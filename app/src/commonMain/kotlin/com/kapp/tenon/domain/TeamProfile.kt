@@ -2,6 +2,7 @@
 
 package com.kapp.tenon.domain
 
+import com.kapp.tenon.core.protocol.GroupMeta
 import com.kapp.tenon.core.protocol.TeamMemberDraft
 import com.kapp.tenon.core.protocol.TeamMemberInfo
 import kotlinx.serialization.Serializable
@@ -54,6 +55,19 @@ public fun List<TeamProfile>.byTeamId(teamId: String?): TeamProfile? {
     if (key.isEmpty()) return null
     return firstOrNull { it.teamId == key }
 }
+
+/**
+ * 哪些群正在引用这份档案（席位 `teamId` 相等）—— **全仓唯一一份判定**。
+ *
+ * 两处读它：写路径（改名 / 加群 / 解散要知道改哪些群）与界面（「这支队还在不在群里」）。
+ * 各写一遍 `filter` 的后果不是重复代码，是**判据分叉**：某天一方加了条件、另一边没加，
+ * 界面就会把一支正在群里干活的队伍画成「未入驻」，或者反过来，让用户解散一支他以为
+ * 已经没了的队伍。
+ *
+ * 返回群对象而不只是 id：界面要判「空」，写路径要 id（`.map { it.groupId }`）。
+ */
+public fun List<GroupMeta>.groupsReferencingTeam(teamId: String): List<GroupMeta> =
+    filter { group -> group.virtualAgents.orEmpty().any { it.teamId == teamId } }
 
 /**
  * 席位上的团队展示名：**档案优先，快照兜底，最后才回落群名**。

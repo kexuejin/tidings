@@ -1513,7 +1513,7 @@ class DesktopWorkerOrchestrator(
         if (seat.hostNodeId != st.selfNodeId) return null
         val dirId = groupDirIdOf(group.groupId)?.trim().orEmpty()
         if (dirId.isEmpty()) return null
-        val profile = store.profileFor(group.groupId, dirId, seat.agentId) ?: return null
+        val profile = store.profileFor(dirId, seat.agentId) ?: return null
         val worker = profile.members.firstOrNull { it.isWorker } ?: return null
         // 空 driverKey = 用户还没指派：保持既有解析（按席位 slug 走），不替人做决定。
         if (worker.driverKey.isBlank()) return null

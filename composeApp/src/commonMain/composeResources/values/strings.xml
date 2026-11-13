@@ -473,6 +473,10 @@
          团队看「这队有谁」。切换不是上下两段，所以标题栏就是切换器本身。 -->
     <string name="hub_view_employees">员工</string>
     <string name="hub_view_teams">团队</string>
+    <!-- 第三档：**登记簿**（不是第三份运行时名录）。名录回答「谁在跑」，这一档回答
+         「谁登记过、@ 是什么、在几个群里」—— 档案先于任何群存在，也能在席位撤光之后
+         继续存在，所以它必须有自己不依赖运行时状态的落点。 -->
+    <string name="hub_view_profiles">档案</string>
     <!-- 团队卡：领队与人数都是**本团队**的事实（协议里名字/角色挂在席位上，换团队换一份）。 -->
     <string name="hub_team_leader_format">领队 %1$s</string>
     <string name="hub_team_size_format">%1$d 人</string>
@@ -480,6 +484,14 @@
     <!-- 团队行第三行：这支队在哪个项目目录里干活（席位声明的执行点）。 -->
     <string name="hub_team_place_format">项目目录 %1$s</string>
     <string name="hub_team_empty">还没有团队。群里加了「团队」席位之后这里才会出现。</string>
+    <string name="hub_team_orphan_section">未入驻任何群</string>
+    <string name="hub_team_orphan_hint">解散会清除档案；要用就从群信息里加回。</string>
+    <string name="hub_team_orphan_meta_format">%1$d 人 · 不在任何群</string>
+    <!-- 团队详情页：它自己的名册与「在哪些群里」。名册里含领队，所以不叫「组员」。 -->
+    <string name="team_detail_roster_title">成员</string>
+    <string name="team_detail_groups_title">在哪些群里</string>
+    <string name="team_detail_missing_title">这个团队已经不在了</string>
+    <string name="team_detail_missing_body">它的席位可能已经从群里撤回。返回名录看看别的团队。</string>
     <!-- 「最新活动」的诚实措辞（不变量 4）：24h 之外不叫「最新」，对端离线也不叫。
          字符串与判定函数 agentActivityFreshness 一一对应，UI 不许自带第三档。 -->
     <string name="hub_activity_last_format">最后活动 %1$s</string>
@@ -535,9 +547,26 @@
     <string name="agent_employee_scope_members_hint">这个群里的任何成员 @ 它，都会真的在这台机器上跑命令。确定这个群里的成员都可信再开。</string>
     <string name="agent_employee_scope_rejected">「谁能调用」没改成：这次设置没有写进本机，这个员工仍是原来的档位。</string>
     <string name="agent_employee_save">保存</string>
+    <string name="agent_employee_subject_format">登记对象：%1$s</string>
     <string name="employee_profile_saved">员工档案已保存：%1$s</string>
     <string name="employee_profile_saved_aliased">员工档案已保存：%1$s（在 %2$s 用的是本群别名）</string>
     <string name="employee_profile_rejected">员工档案没有保存：名字不合法，或这个智能体已经有档案了。</string>
+    <!-- 注销（下编）：档案删了、席位不动。前半句说做成了什么，后半句是最容易被误读的那件事。 -->
+    <string name="employee_profile_forgotten">员工档案已注销：%1$s；群里的席位还在。</string>
+    <string name="employee_profile_forgotten_partial">员工档案已注销：%1$s，但有 %2$d 个群没摘掉引用 —— 那边的席位还显示旧名。</string>
+    <!-- 档案管理（登记簿视角）。行上把 @ token 与职责摆出来，是这一档唯一比名录多给的信息。 -->
+    <string name="agent_profile_section_title">员工档案</string>
+    <string name="agent_profile_hint">名字与 @ 记在这里；注销不踢人。</string>
+    <string name="agent_profile_meta_groups_format">@%1$s · %2$s · %3$d 个群</string>
+    <string name="agent_profile_meta_alone_format">@%1$s · %2$s · 不在任何群</string>
+    <string name="agent_profile_empty">还没有登记过员工。给本机智能体起个名字，它就成了一名员工。</string>
+    <string name="agent_profile_new">新建档案</string>
+    <string name="agent_profile_new_hint">选一个本机智能体，给它起个员工名。可以先建档，之后再让它进群。</string>
+    <string name="agent_profile_new_empty">这台机器还没有上报身份的智能体，暂时无法建档。等它连上宿主再来。</string>
+    <string name="agent_profile_new_meta_format">%1$s · %2$s</string>
+    <string name="agent_profile_forget">注销档案</string>
+    <string name="agent_profile_forget_body">「%1$s」的档案会被删除。</string>
+    <string name="agent_profile_forget_hint">它仍留在原来的群里，@ 名字不变；只是不再有员工名。</string>
     <string name="workspace_no_sessions">暂无会话</string>
     <!-- 工作区详情的整屏空态：工作区对象不存在且一条会话都没有时。
          此前这一屏只剩一张写着「暂无会话」的小卡，大半屏是空的 —— 空态没有"出路"。 -->
@@ -2041,6 +2070,12 @@
     <string name="team_profile_saved_partial">团队档案已保存：%1$s（%2$d 个群，%3$d 个群没写进去，可以再存一次）</string>
     <string name="team_profile_saved_aliased">其中 %1$d 个群已有同名组员，本群按别名生效（@ 要用别名）</string>
     <string name="team_profile_rejected">团队档案没有保存：名字不合法、名册为空，或目标群不可写。</string>
+    <string name="team_profile_dissolve">解散团队</string>
+    <string name="team_profile_dissolve_hint">解散会把这支队从每个群里摘掉：席位退回单兵，人不会被移出群，领队还能被 @。</string>
+    <string name="team_profile_dissolve_confirm_body">「%1$s」的名字与名册会一并删除，且无法恢复。</string>
+    <string name="team_profile_dissolved">已解散「%1$s」，%2$d 个群的席位已退回单兵</string>
+    <string name="team_profile_dissolved_bare">已解散「%1$s」</string>
+    <string name="team_profile_dissolved_partial">已解散「%1$s」，%2$d 个群已退回单兵；%3$d 个群没摘干净，那些群的席位还指着这支队，请到群里手工移除</string>
     <string name="team_profile_new">新建团队</string>
     <string name="team_profile_edit">编辑团队</string>
     <string name="agent_team_ai_new">AI 建队</string>

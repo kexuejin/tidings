@@ -96,7 +96,7 @@ class GroupSeatPointerProjectionTest {
     }
 
     @Test
-    fun `missing title falls back to empty, not to the path`() {
+    fun `missing title falls back to empty -- not to the path`() {
         val meta = metaOf(seatOf("dsh"))
         val next = rebuildSelfSeatsForPointer(meta, "self", resolveWsId = { "ws-a" }, titleOfWs = { null })!!
         assertEquals(listOf(GroupWorkspaceInfo("ws-a", "")), next.single().allowedWorkspaces)

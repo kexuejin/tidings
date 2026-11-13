@@ -378,6 +378,8 @@ fun RelayApp(
                         nav = nav.leaveAgentSessionDetail()
                     } else if (nav.inAgentWorkspaceDetail) {
                         nav = nav.leaveAgentWorkspaceDetail()
+                    } else if (nav.inAgentTeamDetail) {
+                        nav = nav.leaveTeamDetail()
                     } else if (nav.inAgentEntityDetail) {
                         nav = nav.leaveAgentDetail()
                     }
@@ -1010,6 +1012,16 @@ fun RelayApp(
                                                 nav = nav.openAgentDetail(hostNodeId, agentId)
                                             },
                                             onLeaveAgentDetail = { nav = nav.leaveAgentDetail() },
+                                            // 团队详情（团队视角的实体页）：键是 `(groupId, leaderAgentId)`，
+                                            // 与实体详情那两格分开 —— 见 AppNavState 的同名注释。
+                                            // 宿主不用在这里补：AgentConsoleScreen 的 onOpenTeam 已经
+                                            // 先 onSelectAgent(领队宿主)，两个来源不重复写。
+                                            detailTeamGroupId = nav.detailTeamGroupId,
+                                            detailTeamLeaderAgentId = nav.detailTeamLeaderAgentId,
+                                            onOpenTeamDetail = { groupId, leaderAgentId ->
+                                                nav = nav.openTeamDetail(groupId, leaderAgentId)
+                                            },
+                                            onLeaveTeamDetail = { nav = nav.leaveTeamDetail() },
                                             // 团队卡的「打开协同群」：团队就是群里的那条席位，所以
                                             // 它的会话键只有一种取法 —— `ConvId.group(groupId)`。
                                             onOpenGroup = { groupId ->

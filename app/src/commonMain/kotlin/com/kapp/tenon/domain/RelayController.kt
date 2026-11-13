@@ -979,6 +979,15 @@ class RelayController(
     }
 
     /**
+     * 注销员工档案（档案管理页的落点）：逐群摘引用 + 删档案，见 [forgetEmployeeProfileEntry]。
+     *
+     * 位置实参同理（命名实参会命中档案写路径守卫的赋值形状探针）。
+     */
+    override fun forgetEmployeeProfile(employeeId: String) {
+        forgetEmployeeProfileEntry(employeeId)
+    }
+
+    /**
      * 新建 / 编辑团队档案（界面入口）：转调档案写路径，结果走横幅。
      *
      * 与员工那一条同构：界面只表达「存这个团队名 + 这份名册 + 去这几个群」，
@@ -998,6 +1007,11 @@ class RelayController(
     override fun attachTeamToGroup(teamId: String, groupId: String) {
         // 位置实参：命名实参会命中档案写路径守卫的赋值形状探针（见 saveEmployeeProfile）。
         attachTeamToGroupEntry(teamId, groupId)
+    }
+
+    /** 解散团队（团队详情页的落点）：逐群摘席位 + 删档案，见 [dissolveTeamProfileEntry]。 */
+    override fun dissolveTeamProfile(teamId: String) {
+        dissolveTeamProfileEntry(teamId)
     }
 
     /**

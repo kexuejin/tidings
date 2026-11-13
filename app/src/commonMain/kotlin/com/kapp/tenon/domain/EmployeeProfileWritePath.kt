@@ -228,7 +228,7 @@ private fun RelayController.updateEmployee(
         rev = profile.rev + 1,
         updatedTs = nowMillis(),
     )
-    val groups = groupsReferencingEmployee(updated.employeeId)
+    val groups = groupsReferencingEmployeeIds(updated.employeeId)
     val denied = employeeTargetGroups(self, actorNode, groups)
     if (denied != null) return EmployeeProfileResult.Rejected(denied)
 
@@ -270,7 +270,7 @@ private fun RelayController.forgetEmployee(
 ): EmployeeProfileResult {
     val profile = profiles.byEmployeeId(cmd.employeeId)
         ?: return EmployeeProfileResult.Rejected(DeclarationRejection.EMPLOYEE_UNKNOWN)
-    val groups = groupsReferencingEmployee(profile.employeeId)
+    val groups = groupsReferencingEmployeeIds(profile.employeeId)
     val denied = employeeTargetGroups(self, actorNode, groups)
     if (denied != null) return EmployeeProfileResult.Rejected(denied)
     // 先摘席位引用、再删档案：反过来的中间态是「席位指着一份不存在的档案」。
@@ -280,7 +280,9 @@ private fun RelayController.forgetEmployee(
         when (applyDeclaration(
             GroupDeclarationCommand.DetachEmployee(
                 groupId = groupId,
-                agentId = profile.agentId,
+                // 按**席位**的身份键定位（档案里可能是短 id，见 [seatAgentIdFor]）：
+                // 用档案里的字符串去摘，短 id 那档会 SEAT_MISSING —— 引用留着、档案却删了。
+                agentId = seatAgentIdFor(groupId, profile) ?: profile.agentId,
                 actor = cmd.actor,
                 origin = cmd.origin,
             ),
@@ -359,7 +361,49 @@ public fun RelayController.saveEmployeeProfileEntry(
     }
 }
 
+/**
+ * 界面入口：**注销**一名员工的档案（下编）。
+ *
+ * ## 它只做两件事，顺序不能反
+ *
+ * 1. 逐群摘掉席位上的员工引用与名字快照（`DetachEmployee`）；
+ * 2. 删档案。
+ *
+ * 反过来（先删档案）的中间态是「席位指着一份不存在的档案」：宿主本机按 `agentId` 查不到
+ * 档案、回落席位名，手机却还读着快照 —— 两端两个名字，且不会自愈。
+ *
+ * ## 注销不是踢人
+ *
+ * 席位与它的 `@` 名字都留着：用户想清掉一个人，走的是撤回入驻（`removeGroupAgent`）。
+ * 这两件事分开，是因为「这个人不在这台机器上干活了」与「这个群里没有这个人了」不同 ——
+ * 混成一个动作，注销一个人的档案会顺手把他从所有群里踢出去。
+ *
+ * 结果用横幅回报：全摘干净走 info，有群没摘干净走 warn 并报数（那些群还挂着旧名）。
+ */
+public fun RelayController.forgetEmployeeProfileEntry(
+    employeeId: String,
+    origin: DeclarationOrigin = DeclarationOrigin.AGENT_HUB,
+) {
+    val result = applyEmployeeProfile(
+        EmployeeProfileCommand.Forget(
+            employeeId = employeeId,
+            actor = DeclarationActor.Human(_state.value.selfNodeId),
+            origin = origin,
+        ),
+    )
+    when (result) {
+        is EmployeeProfileResult.Applied ->
+            if (result.failedGroupIds.isEmpty()) {
+                info(BannerMessage.EmployeeProfileForgotten(result.name))
+            } else {
+                warn(BannerMessage.EmployeeProfileForgotten(result.name, result.failedGroupIds.size))
+            }
+        is EmployeeProfileResult.Rejected -> warn(BannerMessage.EmployeeProfileRejected)
+    }
+}
+
 // ------------------------------------------------------------------ 内部工具
+
 /**
  * agent 在本机台账里吗？台账**为空**时返回 true（见文件头：手机/冷启动/测试没有运行时条目，
  * 那时拒绝等于让人连名字都存不下来）；台账有条目但都不匹配 ⇒ false（幽灵员工）。
@@ -386,12 +430,6 @@ private fun RelayController.employeeTargetGroups(
     return null
 }
 
-/** 哪些群正在引用这份档案（席位 `employeeId` 相等）。 */
-private fun RelayController.groupsReferencingEmployee(employeeId: String): List<String> =
-    _state.value.settings.groups
-        .filter { group -> group.virtualAgents.orEmpty().any { it.employeeId == employeeId } }
-        .map { it.groupId }
-
 /**
  * 逐群挂席位，返回 (成功群, 失败群, 别名群)。单群失败不影响其它群 —— 跨群不是事务。
  *
@@ -411,15 +449,19 @@ private fun RelayController.attachEmployeeToGroups(
     val failed = mutableListOf<String>()
     val aliased = mutableListOf<String>()
     for (groupId in groupIds) {
+        // 目标席位按**身份**定位：档案里可能是短 id（`dsh`），而席位上写的是完整实例 id
+        // （`dsh-029bbbf3`）—— 精确比会把这条席位当成「不存在」，于是就地再建一条，
+        // 同一个 agent 在一个群里变成两条席位。见 [seatAgentIdFor]。
+        val seatAgentId = seatAgentIdFor(groupId, profile)
         val result = applyDeclaration(
             GroupDeclarationCommand.AttachEmployee(
                 groupId = groupId,
-                agentId = profile.agentId,
+                agentId = seatAgentId ?: profile.agentId,
                 employeeId = profile.employeeId,
                 employeeName = profile.name,
                 token = profile.token,
                 forceToken = forceToken,
-                agentKind = agentKindOf(self, profile.agentId),
+                agentKind = agentKindOf(self, seatAgentId ?: profile.agentId),
                 duty = profile.duty,
                 baseRev = if (actor is DeclarationActor.Agent) baseRev else null,
                 actor = actor,
@@ -429,13 +471,13 @@ private fun RelayController.attachEmployeeToGroups(
         when (result) {
             is DeclarationResult.Applied -> {
                 applied += groupId
+                // 落盘后**按引用**读回席位名（`employeeId` 相等就是这个席位属于这份档案的
+                // 定义）：按 `agentId` 精确比会漏掉短 id 那一档，别名就报不出来。
                 val seatName = _state.value.settings.groups
                     .firstOrNull { it.groupId == groupId }
                     ?.virtualAgents.orEmpty()
                     .firstOrNull {
-                        it.hostNodeId == self &&
-                            it.agentId.equals(profile.agentId, ignoreCase = true) &&
-                            it.employeeId == profile.employeeId
+                        it.hostNodeId == self && it.employeeId == profile.employeeId
                     }
                     ?.name
                 if (profile.isAliasedIn(seatName)) aliased += groupId
@@ -445,6 +487,36 @@ private fun RelayController.attachEmployeeToGroups(
         }
     }
     return Triple(applied, failed, aliased)
+}
+
+/** 哪些群正在引用这份档案 —— 判据住 [groupsReferencingEmployee]（投影与写路径共用一份）。 */
+private fun RelayController.groupsReferencingEmployeeIds(employeeId: String): List<String> =
+    _state.value.settings.groups.groupsReferencingEmployee(employeeId).map { it.groupId }
+
+/**
+ * 这条档案在某个群里对应的**席位身份键**（写入要按它定位，不能按档案里的字符串）。
+ *
+ * ## 为什么不能直接用 `profile.agentId`
+ *
+ * 档案里存的可能是短 id（`dsh`，登记时取自卡片聚类的代表键），而席位上写的是完整实例 id
+ * （`dsh-029bbbf3`，入驻时由 agent 自报）—— 席位写路径的 `localSeat` 是**精确比**，
+ * 拿短 id 去定位会 `SEAT_MISSING`：改名到不了这个群、注销摘不掉这条引用，
+ * 而横幅照样是绿的。上一轮修 `planJoinSeat` 时用的是同一条判据（`sameAgent` 归一）。
+ *
+ * 两段查找，先精后粗：
+ * 1. **认引用**（`employeeId` 相等）—— 最精确，且正是「这条席位属于这份档案」的定义；
+ * 2. **认身份**（[sameAgent]）—— 首次挂档案时席位还没有引用，靠它找到那条席位。
+ *
+ * null = 本群没有它的席位（`AttachEmployee` 会就地入驻）。
+ */
+private fun RelayController.seatAgentIdFor(groupId: String, profile: EmployeeProfile): String? {
+    val self = _state.value.selfNodeId
+    val seats = _state.value.settings.groups
+        .firstOrNull { it.groupId == groupId }
+        ?.virtualAgents.orEmpty()
+        .filter { it.hostNodeId == self }
+    return seats.firstOrNull { it.employeeId == profile.employeeId }?.agentId
+        ?: seats.firstOrNull { sameAgent(it.agentId, null, profile.agentId) }?.agentId
 }
 
 /** 档案落盘：设置里只此一处写 `employeeProfiles`（守卫 `EmployeeProfileWriteGuardTest` 钉住）。 */

@@ -82,6 +82,13 @@ public data class AgentTeamUi(
     val lastActivityAt: Long,
     /** 本团队席位声明的执行点目录名；null = 未声明 / 宣告还没到（不拿 id 顶替）。 */
     val primaryWsTitle: String?,
+    /**
+     * [primaryWsTitle] 对应的目录键；null = 本群席位没声明执行点。
+     *
+     * 名录只画名字，但详情页要能点进工作区详情 —— 「哪个目录」这件事必须有 id，
+     * 不能从名字反推（两个目录可以同名）。
+     */
+    val primaryWsId: String?,
 )
 
 /**
@@ -157,6 +164,7 @@ public fun agentTeams(
                 pendingCount = pendingByGroup[group.groupId] ?: 0,
                 lastActivityAt = lastAt,
                 primaryWsTitle = primaryWs,
+                primaryWsId = seat.defaultWsId?.takeIf { it.isNotBlank() },
             )
         }
     }
@@ -165,6 +173,123 @@ public fun agentTeams(
             .thenByDescending { it.lastActivityAt }
             .thenBy { it.groupName }
             .thenBy { it.leaderAgentId },
+    )
+}
+
+/**
+ * 团队详情里的一行「这支队在这个群」。
+ *
+ * 同一支队伍可以进多个群（[AgentTeamUi.teamId] 相同的多张卡），详情页要把它们**一次说清**：
+ * 每群一行，各自带本群的执行点目录与待批数 —— 这两件事本来就是按群算的，混成一行就是编。
+ */
+public data class AgentTeamGroupRow(
+    val groupId: String,
+    val groupName: String,
+    /** 席位在本群声明的执行点目录；null = 未声明（不拿别的群的目录顶替）。 */
+    val wsId: String?,
+    /** [wsId] 命中的宣告目录名；null = 未命名或宣告未到。 */
+    val wsTitle: String?,
+    /** 本群归因到本团队的待批数（与名录行同一把尺子）。 */
+    val pendingCount: Int,
+)
+
+/**
+ * 团队详情页的投影（团队视角的实体页）：给定团队键 `(groupId, leaderAgentId)`，
+ * 输出该团队的整页数据。
+ *
+ * ## 为什么不是 `agentHubDetail`
+ *
+ * 员工详情回答的是「**这个人**是谁、服务哪些群、名下有哪些目录」，它的键是
+ * `(hostNodeId, agentId)`。团队不是一个人：领队只是它的代表，组员在这个模型里
+ * 连独立席位都没有（执行宿主恒为领队宿主）。点团队却落在领队的员工页，用户看到的
+ * 标题是人名、段落是人的任职 —— 那不是「这支队」的页面，是「带这支队的那个人」的页面。
+ *
+ * ## 它复用同一份事实
+ *
+ * 输入就是 [agentTeams] 的输出（团队席位 → 团队行），不在这里再读一遍切片：
+ * 名录行上写的名字、人数、待批、目录，与详情页里展开的是同一份，不存在第二个算法。
+ *
+ * ## 返回 null 的唯一情形
+ *
+ * 键定位不到任何团队行（席位撤销了，或导航层残留了一个已消失的键）—— 如实，
+ * 由 UI 画空态；不落回任何"最接近的"团队（那会让返回键按一下画面不动）。
+ */
+public data class AgentTeamDetailUi(
+    /** 定位用的群（用户点进来的那一行）；[groups] 的第一行就是它。 */
+    val groupId: String,
+    val leaderAgentId: String,
+    /** 领队所在宿主：组员的执行宿主也是这里。 */
+    val hostNodeId: String,
+    val teamId: String?,
+    /** 卡面标题（档案名 → 快照 → 群名，统一走 [teamDisplayName]）。 */
+    val displayName: String,
+    /** 定位群的群名（与标题不同时才有信息量，UI 自己决定画不画）。 */
+    val groupName: String,
+    val leaderName: String,
+    /** 名册：领队在前，其余按声明序；名字是**本群**那一份（组内别名在这里生效）。 */
+    val members: List<AgentTeamMemberUi>,
+    val teamSize: Int,
+    val online: Boolean,
+    /** 各群待批之和（团队粒度；单群的团队等于那一群的数）。 */
+    val pendingCount: Int,
+    /** 成员最近活动（epoch ms；0 = 没有任何活动）。 */
+    val lastActivityAt: Long,
+    /** 这支队在哪些群：定位群在前，其余按群名钉住稳定序。 */
+    val groups: List<AgentTeamGroupRow>,
+)
+
+/**
+ * 团队详情投影：从 [agentTeams] 的行里定位一支队伍，并把它的**全部群**并成一份。
+ *
+ * 归并条件里必须带 `hostNodeId`：`teamId` 是领队宿主本机分配的档案键，两端各自
+ * 建过一支同名档案时字符串可以撞上；把别的宿主那支队并进这一个，就会把两支人合成一张表。
+ * 没档案的旧团队（`teamId == null`）只有它自己那一行 —— 它本来就没有跨群的第二个家。
+ */
+public fun agentTeamDetail(
+    teams: List<AgentTeamUi>,
+    groupId: String,
+    leaderAgentId: String,
+): AgentTeamDetailUi? {
+    val anchor = teams.firstOrNull { it.groupId == groupId && it.leaderAgentId == leaderAgentId }
+        ?: return null
+    val sameTeam = if (anchor.teamId == null) {
+        listOf(anchor)
+    } else {
+        teams.filter { it.hostNodeId == anchor.hostNodeId && it.teamId == anchor.teamId }
+    }
+    // 一个群只留一行：同 teamId 的两条同群席位不存在（档案写路径按群去重），
+    // 真出现了也只说一次，不让待批被数两遍。
+    val groups = sameTeam
+        .distinctBy { it.groupId }
+        .sortedWith(
+            compareByDescending<AgentTeamUi> { it.groupId == anchor.groupId }
+                .thenBy { it.groupName }
+                .thenBy { it.leaderAgentId },
+        )
+        .map { row ->
+            AgentTeamGroupRow(
+                groupId = row.groupId,
+                groupName = row.groupName,
+                wsId = row.primaryWsId,
+                wsTitle = row.primaryWsTitle,
+                pendingCount = row.pendingCount,
+            )
+        }
+    return AgentTeamDetailUi(
+        groupId = anchor.groupId,
+        leaderAgentId = anchor.leaderAgentId,
+        hostNodeId = anchor.hostNodeId,
+        teamId = anchor.teamId,
+        displayName = teamDisplayName(anchor.teamName, anchor.groupName),
+        groupName = anchor.groupName,
+        leaderName = anchor.leaderName,
+        // 名册取**定位群**那一份：组内别名按群生效，用户点的就是这一行，展开的也该是这一份。
+        members = anchor.members,
+        teamSize = anchor.teamSize,
+        online = anchor.online,
+        pendingCount = groups.sumOf { it.pendingCount },
+        lastActivityAt = sameTeam.maxOfOrNull { it.lastActivityAt } ?: anchor.lastActivityAt,
+        groups = groups,
     )
 }
 
@@ -188,4 +313,58 @@ public fun pendingCountByGroup(
         out[group.groupId] = (out[group.groupId] ?: 0) + 1
     }
     return out
+}
+
+/**
+ * 一支**不在任何群里**的团队档案（孤儿）。
+ *
+ * 与 [AgentTeamUi] 的区别不是一个字段，而是**没有席位**：它没有群、没有在线态、
+ * 没有待批、没有执行点目录 —— 那些事实都由席位声明承载，而它没有席位。
+ */
+public data class AgentTeamOrphanUi(
+    /** 档案键（解散与「加回某群」都按它定位）。 */
+    val teamId: String,
+    /** 档案名（档案是唯一真相：没有席位就不存在第二份名字可回落）。 */
+    val name: String,
+    /** 人数 = 领队 1 + 组员数（与 [AgentTeamUi.teamSize] 同一算法）。 */
+    val memberCount: Int,
+)
+
+/**
+ * 未入驻任何群的团队档案。
+ *
+ * ## 为什么需要这个投影
+ *
+ * 团队名录按**席位**装配（[agentTeams]）：一支队伍被逐群「移除」、或它所在的群被解散
+ * 之后，席位没了、名录里也就没有它那一行 —— 但档案还留在 `RelaySettings.teamProfiles`
+ * 里，照样出现在群信息对话框的「添加团队」列表上。于是用户能看见它、却没有任何地方
+ * 能删它，唯一的出路是先把它加回某个群、再从名录点进详情解散。
+ *
+ * 这不是「再加一个列表」，是**给一份仍然存在的数据一个落点**。
+ *
+ * ## 只在本机有档案时才非空
+ *
+ * `teamProfiles` 只住宿主本机（不进协议帧），手机端读到的恒为空列表 ⇒ 整段不画。
+ * 与「团队档案只住宿主机」同一条纪律，不是特例。
+ */
+public fun orphanTeams(settingsSlice: SettingsSlice): List<AgentTeamOrphanUi> {
+    val settings = settingsSlice.settings
+    val profiles = settings.teamProfiles
+    if (profiles.isEmpty()) return emptyList()
+    val groups = settings.groups
+    return profiles
+        // 判据与写路径**同一份**（`groupsReferencingTeam`）：界面说它没入驻，就是写路径
+        // 解散时会摘掉零个席位的那一支 —— 两边各写一遍 filter 迟早分叉，那时界面会把
+        // 一支正在群里干活的队伍画成孤儿。
+        .filter { groups.groupsReferencingTeam(it.teamId).isEmpty() }
+        .map {
+            AgentTeamOrphanUi(
+                teamId = it.teamId,
+                name = it.name,
+                // 领队不计在 `members` 里（名单只列组员），与名录行同一算法。
+                memberCount = 1 + it.members.size,
+            )
+        }
+        // 没有活动数据可排：按名字钉稳定序（`sortedBy` 稳定，重名保持档案序）。
+        .sortedBy { it.name }
 }

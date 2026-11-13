@@ -1,5 +1,11 @@
 [versions]
-luciola = "0.9.0"
+# luciola 0.11.0-local.1：尚未发到 Maven Central 的本地版本，构建要先
+# `cd <luciola 仓库> && scripts/publish-maven-local.sh`，再带 `LUCIOLA_LOCAL=1` 跑
+#（`settings.gradle.kts` 里那面开关会把 mavenLocal() 提到最前）。
+# 原生库与 bindings 必须同版：`desktopApp/resources/common/native/libluciola_uniffi.dylib`
+# 由 `copyLuciolaNative` 从 `RustBuild/cargo-target/release` 复制，
+# `:desktopApp:verifyLuciolaNative` 逐项比对 UniFFI checksum（83 项 + contract 29）。
+luciola = "0.11.0-local.1"
 agp = "9.4.1"
 android-compileSdk = "37"
 android-buildToolsVersion = "36.1.0"

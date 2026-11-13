@@ -91,7 +91,9 @@ public fun cabinetArtifactGroups(
             ?: wsId?.let { id ->
                 agent.agentWorkspaces.values.firstOrNull { it.wsId == id }?.wsTitle?.takeIf { it.isNotBlank() }
             }
-        if (wsId != null && wsTitle != null) titles.putIfAbsent(wsId, wsTitle)
+        // `putIfAbsent` 是 JVM 专有的 Map 默认方法（commonMain 写它 ⇒ iOS 目标编译不过），
+        // 语义照旧：第一次给出的目录名说了算，后来的不覆盖。
+        if (wsId != null && wsTitle != null && wsId !in titles) titles[wsId] = wsTitle
         rows += CabinetArtifactRowUi(
             name = artifact.name,
             mime = artifact.mime?.takeIf { it.isNotBlank() },

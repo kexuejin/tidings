@@ -242,13 +242,44 @@ private fun RelayController.dissolveTeam(
             actor = cmd.actor,
             origin = cmd.origin,
         ))) {
-            is DeclarationResult.Applied -> applied += groupId
+            is DeclarationResult.Applied -> {
+                applied += groupId
+                forgetExecutionProfile(groupId, profile.leaderAgentId)
+            }
             is DeclarationResult.Rejected -> failed += groupId
             is DeclarationResult.Conflict -> failed += groupId
         }
     }
     persistTeamProfiles(profiles.filterNot { it.teamId == profile.teamId })
     return TeamProfileResult.Applied(profile.teamId, profile.name, applied, failed)
+}
+
+/**
+ * 解散收尾：把这一群对应的执行档从宿主磁盘上删掉。
+ *
+ * ## 为什么必须删
+ *
+ * 执行档的主键是 `(目录, 领队)` —— 它不随团队档案消失。不删的后果不是「文件里多几行」：
+ * 用户在同一个群、同一个目录里**重建**一支领队相同的队伍时，键完全命中旧档 ⇒ 新的编制
+ * 直接继承上一次的驱动/模型/人设，而界面上一个提示都没有（旧档里的成员名册还可能已经
+ * 不是这批人了，读取期的悬空检查只兜住「档里的人不在声明里」，兜不住「这次没打算继承」）。
+ *
+ * ## 为什么只在 DetachTeam 成功的那一群删
+ *
+ * 席位还在就一定还在用它 —— 那一群没摘干净（并发/落盘被拒）时删掉执行档，等于把一个
+ * 还能跑的团队变成「没配过」。用户在横幅里已经看到「N 个群没摘干净」，会去重试。
+ *
+ * ## 与「单群撤回」的区别
+ *
+ * 从群信息里把团队移到别的群、或只是这一个群不带它了，**不清**执行档：那不是解散，
+ * 加回来时配置还在才是用户预期。清的理由只成立于「这支队没有了」。
+ */
+private fun RelayController.forgetExecutionProfile(groupId: String, leaderAgentId: String) {
+    val port = teamExecutionPort ?: return
+    // 群没有目录指针 ⇒ 这份档本来就不按这个群存过（主键缺一半），无从删也不该猜。
+    val dirId = port.groupPointerDirId(groupId)?.trim().orEmpty()
+    if (dirId.isEmpty()) return
+    port.forget(dirId, leaderAgentId)
 }
 
 // ------------------------------------------------------------------ 界面入口
@@ -350,6 +381,62 @@ public fun RelayController.saveTeamProfileEntry(
 }
 
 /**
+ * 界面入口：**解散**一支团队（团队详情页置顶栏那颗「解散」的落点）。
+ *
+ * ## 这条命令早就在，缺的一直是入口
+ *
+ * `Dissolve` 从档案写路径落地那天就实现了（逐群 `DetachTeam` + 删档案），但界面从
+ * 来没有调过它：一支队伍能被建、能改名册、能在某个群被「移除」，却**删不掉**。
+ * 席位撤光之后它从智能体页的名录里消失（名录按席位装配），档案却仍留在
+ * `RelaySettings.teamProfiles` 里。
+ *
+ * 两个入口都走这一条：
+ * 1. **团队详情页置顶栏的垃圾桶** —— 席位还在时（有 `groupId` 可定位）；
+ * 2. **名录「未入驻任何群」那一段的垃圾桶** —— 席位已经撤光、只剩档案时。
+ *    那种队伍进不了详情页（`agentTeamDetail` 按席位键定位，解析不到它），
+ *    所以它的落点必须在名录侧，否则它永远只能从群信息的「添加团队」里看见、删不掉。
+ *
+ * ## 解散 ≠ 踢人
+ *
+ * 每个群走 `DetachTeam`：席位**回单兵**（`entityType` 清成 SINGLE、`teamId` 清空），
+ * 领队本人仍留在群里、仍能被 `@`。摘席位是 `LeaveSeat` 的事，两条命令不混用
+ * （见 `planDetachTeam` 的说明）—— 想把人踢出群是另一个动作。
+ *
+ * ## 有群没摘干净就说出来
+ *
+ * 跨群不是事务：某个群 detach 被拒（已不是成员 / 群已散）时档案仍然会被删，
+ * 那些群的席位就地留下一条**指着已不存在档案**的 `teamId`。这不是可以吞掉的
+ * 细节 —— 走警告位，用户得知道去那一群手工处理。
+ */
+public fun RelayController.dissolveTeamProfileEntry(
+    teamId: String,
+    origin: DeclarationOrigin = DeclarationOrigin.AGENT_HUB,
+) {
+    val result = applyTeamProfile(
+        TeamProfileCommand.Dissolve(
+            teamId = teamId,
+            actor = DeclarationActor.Human(_state.value.selfNodeId),
+            origin = origin,
+        ),
+    )
+    when (result) {
+        is TeamProfileResult.Applied ->
+            if (result.failedGroupIds.isEmpty()) {
+                info(BannerMessage.TeamProfileDissolved(result.name, result.groupIds.size))
+            } else {
+                warn(
+                    BannerMessage.TeamProfileDissolved(
+                        name = result.name,
+                        groupCount = result.groupIds.size,
+                        failedGroupCount = result.failedGroupIds.size,
+                    ),
+                )
+            }
+        is TeamProfileResult.Rejected -> warn(BannerMessage.TeamProfileRejected)
+    }
+}
+
+/**
  * 界面入口：把**已有**团队整体加进一个群（群信息里「添加团队」的落点）。
  *
  * 名册不重填 —— 这正是「群添加可以直接添加一个团队」与「一个个加人」的差别：
@@ -430,11 +517,7 @@ private fun RelayController.teamTargetGroups(
 
 /** 哪些群正在引用这份档案（席位 `teamId` 相等；仅本机席位算数 —— 别人的档案不归我改）。 */
 private fun RelayController.groupsReferencing(teamId: String): List<String> =
-    _state.value.settings.groups
-        .filter { group ->
-            group.virtualAgents.orEmpty().any { it.teamId == teamId }
-        }
-        .map { it.groupId }
+    _state.value.settings.groups.groupsReferencingTeam(teamId).map { it.groupId }
 
 /** 一次逐群挂席位的结果。三个集合互不重叠，`applied` 之外的两个都要如实回报给用户。 */
 private data class AttachOutcome(

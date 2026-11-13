@@ -33,6 +33,7 @@ import com.kapp.tenon.generated.resources.agent_employee_scope_members
 import com.kapp.tenon.generated.resources.agent_employee_scope_members_hint
 import com.kapp.tenon.generated.resources.agent_employee_scope_owner
 import com.kapp.tenon.generated.resources.agent_employee_scope_owner_hint
+import com.kapp.tenon.generated.resources.agent_employee_subject_format
 import com.kapp.tenon.generated.resources.agent_employee_token_hint
 import com.kapp.tenon.generated.resources.common_cancel
 import com.kapp.tenon.ui.components.RelayDialog
@@ -62,12 +63,15 @@ import org.jetbrains.compose.resources.stringResource
  * `normalize` 悄悄折回 `assistant`，用户以为设了、其实没设。
  *
  * @param employeeId null = 这个 agent 还没档案（登记）；非 null = 编辑（按它定位，不按名字）。
+ * @param subjectLabel 这次给**谁**建档（身份键）。非空时写在表单最上方 —— 从档案页进来时
+ *   表单里没有那张卡，不写出来用户就只能凭记忆确认自己点的是哪个人。
  */
 @Composable
 internal fun EmployeeEditDialog(
     employeeId: String?,
     initialName: String,
     initialDuty: String,
+    subjectLabel: String? = null,
     /**
      * 当前「谁能调用」档位（[AgentExecPolicies] 取值）。
      *
@@ -99,6 +103,14 @@ internal fun EmployeeEditDialog(
         },
         content = {
             Column {
+                if (subjectLabel != null) {
+                    Text(
+                        text = stringResource(Res.string.agent_employee_subject_format, subjectLabel),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(bottom = sp.sm),
+                    )
+                }
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },

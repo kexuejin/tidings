@@ -28,13 +28,11 @@ class DesktopTeamExecutionPort(
         (availableDrivers() ?: emptySet()).toSet()
 
     override fun profileOf(
-        groupId: String,
         dirId: String,
         leaderAgentId: String,
     ): TeamExecutionProfileUi? =
-        store.profileFor(groupId, dirId, leaderAgentId)?.let { p ->
+        store.profileFor(dirId, leaderAgentId)?.let { p ->
             TeamExecutionProfileUi(
-                groupId = p.groupId,
                 dirId = p.dirId,
                 leaderAgentId = p.leaderAgentId,
                 members = p.members.map {
@@ -42,6 +40,11 @@ class DesktopTeamExecutionPort(
                 },
             )
         }
+
+    /** 团队解散收尾：把这份档从宿主磁盘上真的删掉（[TeamExecutionStore.remove]）。 */
+    override fun forget(dirId: String, leaderAgentId: String) {
+        store.remove(dirId, leaderAgentId)
+    }
 
     override fun validate(
         profile: TeamExecutionProfileUi,
@@ -62,7 +65,6 @@ class DesktopTeamExecutionPort(
     override fun groupPointerDirId(groupId: String): String? = pointerDirId(groupId)
 
     private fun toSpec(profile: TeamExecutionProfileUi) = TeamExecutionProfile(
-        groupId = profile.groupId,
         dirId = profile.dirId,
         leaderAgentId = profile.leaderAgentId,
         updatedAt = 0,

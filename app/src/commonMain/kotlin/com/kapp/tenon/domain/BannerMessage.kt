@@ -272,6 +272,24 @@ sealed interface BannerMessage {
     data object TeamProfileRejected : BannerMessage
 
     /**
+     * 团队已解散（档案删除，各群席位退回单兵）。
+     *
+     * 与 [TeamProfileRejected] 分开：一个是「做成了」，一个是「没做成」。与
+     * [TeamProfileSaved] 也分开：解散之后档案不存在了，拿「已保存」去确认会让用户
+     * 以为它还在。
+     *
+     * @param name 团队自己的名字（用户点的是「这支队」，横幅要说出是哪一支）。
+     * @param groupCount 真的摘干净的群数。
+     * @param failedGroupCount 没能摘干净的群数；>0 时文案必须说出来 —— 那些群的席位
+     *   仍挂着 `teamId` 而档案已经没了（悬空引用），用户得去那一群手工移除。
+     */
+    data class TeamProfileDissolved(
+        val name: String,
+        val groupCount: Int,
+        val failedGroupCount: Int = 0,
+    ) : BannerMessage
+
+    /**
      * 员工档案已保存（登记 / 改名 / 改职责）。
      *
      * 与 [TeamRosterSaved] 分开：一个是「这是谁」，一个是「这支队有谁」，
@@ -293,6 +311,23 @@ sealed interface BannerMessage {
      * 界面入口已经把能就地拦的都拦了（空名字、未上报身份）。
      */
     data object EmployeeProfileRejected : BannerMessage
+
+    /**
+     * 员工档案已注销（下编）：档案删了，**群里的席位没动**。
+     *
+     * 与 [EmployeeProfileSaved] 分开：注销之后档案不存在了，拿「已保存」去确认会让用户
+     * 以为它还在；与 [TeamProfileDissolved] 也分开：团队解散是「这支队没了」，
+     * 员工注销是「这个人只是不再登记为员工」—— 它还在群里、还能被 `@`。
+     *
+     * @param name 档案名（用户点的是「这个人」，横幅要说出是谁）。
+     * @param failedGroupCount 没能摘掉引用的群数；>0 时文案必须说出来 ——
+     *   那些群的席位仍带着 `employeeName` 快照而档案已经没了（悬空引用），
+     *   手机端会继续显示旧名，用户得去那一群重新入驻一次。
+     */
+    data class EmployeeProfileForgotten(
+        val name: String,
+        val failedGroupCount: Int = 0,
+    ) : BannerMessage
 
     /**
      * 「谁能调用这个员工」没写成功（宿主侧执行范围落盘被拒 / 取值非法）。

@@ -513,7 +513,26 @@ private fun RelayController.declarationTokenPool(
     return pool - staleMemberNames
 }
 
-/** 入驻：沿用既有名字（`@` token 不漂），新席位走 `kind-职责` 且群内唯一。 */
+/**
+ * 入驻：已有席位沿用旧名（`@` token 不漂），新席位用**档案 token**（没有档案才按
+ * `kind-职责` 派生），两种都过群内唯一；席位同时挂上员工档案引用与名字快照。
+ *
+ * ## 入驻必须顺手带上员工档案
+ *
+ * 「群信息 → 邀请 agent 入驻」是**唯一**能把一个已有员工加进第二个群的入口（员工详情页
+ * 只有名字/职责/档位，没有加群）。如果这条路上的席位不带档案引用，症状是**两端各说各话**：
+ * 宿主本机的投影按 agentId 直接读档案 ⇒ 立刻显示员工名；手机只有席位快照 ⇒ 还是
+ * `kind-职责`。更贵的是后续 —— `EmployeeProfileWritePath` 重建快照时按 `employeeId`
+ * 找引用群，这条席位不在其中，于是**改名永远到不了它**，且没有任何报错。
+ *
+ * 所以这里补的是「席位一经产生就属于那个员工」，而不是让档案写路径去猜哪些席位是它的。
+ * 名字的取法分三种，各有理由：
+ * - 新席位：档案 token（撞名则本群别名，与 `AttachEmployee` 同一套）；没有档案才按
+ *   `kind-职责` 派生（D13）；
+ * - 已有席位：**保留它现在的名字**。它可能就是这一群正在用的 `@` token，改名等于让全群的
+ *   输入习惯断掉（只有档案显式改 token 才 `forceToken`）；
+ * - 显式 `nameOverride`（`UpdateSeat` / `AttachEmployee` 带名入驻）：以它为准。
+ */
 private fun RelayController.planJoinSeat(
     meta: GroupMeta,
     self: String,
@@ -524,6 +543,8 @@ private fun RelayController.planJoinSeat(
     val canonicalAgentId = cmd.agentId.trim()
     if (canonicalAgentId.isEmpty()) return DeclarationPlan.Rejected(DeclarationRejection.ARGUMENT_INVALID)
     val previous = meta.localSeat(self, canonicalAgentId)
+    // 本机档案（宿主才有；手机端 employeeProfiles 恒空 ⇒ 这条路对手机是空操作）。
+    val employee = _state.value.settings.employeeProfiles.byAgentIdentity(canonicalAgentId)
     val taken = meta.virtualAgents.orEmpty().map { it.name }.toMutableSet()
     val name = when {
         nameOverride != null -> {
@@ -540,6 +561,7 @@ private fun RelayController.planJoinSeat(
             nameOverride
         }
         previous != null -> previous.name
+        employee != null -> AgentMemberName.unique(employee.seatToken(cmd.agentKind, cmd.duty), taken)
         else -> AgentMemberName.unique(
             // D13：职责缺省/域外一律归一到单兵默认（`assistant`），不发明第四种拼写。
             AgentMemberName.base(cmd.agentKind, canonicalAgentId, AgentDuties.normalize(cmd.duty)),
@@ -547,13 +569,19 @@ private fun RelayController.planJoinSeat(
         )
     }
     val resolvedWsId = hostDirectoryPort?.resolveForGroup(meta.groupId, canonicalAgentId)
-    val seat = declarationFor(
+    val declared = declarationFor(
         agentId = canonicalAgentId,
         hostNodeId = self,
         name = name,
         defaultWsId = resolvedWsId,
         previous = previous,
-    ).withPointerProjection(
+    )
+    // 档案是权威、席位只是引用 + 快照：入驻这条路一律按档案重写一次（值相同就是 no-op）。
+    // 只补不猜 —— 没有档案就一个字都不写，席位仍是「未登记 agent」。
+    val withEmployee = employee?.let {
+        declared.copy(employeeId = it.employeeId, employeeName = it.name)
+    } ?: declared
+    val seat = withEmployee.withPointerProjection(
         defaultWsId = resolvedWsId,
         allowedWorkspaces = resolvedWsId?.let { wsId ->
             listOf(

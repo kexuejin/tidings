@@ -205,6 +205,16 @@ public interface DesktopPaneActions {
     fun saveEmployeeProfile(agentId: String, employeeId: String?, name: String, duty: String) = Unit
 
     /**
+     * **注销**一名员工的档案（员工「下编」）：逐群摘掉席位上的员工引用，再删档案。
+     *
+     * 席位**不动** —— 注销不等于把人踢出群（那走 [removeGroupAgent]）。与
+     * [saveEmployeeProfile] 同一条纪律：默认空实现 = 这个壳没有宿主档案面（预览 / 手机）
+     * ⇒ 界面也不画入口。少了这条，档案只能登记与改名、**删不掉**，而档案不保证出现在
+     * 任何列表里（席位撤光、agent 下线之后它就没有卡了），用户连「有个东西该删」都看不见。
+     */
+    fun forgetEmployeeProfile(employeeId: String) = Unit
+
+    /**
      * 新建 / 编辑一份**团队档案**（团队有名字、一份名册多群复用）。
      *
      * @param teamId null = 新建；非 null = 编辑该档案。
@@ -220,6 +230,15 @@ public interface DesktopPaneActions {
         members: List<TeamMemberDraft>,
         groupIds: List<String>,
     ) = Unit
+
+    /**
+     * **解散**一份团队档案：逐群把席位退回单兵（`DetachTeam`），再删档案。
+     *
+     * 与 [saveTeamProfile] 同一条纪律：默认空实现 = 这个壳没有宿主档案面（预览 / 手机）
+     * ⇒ 界面也不画入口。而「解散」比「保存」更需要这条 —— 一颗点了没反应的解散按钮，
+     * 用户会以为队伍已经没了，然后继续按旧名字去 @。
+     */
+    fun dissolveTeamProfile(teamId: String) = Unit
 
     /**
      * 把**整支团队**加进一个群（群信息「添加团队」的落点）：一条席位、组员随档案过来。

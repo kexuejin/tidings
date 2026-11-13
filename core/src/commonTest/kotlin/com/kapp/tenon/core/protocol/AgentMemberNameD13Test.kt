@@ -15,7 +15,7 @@ import kotlin.test.assertTrue
 class AgentMemberNameD13Test {
 
     @Test
-    fun `token is kind plus duty, never the per-machine instance id or the directory`() {
+    fun `token is kind plus duty -- never the per-machine instance id or the directory`() {
         // kind 优先；实例 id（dsh-029bbbf3）不进名字。
         assertEquals("dsh-coder", AgentMemberName.base("dsh", "dsh-029bbbf3", "coder"))
         assertEquals("gemini-lead", AgentMemberName.base("gemini", "gemini-x", "lead"))

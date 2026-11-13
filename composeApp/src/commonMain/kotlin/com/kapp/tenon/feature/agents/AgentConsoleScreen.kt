@@ -47,6 +47,8 @@ import com.kapp.tenon.generated.resources.agent_team_role_coder
 import com.kapp.tenon.generated.resources.agent_team_role_reviewer
 import com.kapp.tenon.generated.resources.agent_team_role_tester
 import com.kapp.tenon.generated.resources.ic_bot
+import com.kapp.tenon.generated.resources.team_detail_missing_body
+import com.kapp.tenon.generated.resources.team_detail_missing_title
 import com.kapp.tenon.navigation.resolveAgentSessionId
 import com.kapp.tenon.ui.ContentWidths
 import com.kapp.tenon.ui.EmptyState
@@ -107,6 +109,19 @@ fun AgentConsoleScreen(
     detailEntityHostId: String? = null,
     /** 实体的 agent 身份键；null = 「未上报类型」那一档（与卡片的 null 身份键同值）。 */
     detailEntityAgentKey: String? = null,
+    /**
+     * 团队详情页正看着哪支队伍：**群 + 领队**（团队键与 `agentTeams` 的行同口径）。
+     * 第一格 null = 没停在团队详情里（与实体详情同一条「成对写入、判据只看第一格」）。
+     *
+     * ## 为什么不复用实体详情那两格
+     *
+     * 团队不是员工实体：它的键是 `(groupId, leaderAgentId)`，而实体详情要的是
+     * `(hostNodeId, agentId)`。混用一格会让「点团队 → 右列出团队页」与「点员工 → 右列
+     * 出员工页」变成两个来源争同一个字段，返回时不知道该退回哪一层。
+     */
+    detailTeamGroupId: String? = null,
+    /** 团队详情页的领队席位键。与 [detailTeamGroupId] 成对（null 表示这一格没意义）。 */
+    detailTeamLeaderAgentId: String? = null,
     onOpenWorkspaceDetail: ((peerId: String, wsId: String) -> Unit)? = null,
     onLeaveWorkspaceDetail: (() -> Unit)? = null,
     onOpenSessionDetail: ((peerId: String, sessionId: String) -> Unit)? = null,
@@ -119,6 +134,16 @@ fun AgentConsoleScreen(
     onOpenAgentDetail: ((hostNodeId: String, agentId: String?) -> Unit)? = null,
     /** 退出实体详情回看板。手机壳接 `nav.leaveAgentDetail`；null = 屏内自驱。 */
     onLeaveAgentDetail: (() -> Unit)? = null,
+    /**
+     * 点团队名录行 → **团队详情**（团队视角的实体页）。
+     *
+     * 手机壳接 `nav.openTeamDetail`；null = 壳没有导航层 ⇒ 屏内自驱（桌面两栏右列切换）。
+     * 与 [onOpenAgentDetail] 分开而不是共用：团队与员工是两个实体，落到同一个回调里
+     * 会让退回时先弹哪一层取决于参数形状。
+     */
+    onOpenTeamDetail: ((groupId: String, leaderAgentId: String) -> Unit)? = null,
+    /** 退出团队详情，回名录。手机壳接 `nav.leaveTeamDetail`；null = 屏内自驱。 */
+    onLeaveTeamDetail: (() -> Unit)? = null,
     /** 与 `WorkspaceBoardView` 同签名：wsId 非空 = 要收窄到那个工作区（见那里的 KDoc）。 */
     onOpenChat: (peerId: String, wsId: String?) -> Unit,
     /**
@@ -178,6 +203,32 @@ fun AgentConsoleScreen(
      */
     onEditEmployee: ((com.kapp.tenon.domain.AgentHubDetailUi) -> Unit)? = null,
     /**
+     * 档案视角里点一行 = **编辑那份档案**（与详情页的「编辑员工」同一个对话框）。
+     *
+     * null = 这个壳没有档案写通路（手机 / 预览）⇒ 档案行不可点。只交档案行、不交表单状态 ——
+     * 与 [onEditEmployee] 同一条纪律：页面不持有第二份「当前编辑谁」。
+     */
+    onEditEmployeeProfile: ((com.kapp.tenon.domain.AgentEmployeeProfileUi) -> Unit)? = null,
+    /**
+     * **注销**一份员工档案（下编）：`(档案行)`。
+     *
+     * null = 这个壳没有档案写通路（手机 / 预览）⇒ 垃圾桶不画。与 [onDissolveTeam] 同一条
+     * 纪律：删除比保存更需要在缺失时**不画**—— 一颗点了没反应的注销键，用户会以为
+     * 这个人已经不在这台机器上了。
+     */
+    onForgetEmployee: ((com.kapp.tenon.domain.AgentEmployeeProfileUi) -> Unit)? = null,
+    /**
+     * 档案页的「新建档案」：`(选中的本机 agent)`。
+     *
+     * 档案**必须先挂在一个真实存在的本机 agent 上**，所以这条通路的入口是一张候选表
+     * （[com.kapp.tenon.domain.employeeProfileCandidates]），不是一张空表单。选完之后
+     * 弹的是与详情页同一个表单 —— 本屏只交人，不持有第二份表单状态。
+     *
+     * null = 这个壳没有档案写通路（手机：档案只住宿主机）⇒ 按钮与候选表都不画，
+     * 档案那一档也不会因为「空」而多出来。
+     */
+    onNewEmployeeProfile: ((com.kapp.tenon.domain.AgentEmployeeCandidateUi) -> Unit)? = null,
+    /**
      * 保存一份**团队档案**：`(teamId, 名字, 领队, 名册, 要加入的群)`，teamId null = 新建。
      *
      * null = 这个壳没有团队档案面（手机：档案只住宿主机）⇒ 团队视角里不画
@@ -190,6 +241,13 @@ fun AgentConsoleScreen(
         members: List<com.kapp.tenon.core.protocol.TeamMemberDraft>,
         groupIds: List<String>,
     ) -> Unit)? = null,
+    /**
+     * **解散**一份团队档案：`(teamId)`。
+     *
+     * null = 这个壳没有团队档案面（手机：档案只住宿主机）⇒ 团队详情页不画那颗入口。
+     * 与 [onSaveTeam] 同一个 gate —— 解散也是一次档案写入，能保存的地方才能解散。
+     */
+    onDissolveTeam: ((teamId: String) -> Unit)? = null,
     /**
      * 「AI 建队」生成桥：`(需求一句话, 领队候选, 本地化缺省) -> 方案`。
      *
@@ -253,6 +311,9 @@ fun AgentConsoleScreen(
     var execConfigOpen by remember { mutableStateOf(false) }
     // 「AI 建队」对话框的开关（生成 → 预览 → 确认；确认走 onSaveTeam + 执行档端口）。
     var aiTeamOpen by remember { mutableStateOf(false) }
+    // 「新建档案」的选择器（选人 → 交给壳打开同一个表单）。放在本屏是因为候选表来自
+    // 本屏已经算好的卡片流：壳那边再算一次就是第二份实体装配。
+    var profileCreateOpen by remember { mutableStateOf(false) }
 
     // 内部备选下钻状态：桌面端壳或未接入外层导航时提供自驱下钻支持
     var localDetailSessionId by remember { mutableStateOf<String?>(null) }
@@ -261,6 +322,10 @@ fun AgentConsoleScreen(
     var localDetailEntityHost by remember { mutableStateOf<String?>(null) }
     var localDetailEntityKey by remember { mutableStateOf<String?>(null) }
     var explicitlyClearedEntity by remember { mutableStateOf(false) }
+    // 团队详情（团队视角）的本地备选。与实体详情**互斥**：点团队时清掉实体那一对，
+    // 点员工时清掉团队这一对 —— 否则右列会同时"开着两层"，返回键先弹看不见的那层。
+    var localDetailTeamGroup by remember { mutableStateOf<String?>(null) }
+    var localDetailTeamLeader by remember { mutableStateOf<String?>(null) }
 
     val effectiveWsId = detailWsId ?: localDetailWsId
     val effectiveSessionId = detailSessionId ?: localDetailSessionId
@@ -271,6 +336,34 @@ fun AgentConsoleScreen(
         hubAgents(agentSlice, nodeSlice, settingsSlice, now)
     }
 
+    // 团队视角投影（不变量 5）：与卡片流**同一份实体装配**（agentTeams 内部就用 hubAgents），
+    // 两处各归一一次身份，就会让同一个人在员工卡与团队卡里变成两个人。
+    // 团队详情要读它，所以它在实体详情判定之前算。
+    val hubTeams: List<com.kapp.tenon.domain.AgentTeamUi> = if (hubCards != null) {
+        remember(agentSlice, nodeSlice, settingsSlice, now) {
+            com.kapp.tenon.domain.agentTeams(agentSlice, nodeSlice, settingsSlice, now)
+        }
+    } else {
+        emptyList()
+    }
+
+    // 未入驻任何群的团队档案：名录按**席位**装配，所以席位撤光的队伍只有这里看得见
+    // （档案还在，群信息的「添加团队」照样列着它）。只读 `settingsSlice` —— 手机端
+    // 读不到档案（`teamProfiles` 只住宿主机）⇒ 恒空 ⇒ 整段不画。
+    val hubOrphanTeams: List<com.kapp.tenon.domain.AgentTeamOrphanUi> = if (hubCards != null) {
+        remember(settingsSlice) { com.kapp.tenon.domain.orphanTeams(settingsSlice) }
+    } else {
+        emptyList()
+    }
+
+    // 员工档案（登记簿视角，第三档）：只读 `settingsSlice` —— 档案只住宿主机本机，
+    // 手机端恒空 ⇒ 那一档不出现，与团队档案同一条纪律。
+    val hubEmployeeProfiles: List<com.kapp.tenon.domain.AgentEmployeeProfileUi> = if (hubCards != null) {
+        remember(settingsSlice) { com.kapp.tenon.domain.employeeProfileLedger(settingsSlice) }
+    } else {
+        emptyList()
+    }
+
     // 桌面两栏主从联动：未主动点选任何实体且未显式关闭时，默认选中第一位智能体进入其工作台
     val defaultCard = if (layout == AgentHubLayout.TwoColumn && !explicitlyClearedEntity) hubCards?.firstOrNull() else null
     val effectiveEntityHost = detailEntityHostId ?: localDetailEntityHost ?: defaultCard?.hostNodeId
@@ -278,18 +371,33 @@ fun AgentConsoleScreen(
     // 实体详情层在开（成对状态，判据只看宿主格；身份键 null = 「未上报类型」那一档）。
     val entityDetailActive = effectiveEntityHost != null
 
-    val backEnabled = (localDetailSessionId != null || localDetailWsId != null || localDetailEntityHost != null) &&
-        (onLeaveWorkspaceDetail == null && onLeaveSessionDetail == null && onLeaveAgentDetail == null)
+    // 团队详情层：团队键是 `(groupId, leaderAgentId)`，判据同样只看第一格。
+    // 它比实体详情**优先**（右列渲染时先判团队），因为桌面两栏会给出一个默认实体的
+    // `effectiveEntityHost`：不优先的话，用户点团队、右列还画着第一个员工的详情。
+    val effectiveTeamGroup = detailTeamGroupId ?: localDetailTeamGroup
+    val effectiveTeamLeader = detailTeamLeaderAgentId ?: localDetailTeamLeader
+    val teamDetailActive = effectiveTeamGroup != null
+
+    val backEnabled = (localDetailSessionId != null || localDetailWsId != null ||
+        localDetailTeamGroup != null || localDetailEntityHost != null) &&
+        (onLeaveWorkspaceDetail == null && onLeaveSessionDetail == null && onLeaveAgentDetail == null &&
+            onLeaveTeamDetail == null)
     BackHandler(enabled = backEnabled) {
-        // 逐层退出（会话详情 ← 工作区详情 ← 实体详情 ← 看板）：落到哪层由**还开着的更浅层**
-        // 决定，只有整条链都空了才回看板。
+        // 逐层退出（会话详情 ← 工作区详情 ← 团队详情 ← 实体详情 ← 看板）：落到哪层由
+        // **还开着的更浅层**决定，只有整条链都空了才回看板。
         if (localDetailSessionId != null) {
             localDetailSessionId = null
-            if (localDetailWsId == null && localDetailEntityHost == null) {
+            if (localDetailWsId == null && localDetailEntityHost == null && localDetailTeamGroup == null) {
                 onBackToBoard?.invoke()
             }
         } else if (localDetailWsId != null) {
             localDetailWsId = null
+            if (localDetailEntityHost == null && localDetailTeamGroup == null) {
+                onBackToBoard?.invoke()
+            }
+        } else if (localDetailTeamGroup != null) {
+            localDetailTeamGroup = null
+            localDetailTeamLeader = null
             if (localDetailEntityHost == null) {
                 onBackToBoard?.invoke()
             }
@@ -302,7 +410,7 @@ fun AgentConsoleScreen(
     }
 
     // 四级链路现在在哪一层：都没下钻 = 看板级。
-    val atBoardLevel = !entityDetailActive &&
+    val atBoardLevel = !entityDetailActive && !teamDetailActive &&
         !(selected != null && (effectiveSessionId != null || effectiveWsId != null))
 
     // 实体详情投影（Phase B4）：与卡片流同一套装配（聚类 / 席位 / 归因都在投影里），
@@ -317,14 +425,17 @@ fun AgentConsoleScreen(
         null
     }
 
-    // 团队视角投影（不变量 5）：与卡片流**同一份实体装配**（agentTeams 内部就用 hubAgents），
-    // 两处各归一一次身份，就会让同一个人在员工卡与团队卡里变成两个人。
-    val hubTeams: List<com.kapp.tenon.domain.AgentTeamUi> = if (hubCards != null) {
-        remember(agentSlice, nodeSlice, settingsSlice, now) {
-            com.kapp.tenon.domain.agentTeams(agentSlice, nodeSlice, settingsSlice, now)
+    // 团队详情投影：从已算好的名录行里定位这一支队伍并合并它的全部群 —— 不再读一遍切片
+    // （名录行上写的名字/人数/待批与详情页展开的必须是同一份）。键定位不到 = 席位已撤回，
+    // 正文退成整屏空态，不落回"最接近的"团队。
+    val teamDetail: com.kapp.tenon.domain.AgentTeamDetailUi? = if (teamDetailActive) {
+        val teamGroup = effectiveTeamGroup.orEmpty()
+        val teamLeader = effectiveTeamLeader.orEmpty()
+        remember(hubTeams, teamGroup, teamLeader) {
+            com.kapp.tenon.domain.agentTeamDetail(hubTeams, teamGroup, teamLeader)
         }
     } else {
-        emptyList()
+        null
     }
 
     // 团队档案对话框的目标（null = 关着）。桌面宿主独占：档案只住本机设置，
@@ -333,6 +444,26 @@ fun AgentConsoleScreen(
 
     // 两栏是否成立：形态开关 + 左列真有实体。左列无实体 ⇒ 退化回单列全宽（不画空左列）。
     val hubAside = layout == AgentHubLayout.TwoColumn && !hubCards.isNullOrEmpty()
+
+    // 打开团队档案编辑器：名录行的「编辑团队」与详情页的同一颗按钮共用**这一份**构造
+    // （档案在就用档案 —— 名册是唯一真相；档案丢了退回卡上快照，退回不等于静默：
+    // 保存时会按用户眼前所见重建档案）。两处各写一遍必然漂。
+    val openTeamEditor: (com.kapp.tenon.domain.AgentTeamUi) -> Unit = { team ->
+        val profile = settingsSlice.settings.teamProfiles.byTeamId(team.teamId)
+        teamEditing = TeamEditTarget(
+            profileKey = team.teamId,
+            name = profile?.name ?: team.teamName ?: team.groupName,
+            leaderAgentId = profile?.leaderAgentId ?: team.leaderAgentId,
+            members = profile?.rosterDrafts()
+                ?: team.members.filterNot { it.isLeader }.map {
+                    com.kapp.tenon.core.protocol.TeamMemberDraft(
+                        agentId = it.agentId,
+                        name = it.name,
+                        role = it.role,
+                    )
+                },
+        )
+    }
 
     // 卡片流：**一份内容、一份接线**（AGENTS 组件共享纪律），全宽正文顶端（单列）与
     // 两栏左列只差密度参数（实参 = compact：true = 两栏左列窄形态，false = 全宽横段）。
@@ -350,11 +481,29 @@ fun AgentConsoleScreen(
             compact = compact,
             selectedHostNodeId = effectiveEntityHost,
             selectedAgentKey = effectiveEntityKey,
+            // 团队行的高亮与员工行分开一格（团队与领队是两个实体，宿主相同不等于同一行）。
+            selectedTeamGroupId = effectiveTeamGroup,
+            selectedTeamLeaderAgentId = effectiveTeamLeader,
             workstationPort = agentWorkstationPort,
+            orphanTeams = hubOrphanTeams,
+            // 解散的写通路与详情页那把同一个（`onDissolveTeam` 来自桌面壳的档案面）；
+            // 手机壳不接 ⇒ null ⇒ 孤儿段整段不画。
+            onDissolveOrphanTeam = onDissolveTeam,
+            // 员工**档案**（登记簿视角）：与团队档案同一个 gate —— 手机读不到 `employeeProfiles`
+            // （只住宿主机）⇒ 恒空 ⇒ 那一档不出现；写通路（编辑 / 注销）同样由桌面壳独占。
+            employeeProfiles = hubEmployeeProfiles,
+            onEditEmployeeProfile = onEditEmployeeProfile,
+            onForgetEmployeeProfile = onForgetEmployee,
+            // 「新建档案」的落点是**选择器**（本屏持有），不是壳：候选表由卡片流与档案表
+            // 一起算（本屏已有 `hubCards`），壳只接「选完了、给这个人建档」这一步。
+            onNewEmployeeProfile = onNewEmployeeProfile?.let { { profileCreateOpen = true } },
             onOpenEntity = { card ->
                 explicitlyClearedEntity = false
                 localDetailSessionId = null
                 localDetailWsId = null
+                // 点员工 = 离开团队详情（两层互斥，见 localDetailTeamGroup 的注释）。
+                localDetailTeamGroup = null
+                localDetailTeamLeader = null
                 onSelectAgent(card.hostNodeId)
                 if (onOpenAgentDetail != null) {
                     onOpenAgentDetail(card.hostNodeId, card.agentKey)
@@ -373,6 +522,9 @@ fun AgentConsoleScreen(
             // 工作区，目标会话解析不到。单列下同样因为卡片不可见而是空操作。
             onOpenRowSession = { hostNodeId, sessionId ->
                 localDetailWsId = null
+                // 进会话 = 离开团队详情（左列在详情层级也亮着，点行不该把团队页留在右列）。
+                localDetailTeamGroup = null
+                localDetailTeamLeader = null
                 onSelectAgent(hostNodeId)
                 if (onOpenSessionDetail != null) {
                     onOpenSessionDetail(hostNodeId, sessionId)
@@ -381,18 +533,24 @@ fun AgentConsoleScreen(
                 }
                 onSelectAgentSession(sessionId)
             },
-            // 团队卡点卡 → **领队**那张员工详情。团队没有独立实体页可下钻（它不是独立对象，
-            // 协议里没有 teamId），而「这队是谁在带」就落在领队身上 —— 落到它是如实的下钻，
-            // 凭空造一个团队详情实体才是编身份。
+            // 团队名录点行 → **团队详情**（团队视角的实体页）。
+            //
+            // 此前这一步落到**领队**那张员工详情：标题是人名、段落是「这个人的任职」，
+            // 用户点的却是「这支队」—— 团队自己的名字、名册、在哪些群里全都没有落点。
+            // 团队不是员工实体，它有自己的键 `(groupId, leaderAgentId)`，就该有自己的页面。
             onOpenTeam = { team ->
                 localDetailSessionId = null
                 localDetailWsId = null
+                // 团队与实体两层互斥：不点员工时右列不该还留着上一个人的详情。
+                explicitlyClearedEntity = true
+                localDetailEntityHost = null
+                localDetailEntityKey = null
                 onSelectAgent(team.hostNodeId)
-                if (onOpenAgentDetail != null) {
-                    onOpenAgentDetail(team.hostNodeId, team.leaderAgentId)
+                if (onOpenTeamDetail != null) {
+                    onOpenTeamDetail(team.groupId, team.leaderAgentId)
                 } else {
-                    localDetailEntityHost = team.hostNodeId
-                    localDetailEntityKey = team.leaderAgentId
+                    localDetailTeamGroup = team.groupId
+                    localDetailTeamLeader = team.leaderAgentId
                 }
             },
             onOpenGroup = onOpenGroup,
@@ -411,26 +569,7 @@ fun AgentConsoleScreen(
             onCreateTeamWithAi = onGenerateTeam?.takeIf { onSaveTeam != null }?.let {
                 { aiTeamOpen = true }
             },
-            onEditTeam = onSaveTeam?.let { save ->
-                { team ->
-                    val profile = settingsSlice.settings.teamProfiles.byTeamId(team.teamId)
-                    teamEditing = TeamEditTarget(
-                        profileKey = team.teamId,
-                        // 档案在就用档案（名册是唯一真相）；档案丢了退回卡上快照 ——
-                        // 退回不等于静默：保存时会按这一份重建档案（文件名与名册以用户眼前所见为准）。
-                        name = profile?.name ?: team.teamName ?: team.groupName,
-                        leaderAgentId = profile?.leaderAgentId ?: team.leaderAgentId,
-                        members = profile?.rosterDrafts()
-                            ?: team.members.filterNot { it.isLeader }.map {
-                                com.kapp.tenon.core.protocol.TeamMemberDraft(
-                                    agentId = it.agentId,
-                                    name = it.name,
-                                    role = it.role,
-                                )
-                            },
-                    )
-                }
-            },
+            onEditTeam = if (onSaveTeam != null) openTeamEditor else null,
         )
     }
 
@@ -442,6 +581,26 @@ fun AgentConsoleScreen(
             selfNodeId = settingsSlice.settings.nodeId,
             port = execPort,
             onDismiss = { execConfigOpen = false },
+        )
+    }
+
+    // 「新建档案」的候选表（本机、还没有档案、有身份键）：过滤规则住领域层
+    // （`employeeProfileCandidates`）—— 写路径的台账检查与本表必须是同一批人。
+    val newProfile = onNewEmployeeProfile
+    if (profileCreateOpen && newProfile != null) {
+        val candidates = remember(hubCards, settingsSlice) {
+            com.kapp.tenon.domain.employeeProfileCandidates(
+                cards = hubCards.orEmpty(),
+                selfNodeId = settingsSlice.settings.nodeId,
+            )
+        }
+        EmployeeProfileCreateDialog(
+            candidates = candidates,
+            onPick = { candidate ->
+                profileCreateOpen = false
+                newProfile(candidate)
+            },
+            onDismiss = { profileCreateOpen = false },
         )
     }
 
@@ -516,12 +675,13 @@ fun AgentConsoleScreen(
                 val port = teamExecutionPort
                 if (port != null) {
                     val declared = spec.members.map { it.agentId }.toSet()
-                    for (groupId in groupIds) {
-                        val dirId = port.groupPointerDirId(groupId) ?: continue
+                    // 执行档属于**团队**，不属于群：键是 `(目录, 领队)` ⇒ 几个群指向同一目录
+                    // 就是同一份档，按群写只是把同一份覆盖 N 次。
+                    val dirIds = groupIds.mapNotNull { port.groupPointerDirId(it) }.distinct()
+                    for (dirId in dirIds) {
                         when (
                             val saved = port.save(
                                 com.kapp.tenon.domain.TeamExecutionProfileUi(
-                                    groupId = groupId,
                                     dirId = dirId,
                                     leaderAgentId = spec.leaderAgentId,
                                     members = spec.toExecutionMembers(),
@@ -684,6 +844,84 @@ fun AgentConsoleScreen(
                 },
                 modifier = area,
             )
+        } else if (teamDetailActive) {
+            // 团队详情（团队视角的实体页）：与员工详情同形同骨架，内容由
+            // `agentTeamDetail` 从名录行并出来 —— 一屏的规则只留一处。
+            val detail = teamDetail
+            if (detail != null) {
+                AgentTeamDetailView(
+                    detail = detail,
+                    onBack = {
+                        if (onLeaveTeamDetail != null) {
+                            onLeaveTeamDetail()
+                        } else {
+                            localDetailTeamGroup = null
+                            localDetailTeamLeader = null
+                            onBackToBoard?.invoke()
+                        }
+                    },
+                    onOpenGroup = onOpenGroup,
+                    onOpenWorkspaceDetail = { wsId ->
+                        // 与员工详情的目录行同一条接线：外层导航优先，没有导航层的壳走本地状态。
+                        if (onOpenWorkspaceDetail != null) {
+                            onOpenWorkspaceDetail(detail.hostNodeId, wsId)
+                        } else {
+                            localDetailWsId = wsId
+                        }
+                        onLoadWorkspaceSessions?.invoke(detail.hostNodeId, wsId)
+                    },
+                    // 编辑团队：与名录行那把开同一支对话框（构造逻辑只有 openTeamEditor 一份）。
+                    onEditTeam = if (onSaveTeam != null) {
+                        {
+                            hubTeams.firstOrNull {
+                                it.groupId == detail.groupId && it.leaderAgentId == detail.leaderAgentId
+                            }?.let(openTeamEditor)
+                        }
+                    } else {
+                        null
+                    },
+                    // 解散：同样只有带档案（`teamId != null`）且壳有档案面时才画 —— 没有档案
+                    // 就无从解散，那颗按钮点下去只能是空操作。teamId 先落成局部量再闭包捕获：
+                    // 跨模块的 val 属性不做智能转换。
+                    onDissolveTeam = detail.teamId?.let { teamId ->
+                        onDissolveTeam?.let { dissolve ->
+                            {
+                                dissolve(teamId)
+                                // 解散之后这支队就没有详情可言了：留在原页会看到
+                                // 「这个团队已经不在了」—— 那是**席位被撤回**的措辞，
+                                // 不是「你刚把它解散了」。退回名录，让横幅去说结果。
+                                if (onLeaveTeamDetail != null) {
+                                    onLeaveTeamDetail()
+                                } else {
+                                    localDetailTeamGroup = null
+                                    localDetailTeamLeader = null
+                                    onBackToBoard?.invoke()
+                                }
+                            }
+                        }
+                    },
+                    modifier = area,
+                )
+            } else {
+                // 席位已撤回（投影 null）：整屏空态 + 出路 —— 不悄悄落回名录，
+                // 导航层还停在团队详情上，悄悄换内容会让返回键「按一下没反应」。
+                EmptyState(
+                    title = stringResource(Res.string.team_detail_missing_title),
+                    message = stringResource(Res.string.team_detail_missing_body),
+                    actionLabel = stringResource(Res.string.action_back),
+                    onAction = {
+                        if (onLeaveTeamDetail != null) {
+                            onLeaveTeamDetail()
+                        } else {
+                            localDetailTeamGroup = null
+                            localDetailTeamLeader = null
+                            onBackToBoard?.invoke()
+                        }
+                    },
+                    icon = painterResource(Res.drawable.ic_bot),
+                    modifier = area,
+                )
+            }
         } else if (entityDetailActive) {
             // 智能体实体详情（Phase B4）：点卡片的第一落点，内容与手机共用同一份
             // AgentDetailView（AGENTS §2.6 —— 外壳在这里，内容不抄第二遍）。

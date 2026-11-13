@@ -31,7 +31,7 @@ class TeamPlanCompilerTest {
     )
 
     private fun profile(vararg members: TeamExecutionMemberSpec) = TeamExecutionProfile(
-        groupId = "g1", dirId = "ws-1", leaderAgentId = "dsh-lead",
+        dirId = "ws-1", leaderAgentId = "dsh-lead",
         updatedAt = 0, members = members.toList(),
     )
 

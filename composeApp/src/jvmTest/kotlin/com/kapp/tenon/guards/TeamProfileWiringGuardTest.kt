@@ -34,6 +34,13 @@ class TeamProfileWiringGuardTest {
             "桌面壳必须把「新建 / 编辑团队」接到 controller.saveTeamProfile —— " +
                 "团队档案只住宿主本机，桌面壳不接就等于没有入口",
         )
+        // 解散是同一个档案写通路的另一半：只接保存不接解散，队伍建起来就删不掉
+        // （`Dissolve` 命令一直在，缺的一直是这颗按钮）。
+        assertTrue(
+            "controller.dissolveTeamProfile(" in live,
+            "桌面壳必须把「解散团队」接到 controller.dissolveTeamProfile —— " +
+                "漏了它，团队档案只能建、不能删",
+        )
     }
 
     @Test
@@ -45,6 +52,11 @@ class TeamProfileWiringGuardTest {
             "onSaveTeam" !in live,
             "手机壳不许接团队档案的保存通路：档案只住领队宿主本机，" +
                 "手机接上就等于画一颗点了没反应的按钮",
+        )
+        assertTrue(
+            "onDissolveTeam" !in live,
+            "手机壳同样不许接「解散团队」：档案不在手机上，接了等于一颗点了没反应的删除键 —— " +
+                "而删除键点了没反应，用户会以为队伍已经没了",
         )
     }
 

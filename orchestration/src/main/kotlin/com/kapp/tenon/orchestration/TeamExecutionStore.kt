@@ -39,14 +39,26 @@ data class TeamExecutionMemberSpec(
 }
 
 /**
- * 一个席位的团队执行档。主键 = `(groupId, dirId, leaderAgentId)`（D16：dirId 是
- * 宿主本机目录档案的稳定 id，**不随 agent 重新宣告 wsId 变化**；`leaderAgentId`
- * 是声明里的稳定 id，不是显示 token）。
+ * 一支团队的执行档。主键 = `(dirId, leaderAgentId)`（D16：dirId 是宿主本机目录档案的
+ * 稳定 id，**不随 agent 重新宣告 wsId 变化**；`leaderAgentId` 是声明里的稳定 id，
+ * 不是显示 token）。
+ *
+ * ## 主键里为什么没有 groupId
+ *
+ * 一支团队进多个群是**一等场景**（一份名册、每群各一条席位）。键里带 groupId 的后果是
+ * 「同一支队在同一目录下要配 N 份」：`TeamRosterDialog` 的执行配置段按群打开，用户在 A 群
+ * 配完，B 群的 `@团队` 读的是另一条键 ⇒ `team execution is not configured`
+ * （blocked 卡，不是静默失败，但用户完全不知道为什么「刚配过」）。执行配置属于**团队**，
+ * 不属于「团队在某群的那条席位」，所以键只留这两个真的会变的东西。
+ *
+ * 已知边界（fail-closed 方向）：同一个 agent 在两个群里各当**不同两支团队**的领队、
+ * 且两群指向**同一个目录** ⇒ 两队共用一条档。这种名册不符不会被静默吃掉 ——
+ * `TeamExecutionResolver.profileForSeat` 的悬空检查会以
+ * `execution profile is stale: … no longer in the roster` 拒掉。
  *
  * **执行配置只存在宿主本地** —— 不进 group 帧、不广播给全群；群声明仍然只带身份与角色。
  */
 data class TeamExecutionProfile(
-    val groupId: String,
     val dirId: String,
     val leaderAgentId: String,
     val updatedAt: Long,
@@ -185,10 +197,10 @@ class TeamExecutionStore(
     @Volatile
     private var snapshotLength: Long = INITIAL_LENGTH
 
-    /** 主键定位：一个群多支团队时按 `(dirId, leaderAgentId)` 区分席位。 */
-    fun profileFor(groupId: String, dirId: String, leaderAgentId: String): TeamExecutionProfile? =
+    /** 主键定位：`(目录, 领队)` —— 与群无关，一支队进几个群都是同一份档。 */
+    fun profileFor(dirId: String, leaderAgentId: String): TeamExecutionProfile? =
         refreshIfStale().firstOrNull {
-            it.groupId == groupId && it.dirId == dirId && it.leaderAgentId == leaderAgentId
+            it.dirId == dirId && it.leaderAgentId == leaderAgentId
         }
 
     /**
@@ -212,8 +224,7 @@ class TeamExecutionStore(
         lock.write {
             val teams = refreshIfStale().toMutableList()
             teams.removeAll {
-                it.groupId == normalized.groupId && it.dirId == normalized.dirId &&
-                    it.leaderAgentId == normalized.leaderAgentId
+                it.dirId == normalized.dirId && it.leaderAgentId == normalized.leaderAgentId
             }
             teams.add(normalized)
             if (!persistLocked(teams)) return TeamExecutionSaveVerdict.Rejected(listOf("failed to persist execution profile"))
@@ -226,15 +237,14 @@ class TeamExecutionStore(
     }
 
     /**
-     * 团队解散（Single 退回）时同步移除该席位的执行档（§3.5）：防止存留无用幽灵记录。
-     * 条目不存在是正常情形（返回 false 不代表失败）。
+     * 团队解散时同步移除该支队的执行档（§3.5）：防止存留无用幽灵记录。
+     * 条目不存在是正常情形（返回 false 不代表失败）——例如同一目录下两个群都调过一次。
      */
-    fun remove(groupId: String, dirId: String, leaderAgentId: String): Boolean {
+    fun remove(dirId: String, leaderAgentId: String): Boolean {
         return lock.write {
             val teams = refreshIfStale().toMutableList()
             val removed = teams.removeAll {
-                it.groupId == groupId && it.dirId == dirId &&
-                    it.leaderAgentId == leaderAgentId
+                it.dirId == dirId && it.leaderAgentId == leaderAgentId
             }
             if (!removed) return@write false
             if (!persistLocked(teams)) return@write false
@@ -275,7 +285,7 @@ class TeamExecutionStore(
             return emptyList()
         }
         val version = parsed["schemaVersion"]?.jsonPrimitive?.longOrNull
-        if (version != SCHEMA_VERSION) {
+        if (version != SCHEMA_VERSION && version != GROUP_SCOPED_SCHEMA_VERSION) {
             RelayLog.info(TAG, "load failed (schemaVersion=" + version + "): ignored")
             return emptyList()
         }
@@ -289,15 +299,22 @@ class TeamExecutionStore(
             RelayLog.info(TAG, "load failed (illegal entry): ignored")
             return emptyList()
         }
-        return teams.filterNotNull()
+        val loaded = teams.filterNotNull()
+        // v2 的键比现在多一个 groupId ⇒ 同一支队在 N 个群里有 N 条。**读时就折叠**（保留
+        // updatedAt 最新那条），而不是让调用方自己挑：三处读取点各挑一次必然分叉。
+        // 不在这里立刻回写 —— 下一次 save 自然落成 v3，没再保存过的旧文件继续按折叠结果读。
+        return if (version == GROUP_SCOPED_SCHEMA_VERSION) loaded.collapseGroupScoped() else loaded
     }
 
+    private fun List<TeamExecutionProfile>.collapseGroupScoped(): List<TeamExecutionProfile> =
+        groupBy { it.dirId to it.leaderAgentId }
+            .map { (_, same) -> same.maxByOrNull { it.updatedAt } ?: same.first() }
+
     private fun profileOf(entry: JsonObject): TeamExecutionProfile? {
-        val groupId = entry["groupId"]?.jsonPrimitive?.contentOrNull ?: return null
         val dirId = entry["dirId"]?.jsonPrimitive?.contentOrNull ?: return null
         val leaderAgentId = entry["leaderAgentId"]?.jsonPrimitive?.contentOrNull ?: return null
         val updatedAt = entry["updatedAt"]?.jsonPrimitive?.longOrNull ?: return null
-        if (groupId.isBlank() || dirId.isBlank() || leaderAgentId.isBlank()) return null
+        if (dirId.isBlank() || leaderAgentId.isBlank()) return null
         val members = runCatching {
             entry["members"]?.jsonArray?.map { m ->
                 val o = m.jsonObject
@@ -313,16 +330,15 @@ class TeamExecutionStore(
             }
         }.getOrElse { return null }
         if (members == null || members.isEmpty()) return null
-        return TeamExecutionProfile(groupId, dirId, leaderAgentId, updatedAt, members)
+        return TeamExecutionProfile(dirId, leaderAgentId, updatedAt, members)
     }
 
     private fun persistLocked(teams: List<TeamExecutionProfile>): Boolean {
         val json = buildJsonObject {
             put("schemaVersion", SCHEMA_VERSION)
             put("teams", buildJsonArray {
-                teams.sortedBy { it.groupId + "|" + it.leaderAgentId }.forEach { t ->
+                teams.sortedBy { it.dirId + "|" + it.leaderAgentId }.forEach { t ->
                     add(buildJsonObject {
-                        put("groupId", t.groupId)
                         put("dirId", t.dirId)
                         put("leaderAgentId", t.leaderAgentId)
                         put("updatedAt", t.updatedAt)
@@ -365,9 +381,13 @@ class TeamExecutionStore(
 
     private companion object {
         const val TAG = "TEAM-EXEC"
-        // v2（D16）：键从 (groupId, defaultWsId, leaderAgentId) 换为 dirId —— 旧 v1 文件
-        // 走上面「schemaVersion 不认识 ⇒ 整份按空」的既有语义（清库口径，不做迁移）。
-        const val SCHEMA_VERSION: Long = 2
+        // v3：主键去掉 groupId（`(dirId, leaderAgentId)`）—— 一支队进 N 个群只需要配一份。
+        // v2 文件**读时折叠**（同键保留 updatedAt 最新那条），下一次保存落成 v3：
+        // 这里不留旧键是没意义的（dirId 与 leaderAgentId 都在，折叠不丢信息）。
+        // v1（键是 defaultWsId，不是 dirId）仍走「schemaVersion 不认识 ⇒ 整份按空」的既有
+        // 清库语义 —— 那一版的 id 与现在的目录档案对不上，没有可迁移的东西。
+        const val SCHEMA_VERSION: Long = 3
+        const val GROUP_SCOPED_SCHEMA_VERSION: Long = 2
         const val INITIAL_MTIME = -1L
         const val INITIAL_LENGTH = -1L
         val MISSING_STAMP: Pair<Long, Long> = 0L to 0L

@@ -130,6 +130,8 @@ import com.kapp.tenon.generated.resources.disc_cleanup_none
 import com.kapp.tenon.generated.resources.disc_duplicate
 import com.kapp.tenon.generated.resources.disc_invalid_host
 import com.kapp.tenon.generated.resources.agent_employee_scope_rejected
+import com.kapp.tenon.generated.resources.employee_profile_forgotten
+import com.kapp.tenon.generated.resources.employee_profile_forgotten_partial
 import com.kapp.tenon.generated.resources.employee_profile_rejected
 import com.kapp.tenon.generated.resources.employee_profile_saved
 import com.kapp.tenon.generated.resources.employee_profile_saved_aliased
@@ -149,6 +151,9 @@ import com.kapp.tenon.generated.resources.set_saved
 import com.kapp.tenon.generated.resources.time_hours_ago
 import com.kapp.tenon.generated.resources.team_roster_saved
 import com.kapp.tenon.generated.resources.team_roster_seat_missing
+import com.kapp.tenon.generated.resources.team_profile_dissolved
+import com.kapp.tenon.generated.resources.team_profile_dissolved_bare
+import com.kapp.tenon.generated.resources.team_profile_dissolved_partial
 import com.kapp.tenon.generated.resources.team_profile_managed
 import com.kapp.tenon.generated.resources.team_profile_rejected
 import com.kapp.tenon.generated.resources.team_profile_saved
@@ -439,6 +444,19 @@ fun bannerText(message: BannerMessage): String = when (message) {
         }
     }
     BannerMessage.TeamProfileRejected -> stringResource(Res.string.team_profile_rejected)
+    is BannerMessage.TeamProfileDissolved -> when {
+        // 有群没摘干净单独说：那几个群的席位还指着已删的档案，用户得知道去哪儿收尾。
+        message.failedGroupCount > 0 -> stringResource(
+            Res.string.team_profile_dissolved_partial,
+            message.name,
+            message.groupCount,
+            message.failedGroupCount,
+        )
+        // 一个群都没有的档案（名录「未入驻」那一段的解散）：没有席位可退回单兵，
+        // 说「0 个群」只会让用户以为出错了。
+        message.groupCount == 0 -> stringResource(Res.string.team_profile_dissolved_bare, message.name)
+        else -> stringResource(Res.string.team_profile_dissolved, message.name, message.groupCount)
+    }
     is BannerMessage.EmployeeProfileSaved -> if (message.aliasedGroups.isEmpty()) {
         stringResource(Res.string.employee_profile_saved, message.name)
     } else {
@@ -449,6 +467,15 @@ fun bannerText(message: BannerMessage): String = when (message) {
         )
     }
     BannerMessage.EmployeeProfileRejected -> stringResource(Res.string.employee_profile_rejected)
+    is BannerMessage.EmployeeProfileForgotten -> if (message.failedGroupCount > 0) {
+        stringResource(
+            Res.string.employee_profile_forgotten_partial,
+            message.name,
+            message.failedGroupCount,
+        )
+    } else {
+        stringResource(Res.string.employee_profile_forgotten, message.name)
+    }
     BannerMessage.AgentExecPolicyRejected -> stringResource(Res.string.agent_employee_scope_rejected)
     BannerMessage.GroupMetaRejected -> stringResource(Res.string.banner_group_meta_rejected)
     BannerMessage.ForwardSuccess -> stringResource(Res.string.chat_forward_success)

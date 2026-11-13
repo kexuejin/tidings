@@ -26,8 +26,19 @@ interface TeamExecutionPort {
      */
     fun driverCatalog(): Set<String>
 
-    /** 读该席位的执行档；null = 没配过（正常）。 */
-    fun profileOf(groupId: String, dirId: String, leaderAgentId: String): TeamExecutionProfileUi?
+    /**
+     * 读该支队的执行档；null = 没配过（正常）。主键 = `(目录, 领队)`，**不含群** ——
+     * 一支队进几个群都是同一份档（见 `TeamExecutionProfile` 的 KDoc）。
+     */
+    fun profileOf(dirId: String, leaderAgentId: String): TeamExecutionProfileUi?
+
+    /**
+     * 丢掉该支队的执行档（团队解散时收尾）。默认空实现：没有执行面的壳压根没有档可丢。
+     *
+     * 与 [save] 分开而不是 save(null)：删除是个**要能被统计**的动作（解散的横幅要如实说
+     * 有没有清掉），`save` 的返回值语义是「校验/落盘」。
+     */
+    fun forget(dirId: String, leaderAgentId: String) = Unit
 
     /** 校验（保存前预检 + UI 就地指出原因）；与 save 共用同一份规则（§3.4 单源）。 */
     fun validate(profile: TeamExecutionProfileUi, declaredMemberIds: Set<String>): List<String>
@@ -59,8 +70,11 @@ object TeamExecutionKindsUi {
     const val REVIEWER: String = "reviewer"
 }
 
+/**
+ * 执行档的编辑形状。主键 = `(dirId, leaderAgentId)` —— **没有 groupId**：
+ * 执行配置属于团队，一支队进几个群都是同一份档（写进键里就得配 N 份）。
+ */
 data class TeamExecutionProfileUi(
-    val groupId: String,
     val dirId: String,
     val leaderAgentId: String,
     val members: List<TeamExecutionMemberUi>,
@@ -84,7 +98,7 @@ fun initialExecutionProfileUi(
     if (group == null) return null
     // D16：键的一半换成群指针的 dirId —— 没设指针就取不到初值（对话框会置灰）。
     val dirId = port.groupPointerDirId(group.groupId) ?: return null
-    val existing = port.profileOf(group.groupId, dirId, seat.agentId)
+    val existing = port.profileOf(dirId, seat.agentId)
     val declared = seat.teamMembers
     // **单兵席位也要有执行层**（不变量 5）：没有 teamMembers 时从前直接 null ⇒ 单兵
     // 根本没有「底座/模型」这一层，换底座只能换席位本身（`agentId` 是身份）⇒ 编制与
@@ -95,7 +109,6 @@ fun initialExecutionProfileUi(
             it.agentId.trim().lowercase() == seat.agentId.trim().lowercase()
         }
         return TeamExecutionProfileUi(
-            groupId = group.groupId,
             dirId = dirId,
             leaderAgentId = seat.agentId,
             members = listOf(
@@ -120,7 +133,7 @@ fun initialExecutionProfileUi(
             models = prior?.models ?: emptyList(),
         )
     }
-    return TeamExecutionProfileUi(group.groupId, dirId, seat.agentId, members)
+    return TeamExecutionProfileUi(dirId, seat.agentId, members)
 }
 
 /**

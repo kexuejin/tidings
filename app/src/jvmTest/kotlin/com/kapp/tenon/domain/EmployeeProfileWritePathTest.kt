@@ -331,6 +331,257 @@ class EmployeeProfileWritePathTest {
         assertEquals(g2Name, seatOf(controller, "g2")?.name, "名字不跟着档案一起消失")
     }
 
+    // ------------------------------------------------------------ 档案里的短 id ≠ 席位上的实例 id
+
+    /**
+     * 加一个群：本机席位用的是**完整实例 id**（`dsh-029bbbf3`），而档案里可能只存短 id `dsh`。
+     *
+     * 这不是编出来的状态：登记时的 `agentId` 取自卡片聚类的代表键（可能来自会话自报的短
+     * `dsh`），而席位在入驻时写的是 agent 自报的完整 id。于是「按字符串找席位」会找不到 ——
+     * 改名到不了这个群、注销摘不掉这条引用，而横幅照样是绿的。
+     */
+    private fun withLongIdSeat(controller: RelayController, groupId: String = "g4"): RelayController {
+        val group = GroupMeta(
+            groupId = groupId,
+            name = "实例 id 群",
+            members = listOf(self),
+            rev = 1,
+            updatedBy = self,
+            updatedTs = 1_000L,
+            virtualAgents = listOf(
+                VirtualAgentMember(agentId = "dsh-029bbbf3", hostNodeId = self, name = "dsh-lead"),
+            ),
+        )
+        controller.handlePersist(
+            controller.state.value.settings.copy(
+                groups = controller.state.value.settings.groups + group,
+            ),
+        )
+        return controller
+    }
+
+    private fun localSeatsIn(controller: RelayController, groupId: String): List<VirtualAgentMember> =
+        groupOf(controller, groupId).virtualAgents.orEmpty().filter { it.hostNodeId == self }
+
+    /** 那条用实例 id 的席位（按 id 精确取，别拿 `single()` —— 多一条时报的是「列表有两条」）。 */
+    private fun longIdSeat(controller: RelayController, groupId: String = "g4"): VirtualAgentMember? =
+        localSeatsIn(controller, groupId).firstOrNull { it.agentId == "dsh-029bbbf3" }
+
+    @Test
+    fun aShortIdProfileAttachesToOneExistingInstanceIdSeat() {
+        val controller = controller().also { seed(it); withLongIdSeat(it) }
+
+        val created = controller.applyEmployeeProfile(createCommand(groupIds = listOf("g4")))
+        assertTrue(created is EmployeeProfileResult.Applied, "挂档案应当成功，实际 $created")
+        assertTrue(created.failedGroupIds.isEmpty(), "实例 id 那条席位该被认出来，不是「席位不存在」")
+
+        val seats = localSeatsIn(controller, "g4")
+        assertEquals(1, seats.size, "同一个 agent 在一个群里不许变成两条席位（短 id 一条、实例 id 一条）")
+        val seat = assertNotNull(longIdSeat(controller), "要改的是既有那条实例 id 席位，不是新建一条 dsh")
+        assertEquals("dsh-029bbbf3", seat.agentId)
+        assertEquals("emp-test", seat.employeeId, "既有席位没挂上档案引用")
+    }
+
+    @Test
+    fun renamingReachesASeatThatUsesTheLongInstanceId() {
+        val controller = controller().also { seed(it); withLongIdSeat(it) }
+        controller.applyEmployeeProfile(createCommand(groupIds = listOf("g4")))
+
+        val result = controller.applyEmployeeProfile(
+            EmployeeProfileCommand.Update(
+                employeeId = "emp-test",
+                name = "老王",
+                actor = DeclarationActor.Human(self),
+            ),
+        )
+        assertTrue(result is EmployeeProfileResult.Applied, "改名应当成功，实际 $result")
+        assertTrue(result.failedGroupIds.isEmpty(), "短 id 档案改不到实例 id 席位 ⇒ 这个群永远收不到改名")
+        assertEquals("老王", assertNotNull(longIdSeat(controller)).employeeName, "改名没到实例 id 那条席位")
+    }
+
+    @Test
+    fun forgettingDetachesASeatThatUsesTheLongInstanceId() {
+        val controller = controller().also { seed(it); withLongIdSeat(it) }
+        controller.applyEmployeeProfile(createCommand(groupIds = listOf("g4")))
+        // 前置：引用确实挂在实例 id 那条席位上（否则下面的 assertNull 是在断言「本来就是 null」，
+        // 探针改坏写入路径也照样绿）。
+        assertEquals(
+            "emp-test",
+            assertNotNull(longIdSeat(controller)).employeeId,
+            "前置不成立：这条用例测不到注销",
+        )
+
+        controller.forgetEmployeeProfileEntry("emp-test")
+
+        val seat = assertNotNull(longIdSeat(controller), "注销不许把那条实例 id 席位删掉")
+        assertNull(seat.employeeId, "注销必须摘掉实例 id 席位上的引用，否则档案没了、席位还指着它")
+        assertNull(seat.employeeName, "快照也要摘掉，否则手机端一直显示一个已经不存在的员工")
+        val banner = assertNotNull(controller.state.value.banner)
+        assertEquals(BannerTone.Info, banner.tone, "全摘干净了就不该报「有群没摘掉」")
+    }
+
+    // ------------------------------------------------------------ 界面入口：注销
+
+    /** 注销走界面入口：档案真的没了，横幅说出是谁 —— 删除是个需要确认的动作，不能默默成功。 */
+    @Test
+    fun forgettingFromTheUiRemovesTheProfileAndNamesItInTheBanner() {
+        val controller = controller().also { seed(it) }
+        controller.applyEmployeeProfile(createCommand(groupIds = listOf("g1", "g2")))
+
+        controller.forgetEmployeeProfileEntry("emp-test")
+
+        assertTrue(controller.state.value.settings.employeeProfiles.isEmpty(), "档案该没了")
+        val banner = assertNotNull(controller.state.value.banner)
+        assertEquals(BannerTone.Info, banner.tone)
+        assertEquals(BannerMessage.EmployeeProfileForgotten("老王"), banner.message)
+    }
+
+    @Test
+    fun forgettingAnUnknownEmployeeIsReportedAsAWarning() {
+        val controller = controller().also { seed(it) }
+
+        controller.forgetEmployeeProfileEntry("emp-nope")
+
+        val banner = assertNotNull(controller.state.value.banner)
+        assertEquals(BannerTone.Warn, banner.tone)
+        assertEquals(BannerMessage.EmployeeProfileRejected, banner.message)
+    }
+
+    /**
+     * 有群没摘干净：横幅必须**报数**，不许把半成功说成全绿。
+     *
+     * 构造的是一个真实可达的角落：群里那条带档案引用的席位在对端宿主上（席位被复制过去、
+     * 或我们的席位刚被别处摘掉时会出现）。本机没有可摘的席位 ⇒ 那个群失败，
+     * 而那些群的 `employeeName` 快照还留着，手机会继续显示旧名 —— 用户得知道去哪儿收尾。
+     */
+    @Test
+    fun aGroupThatCannotBeDetachedIsReportedWithItsCount() {
+        val controller = controller().also { seed(it) }
+        controller.applyEmployeeProfile(createCommand(groupIds = emptyList()))
+        val foreignGroup = GroupMeta(
+            groupId = "g5",
+            name = "对端席位群",
+            members = listOf(self, peer),
+            rev = 1,
+            updatedBy = peer,
+            updatedTs = 1_000L,
+            virtualAgents = listOf(
+                VirtualAgentMember(
+                    agentId = "codex",
+                    hostNodeId = peer,
+                    name = "coder",
+                    employeeId = "emp-test",
+                ),
+            ),
+        )
+        controller.handlePersist(
+            controller.state.value.settings.copy(
+                groups = controller.state.value.settings.groups + foreignGroup,
+            ),
+        )
+
+        controller.forgetEmployeeProfileEntry("emp-test")
+
+        val banner = assertNotNull(controller.state.value.banner)
+        assertEquals(BannerTone.Warn, banner.tone, "有一个群没摘掉，就不能走信息位")
+        assertEquals(
+            BannerMessage.EmployeeProfileForgotten("老王", failedGroupCount = 1),
+            banner.message,
+        )
+    }
+
+    // ------------------------------------------------------------ 入驻也要带上档案
+
+    /**
+     * 「群信息 → 邀请智能体入驻」是**唯一**能把已有员工加进第二个群的入口
+     * （员工详情页只有名字 / 职责 / 谁可调用，没有加群）。所以这条路上的席位必须当场写上
+     * 员工引用与名字快照 —— 少一个症状就是「宿主显示员工名、手机还是 token」，
+     * 而且之后的改名**永远到不了这个群**（重建快照是按 `employeeId` 找引用群的）。
+     */
+    @Test
+    fun joiningAGroupAdoptsTheExistingProfile() {
+        val controller = controller().also { seed(it) }
+        controller.applyEmployeeProfile(
+            createCommand(groupIds = listOf("g1"), name = "前端小王", token = "dsh-coder"),
+        )
+
+        val join = controller.applyDeclaration(
+            GroupDeclarationCommand.JoinSeat(
+                groupId = "g2",
+                agentId = "dsh",
+                agentKind = "dsh",
+                actor = DeclarationActor.Human(self),
+            ),
+        )
+        assertTrue(join is DeclarationResult.Applied, "入驻应当成功，实际 $join")
+
+        val seat = assertNotNull(seatOf(controller, "g2"))
+        assertEquals("emp-test", seat.employeeId, "入驻没挂档案引用 ⇒ 这个群永远收不到改名")
+        assertEquals("前端小王", seat.employeeName, "手机只读快照，不写快照就是两端两个名字")
+        assertEquals("dsh-coder", seat.name, "新席位用档案 token，不是 kind-职责")
+
+        // 改名按 `employeeId` 找引用群 —— 这条席位现在在册，必须跟着变。
+        controller.applyEmployeeProfile(
+            EmployeeProfileCommand.Update(
+                employeeId = "emp-test",
+                name = "老王",
+                actor = DeclarationActor.Human(self),
+            ),
+        )
+        assertEquals("老王", seatOf(controller, "g2")?.employeeName, "改名没到第二个群")
+        assertEquals("dsh-coder", seatOf(controller, "g2")?.name, "改名不许动 @ token")
+    }
+
+    @Test
+    fun joiningWithATakenTokenGetsALocalAliasNotADerivedName() {
+        val controller = controller().also { seed(it) }
+        controller.applyEmployeeProfile(createCommand(groupIds = emptyList(), token = "coder"))
+
+        controller.applyDeclaration(
+            GroupDeclarationCommand.JoinSeat(
+                groupId = "g3",
+                agentId = "dsh",
+                agentKind = "dsh",
+                actor = DeclarationActor.Human(self),
+            ),
+        )
+        val seat = assertNotNull(seatOf(controller, "g3"))
+        assertEquals("coder-2", seat.name, "撞名给本群别名，不是拒绝、也不是回头用 kind-职责")
+        assertEquals("emp-test", seat.employeeId)
+        assertEquals(
+            "coder",
+            groupOf(controller, "g3").virtualAgents.orEmpty().first { it.hostNodeId == peer }.name,
+            "对端那条同名席位一条都不许动",
+        )
+    }
+
+    @Test
+    fun reJoiningKeepsTheSeatNameTheGroupAlreadyUses() {
+        val controller = controller().also { seed(it) }
+        // g1 早就有 `dsh-lead` 这条席位 —— 群里 @ 的就是这个名字。
+        controller.applyEmployeeProfile(createCommand(groupIds = emptyList(), token = "dsh-coder"))
+        controller.applyDeclaration(
+            GroupDeclarationCommand.JoinSeat(
+                groupId = "g1",
+                agentId = "dsh",
+                agentKind = "dsh",
+                actor = DeclarationActor.Human(self),
+            ),
+        )
+        val seat = assertNotNull(seatOf(controller, "g1"))
+        assertEquals("dsh-lead", seat.name, "已有席位的 @ token 不许被档案改掉（输入习惯会断）")
+        assertEquals("emp-test", seat.employeeId, "名字照旧，但引用要补上")
+        assertEquals("老王", seat.employeeName, "快照也要补上，否则手机读不到这个人叫什么")
+    }
+
+    /** 档案 token 脏了（非归一形态）不许直接进席位名：`@` 后面要打的是 ASCII 短名。 */
+    @Test
+    fun aDirtyProfileTokenFallsBackToTheDerivedSeatName() {
+        val dirty = EmployeeProfile("emp-x", "dsh", "前端小王", token = "小王 coder")
+        assertEquals("dsh-assistant", dirty.seatToken("dsh", AgentDuties.DEFAULT_SINGLE))
+        assertEquals("dsh-coder", dirty.copy(token = "dsh-coder").seatToken("dsh", "reviewer"))
+    }
+
     // ------------------------------------------------------------ 拒绝面
 
     @Test

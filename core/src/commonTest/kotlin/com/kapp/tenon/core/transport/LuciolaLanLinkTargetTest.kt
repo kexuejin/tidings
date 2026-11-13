@@ -14,6 +14,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -32,10 +34,29 @@ class LuciolaLanLinkTargetTest {
 
     private data class Call(val tag: String, val host: String, val port: Int, val pin: String?)
 
+    /**
+     * 记录拨号尝试（替代原来的 `synchronized(calls)`）。
+     *
+     * `synchronized` 是 JVM 专有的（`java.lang` 的静态方法，JVM 上自动可见），commonTest
+     * 用了它 ⇒ **iOS 测试目标根本编译不过**（只是没人编过）。这里改用 `Mutex`：
+     * 假传输由 `LinkClient` 的协程在 `Dispatchers.Default` 上调用，加锁语义保持不变。
+     */
+    private class CallLog {
+        private val mutex = Mutex()
+        private val items = mutableListOf<Call>()
+        suspend fun record(call: Call) {
+            mutex.withLock { items += call }
+        }
+
+        suspend fun isEmpty(): Boolean = mutex.withLock { items.isEmpty() }
+
+        suspend fun snapshot(): List<Call> = mutex.withLock { items.toList() }
+    }
+
     private class RecordingTransport(
         override val isSecure: Boolean,
         private val tag: String,
-        private val calls: MutableList<Call>,
+        private val calls: CallLog,
     ) : LinkTransport {
         override val lastError: String? get() = "connect-failed"
 
@@ -45,7 +66,7 @@ class LuciolaLanLinkTargetTest {
             expectedPin: TlsPin?,
             timeoutMs: Long,
         ): LinkConnection? {
-            synchronized(calls) { calls += Call(tag, host, port, expectedPin?.wire) }
+            calls.record(Call(tag, host, port, expectedPin?.wire))
             return null
         }
 
@@ -88,7 +109,7 @@ class LuciolaLanLinkTargetTest {
         check: (List<Call>, LinkDialStats?) -> Unit,
     ) = runBlocking {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-        val calls = mutableListOf<Call>()
+        val calls = CallLog()
         val registry = PeerRegistry("self")
         registry.touch(peer.nodeId, host, 17878, peer, 1L, confirmed = true)
         if (pin != null) registry.setPin(peer.nodeId, pin)
@@ -106,14 +127,13 @@ class LuciolaLanLinkTargetTest {
         client.start()
         try {
             awaitTrue("link client did not evaluate the peer") {
-                client.dialStats()[peer.nodeId]?.skipReason != null ||
-                    synchronized(calls) { calls.isNotEmpty() }
+                client.dialStats()[peer.nodeId]?.skipReason != null || !calls.isEmpty()
             }
         } finally {
             client.stop()
             scope.cancel()
         }
-        val snapshot = synchronized(calls) { calls.toList() }
+        val snapshot = calls.snapshot()
         check(snapshot, client.dialStats()[peer.nodeId])
     }
 

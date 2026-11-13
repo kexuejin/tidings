@@ -432,4 +432,58 @@ class AppNavStateTest {
         assertTrue(restored.inAgentEntityDetail)
         assertNull(restored.detailAgentEntityKey)
     }
+
+    @Test
+    fun teamDetailOpensLeavesAndIsExclusiveWithTheEntityDetail() {
+        // 团队详情与员工实体详情是**同一层的两个实体**：开着其中一个就离开另一个。
+        // 不互斥的症状是返回键先弹看不见的那一层（画面一动不动）。
+        val fromEmployee = AppNavState().openAgentDetail("node-1", "dsh-lead")
+        assertTrue(fromEmployee.inAgentEntityDetail)
+
+        val team = fromEmployee.openTeamDetail("g-1", "dsh-lead")
+        assertTrue(team.inAgentTeamDetail)
+        assertTrue(team.inAgentSubpage)
+        assertEquals("g-1", team.detailTeamGroupId)
+        assertEquals("dsh-lead", team.detailTeamLeaderAgentId)
+        assertFalse(team.inAgentEntityDetail, "点团队就离开了员工页")
+        assertNull(team.detailAgentEntityHost)
+
+        // 从团队页点项目目录 → 工作区详情：团队层保留（返回落回团队页，不是看板）。
+        val intoWs = team.openAgentWorkspaceDetail("node-1", "ws-1")
+        assertTrue(intoWs.inAgentTeamDetail)
+        assertTrue(intoWs.inAgentWorkspaceDetail)
+        val backToTeam = intoWs.leaveAgentWorkspaceDetail()
+        assertTrue(backToTeam.inAgentTeamDetail, "退出工作区详情落回团队详情")
+
+        // 点员工 → 离开团队页（两个实体在同一层，不会同时开着）。
+        val toEmployee = team.openAgentDetail("node-1", "dsh-lead")
+        assertFalse(toEmployee.inAgentTeamDetail)
+        assertTrue(toEmployee.inAgentEntityDetail)
+
+        val closed = backToTeam.leaveTeamDetail()
+        assertFalse(closed.inAgentTeamDetail)
+        assertFalse(closed.inAgentSubpage)
+        assertTrue(closed.leaveTeamDetail() === closed, "已在名录级再离开是 no-op")
+    }
+
+    @Test
+    fun openingAChatClosesTheTeamDetailLayerToo() {
+        val nav = AppNavState().openTeamDetail("g-1", "dsh-lead").openSession(a)
+        assertEquals(a, nav.activeSessionId)
+        assertFalse(nav.inAgentTeamDetail)
+        assertFalse(nav.inAgentSubpage)
+    }
+
+    @Test
+    fun switchingTabsClosesTheTeamDetailLayer() {
+        val nav = AppNavState().openTeamDetail("g-1", "dsh-lead")
+        assertTrue(nav.inAgentTeamDetail)
+        assertFalse(nav.selectTab(AppRoutes.SETTINGS).inAgentTeamDetail)
+    }
+
+    @Test
+    fun saverRoundtripPreservesTheTeamDetailPair() {
+        val nav = AppNavState(detailTeamGroupId = "g-1", detailTeamLeaderAgentId = "dsh-lead")
+        assertEquals(nav, appNavStateFromSaverValue(nav.toSaverValue()))
+    }
 }

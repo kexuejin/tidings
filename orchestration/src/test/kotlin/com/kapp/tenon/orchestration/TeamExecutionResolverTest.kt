@@ -79,7 +79,7 @@ class TeamExecutionResolverTest {
     )
 
     private fun coderProfile(leaderAgentId: String = "dsh-lead") = TeamExecutionProfile(
-        groupId = "g-team", dirId = "ws-1", leaderAgentId = leaderAgentId,
+        dirId = "ws-1", leaderAgentId = leaderAgentId,
         updatedAt = 0,
         members = listOf(
             TeamExecutionMemberSpec("m-coder", TeamExecutionKinds.WORKER, "codex"),
@@ -108,6 +108,32 @@ class TeamExecutionResolverTest {
         assertEquals("m-coder", hit.member.agentId)
         assertEquals("ws-1", hit.profile.dirId)
         assertEquals(2, hit.profile.members.size)
+    }
+
+    /**
+     * **同一支队进两个群，只需要配一份**：执行档键是 `(目录, 领队)`，不含群。
+     *
+     * 这条钉的是用户能看见的那个症状：在 A 群编制里配好执行配置，B 群的 `@团队` 却出
+     * 「not configured」blocked 卡 —— 因为旧键带 groupId，B 群读的是另一条（不存在的）档。
+     * 反向探针：把键改回三元组，本用例的第二段（另一个 groupId）立刻变 NotConfigured。
+     */
+    @Test
+    fun theSameTeamInAnotherGroupReadsTheSameProfile() {
+        val store = memberStore(coderProfile())
+        val seat = teamSeat()
+        val groupA = group(seat).copy(groupId = "g-a")
+        val groupB = group(seat).copy(groupId = "g-b")
+        // 两个群各自指向同一个项目目录（同一支队在同一个仓里干活）。
+        val dirOf: (String) -> String? = { "ws-1" }
+
+        val hitA = assertIs<TeamExecutionResolver.Target.Hit>(
+            resolve(store, groupA, "coder", dirIdOfGroup = dirOf),
+        )
+        val hitB = assertIs<TeamExecutionResolver.Target.Hit>(
+            resolve(store, groupB, "coder", dirIdOfGroup = dirOf),
+        )
+        assertEquals(hitA.profile, hitB.profile, "两个群必须读到同一份执行档")
+        assertEquals("ws-1", hitB.profile.dirId)
     }
 
     @Test

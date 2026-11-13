@@ -49,12 +49,10 @@ class DesktopAgentWorkstationPortTest {
     )
 
     private fun profile(
-        groupId: String,
         dirId: String,
         leader: String,
         driver: String,
     ) = TeamExecutionProfileUi(
-        groupId = groupId,
         dirId = dirId,
         leaderAgentId = leader,
         members = listOf(
@@ -70,9 +68,9 @@ class DesktopAgentWorkstationPortTest {
         override fun driverCatalog(): Set<String> =
             profiles.flatMap { p -> p.members.map { it.driverKey } }.toSet()
 
-        override fun profileOf(groupId: String, dirId: String, leaderAgentId: String): TeamExecutionProfileUi? =
+        override fun profileOf(dirId: String, leaderAgentId: String): TeamExecutionProfileUi? =
             profiles.firstOrNull {
-                it.groupId == groupId && it.dirId == dirId && it.leaderAgentId == leaderAgentId
+                it.dirId == dirId && it.leaderAgentId == leaderAgentId
             }
 
         override fun validate(profile: TeamExecutionProfileUi, declaredMemberIds: Set<String>): List<String> =
@@ -100,7 +98,7 @@ class DesktopAgentWorkstationPortTest {
     @Test
     fun assignedDriverWins() {
         val execution = FakeExecution(
-            profiles = listOf(profile("g1", "ws-1", "dsh-lead", "codex")),
+            profiles = listOf(profile("ws-1", "dsh-lead", "codex")),
             pointers = mapOf("g1" to "ws-1"),
         )
         val ws = port(listOf(group("g1", seat())), execution).workstationOf(selfHost, "dsh-lead")
@@ -113,7 +111,7 @@ class DesktopAgentWorkstationPortTest {
     @Test
     fun anotherHostHasNoWorkstationHere() {
         val execution = FakeExecution(
-            profiles = listOf(profile("g1", "ws-1", "dsh-lead", "codex")),
+            profiles = listOf(profile("ws-1", "dsh-lead", "codex")),
             pointers = mapOf("g1" to "ws-1"),
         )
         val ws = port(listOf(group("g1", seat())), execution).workstationOf(otherHost, "dsh-lead")
@@ -140,7 +138,7 @@ class DesktopAgentWorkstationPortTest {
     @Test
     fun groupWithoutDirectoryPointerStillFallsBackToSlug() {
         val execution = FakeExecution(
-            profiles = listOf(profile("g1", "ws-1", "claude-seat", "codex")),
+            profiles = listOf(profile("ws-1", "claude-seat", "codex")),
             // 指针缺失：拿不到 dirId，执行档读不到（与上面 profile 存在与否无关）
             pointers = emptyMap(),
         )
@@ -155,8 +153,8 @@ class DesktopAgentWorkstationPortTest {
     fun conflictingDriversAcrossGroupsAreNotGuessed() {
         val execution = FakeExecution(
             profiles = listOf(
-                profile("g1", "ws-1", "dsh-lead", "codex"),
-                profile("g2", "ws-2", "dsh-lead", "claude"),
+                profile("ws-1", "dsh-lead", "codex"),
+                profile("ws-2", "dsh-lead", "claude"),
             ),
             pointers = mapOf("g1" to "ws-1", "g2" to "ws-2"),
         )
@@ -172,8 +170,8 @@ class DesktopAgentWorkstationPortTest {
     fun sameDriverInSeveralGroupsIsNotAConflict() {
         val execution = FakeExecution(
             profiles = listOf(
-                profile("g1", "ws-1", "dsh-lead", "codex"),
-                profile("g2", "ws-2", "dsh-lead", "codex-cli"),
+                profile("ws-1", "dsh-lead", "codex"),
+                profile("ws-2", "dsh-lead", "codex-cli"),
             ),
             pointers = mapOf("g1" to "ws-1", "g2" to "ws-2"),
         )

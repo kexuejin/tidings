@@ -180,6 +180,30 @@ public class DesktopShellActions(
 )
 
 /**
+ * 员工档案对话框的输入（**两个入口共用一份**）。
+ *
+ * 两条路都能打开「编辑员工」：详情页头（实体视角，带 `AgentHubDetailUi`）与档案行
+ * （登记簿视角，带 `AgentEmployeeProfileUi`）。两处各写一遍 `EmployeeEditDialog(…)`
+ * 就是两份初始值规则 —— 迟早出现「详情页改名用的是显示名、档案页用的是档案名」。
+ * 收敛成这一份，对话框只认「名字 / 职责 / 两个键」。
+ *
+ * @property agentId 本机 agent 身份键（决定「谁能调用」读哪一档策略；null = 没有身份键，
+ *   详情页里「未上报类型」那一档就是它，此时也读不出策略）。
+ * @property employeeId 档案键；null = 登记（这个 agent 还没有档案）。
+ */
+private data class EmployeeEditInput(
+    val agentId: String?,
+    val employeeId: String?,
+    val name: String,
+    val duty: String,
+    /**
+     * 表单上方那句「登记对象：…」。只有**从档案页新建**时给：那条路进来的用户手里没有卡，
+     * 不说出身份键就只能凭记忆确认点的是哪个人。从详情页进（那张卡就在屏幕上）留 null。
+     */
+    val subjectLabel: String? = null,
+)
+
+/**
  * 桌面壳主体。
  *
  * 结构自上而下固定三段：标题栏 40px / 工具栏 46px / 内容 / 状态栏 26px，
@@ -532,9 +556,9 @@ public fun DesktopShell(
     // 现在三条入口（工具栏 / ⌘N / 系统菜单）表达的是同一件事：面板真的打开。
     // 面板的开合归 `NodesPane` 自己，这里只递增一个意图计数。
     var addNodeRequest by remember { mutableStateOf(0) }
-    // 「登记为员工 / 编辑员工」对话框：null = 关着。存整个实体（名字 / 职责 / 档案键都在里面），
-    // 不存一份拆开的表单快照 —— 表单状态由对话框自己持有，关了就该忘掉。
-    var employeeEditing by remember { mutableStateOf<com.kapp.tenon.domain.AgentHubDetailUi?>(null) }
+    // 「登记为员工 / 编辑员工」对话框：null = 关着。存**输入**而不是整个实体 ——
+    // 详情页与档案行都从这里开，表单状态由对话框自己持有，关了就该忘掉。
+    var employeeEditing by remember { mutableStateOf<EmployeeEditInput?>(null) }
     val newConversation: () -> Unit = {
         view = DesktopView.Nodes
         addNodeRequest++
@@ -969,23 +993,22 @@ public fun DesktopShell(
                             employeeEditing?.let { editing ->
                                 com.kapp.tenon.feature.agents.EmployeeEditDialog(
                                     employeeId = editing.employeeId,
-                                    initialName = editing.employeeName
-                                        ?: editing.displayName.orEmpty(),
-                                    initialDuty = editing.employeeDuty
-                                        ?: com.kapp.tenon.core.protocol.AgentDuties.DEFAULT_SINGLE,
+                                    initialName = editing.name,
+                                    initialDuty = editing.duty,
+                                    subjectLabel = editing.subjectLabel,
                                     // 「谁能调用」读宿主策略：读不到（没装桥）就整段不画。
-                                    initialPolicy = editing.agentKey?.let(controller::agentExecPolicyOf),
+                                    initialPolicy = editing.agentId?.let(controller::agentExecPolicyOf),
                                     onSave = { name, duty, policy ->
                                         // 位置实参（见 RelayController.saveEmployeeProfile 的注释）。
                                         controller.saveEmployeeProfile(
-                                            editing.agentKey.orEmpty(),
+                                            editing.agentId.orEmpty(),
                                             editing.employeeId,
                                             name,
                                             duty,
                                         )
                                         // 档位是**另一个存储**（宿主侧 AgentExecPolicyStore），
                                         // 与档案分开写：写失败由域层出横幅，界面不猜成败。
-                                        editing.agentKey?.let { key ->
+                                        editing.agentId?.let { key ->
                                             controller.setAgentExecPolicy(key, policy)
                                         }
                                         employeeEditing = null
@@ -1138,12 +1161,54 @@ public fun DesktopShell(
                                 onRespondChoice = controller::respondApproval,
                                 // 详情页的「登记为员工 / 编辑员工」：桌面壳有宿主档案，接这条；
                                 // 手机壳不接（null）⇒ 详情页不画那颗按钮。
-                                onEditEmployee = { detail -> employeeEditing = detail },
+                                onEditEmployee = { detail ->
+                                    employeeEditing = EmployeeEditInput(
+                                        agentId = detail.agentKey,
+                                        employeeId = detail.employeeId,
+                                        // 名字的兜底顺序只写一处（档案名 → 显示名），
+                                        // 与卡片标题同一个顺序：登记时输入框里就是用户看到的那三个字。
+                                        name = detail.employeeName ?: detail.displayName.orEmpty(),
+                                        duty = detail.employeeDuty
+                                            ?: com.kapp.tenon.core.protocol.AgentDuties.DEFAULT_SINGLE,
+                                    )
+                                },
+                                // 档案行（登记簿视角）的两个动作：编辑同一个对话框、注销走档案写路径。
+                                // 档案行没有「未上报类型」那一档（它一定有身份键），所以 agentId 恒非空。
+                                onEditEmployeeProfile = { profile ->
+                                    employeeEditing = EmployeeEditInput(
+                                        agentId = profile.agentId,
+                                        employeeId = profile.employeeId,
+                                        name = profile.name,
+                                        duty = profile.duty,
+                                    )
+                                },
+                                // 注销：此前 `Forget` 命令一直在、界面侧零调用 ⇒ 档案删不掉。
+                                // 二次确认在档案行上（`EmployeeForgetDialog`），这里只报事实。
+                                onForgetEmployee = { profile ->
+                                    controller.forgetEmployeeProfile(profile.employeeId)
+                                },
+                                // 档案页的「新建档案」：候选表由屏算（它有卡片流），这里只接
+                                // 「给这个人建档」—— 复用详情页同一个表单与同一条写路径。
+                                // 名字**不预填**：候选的显示名是席位 token / 身份键，原样存下去
+                                // 等于什么都没起；档案的意义就是人给的名字。
+                                onNewEmployeeProfile = { candidate ->
+                                    employeeEditing = EmployeeEditInput(
+                                        agentId = candidate.agentId,
+                                        employeeId = null,
+                                        name = "",
+                                        duty = com.kapp.tenon.core.protocol.AgentDuties.DEFAULT_SINGLE,
+                                        subjectLabel = candidate.agentId,
+                                    )
+                                },
                                 // 团队档案（新建 / 改名 / 换名册 / 进更多群）：档案只住宿主机，
                                 // 手机壳不接（null）⇒ 团队视角里不画那两个入口。
                                 onSaveTeam = { teamId, name, leader, members, groupIds ->
                                     controller.saveTeamProfile(teamId, name, leader, members, groupIds)
                                 },
+                                // 解散：同一条档案写通路的另一半。缺了它，队伍能被建、
+                                // 能改名册、能被逐群移除，却**删不掉**（档案留在设置里，
+                                // 只剩群信息「添加团队」那一列看得见、只能加不能删）。
+                                onDissolveTeam = { teamId -> controller.dissolveTeamProfile(teamId) },
                                 // 「AI 建队」：生成桥由 DesktopExtension 装配（LLM → 过门 → 回落）；
                                 // 能力位 false（预览 / 未装配）= 不画入口，与 onSaveTeam 同 gate。
                                 onGenerateTeam = if (controller.teamScaffoldAvailable) {

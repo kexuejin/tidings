@@ -107,7 +107,7 @@ class TeamDispatchBehaviorTest {
         if (withProfile) {
             val verdict = store.save(
                 TeamExecutionProfile(
-                    groupId = "g-team", dirId = "ws-1", leaderAgentId = "dsh-lead",
+                    dirId = "ws-1", leaderAgentId = "dsh-lead",
                     updatedAt = 0,
                     members = listOf(
                         TeamExecutionMemberSpec("m-coder", TeamExecutionKinds.WORKER, "codex"),

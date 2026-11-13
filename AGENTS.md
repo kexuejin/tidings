@@ -46,6 +46,14 @@
 
 ## 1. 动手前先跑这些
 
+> **依赖前置：luciola 当前钉的是 `0.11.0-local.1`（未上 Maven Central）。** 本机要先在 luciola 仓库跑
+> `scripts/publish-maven-local.sh`，再给**所有** gradle 命令加 `LUCIOLA_LOCAL=1`（`settings.gradle.kts`
+> 里那面开关把 `mavenLocal()` 提到最前）；不带它会在依赖解析阶段直接失败，报错只说
+> "Could not find io.github.kexuejin:luciola-jvm:0.11.0-local.1"，看着像坐标写错了。
+> 原生库与 bindings 必须同版（`copyLuciolaNative` 从 `RustBuild/cargo-target/release` 复制，
+> `:desktopApp:verifyLuciolaNative` 逐项比对 UniFFI checksum）——不一致的安装包装完启动即崩，
+> 所以这道门**不许跳**，也不许为本机省事去改校验。换回公开发布版时，连这条说明一起改。
+
 ```bash
 # 八个模块的测试（验收时加 --max-workers=1）
 ./gradlew :core:jvmTest :app:jvmTest :cli:test :agent-contract:test :orchestration:test \
@@ -54,7 +62,7 @@
 
 # 门禁（缺一不可）
 ./gradlew :cjkLiteralGate :constructionTraceGate :staleCommentRefGate \
-          :domainComposeFreeGate :envDependentTestGate :designSpecDrift \
+          :domainComposeFreeGate :commonJvmApiGate :envDependentTestGate :designSpecDrift \
           :designTokenUsageGate :designStateSlotGate :designLocaleParityGate \
           :jlinkModulesGate --continue
 python3 tools/unused-imports.py --check
@@ -88,6 +96,7 @@ python3 tools/check-design-palette.py --css-vars
 | `constructionTraceGate` | 注释里不许留**日期 / 内网 IP / 私人绝对路径 / 模型名** | 删掉或改成通用说法 |
 | `staleCommentRefGate` | 注释里不许写 `X.kt:NN`（重构必腐坏） | 换成**符号名** |
 | `domainComposeFreeGate` | 领域层 `:app` 不许 `import compose.*`；**扫描根不存在 / 文件数不足也算失败** | 做成可注入的桥（`RelayUiTexts` 的形状），或列进 `tools/domain-compose-free.py` 的 `INDIVIDUAL_ALLOWED` 并写理由 |
+| `commonJvmApiGate` | common 源集不许出现 **JVM 专有 API**（`java.*` / `kotlin.jvm.*` / `putIfAbsent` / `merge` / `computeIfAbsent` / `synchronized` / `String.format` / `@JvmName` …）。症状是 Android 与桌面全绿、**只有 iOS 编不过**，而 iOS 不在收工清单里 ⇒ 会静默躺很久 | 换 common 写法（`getOrPut` / `if (k !in m)` / `Mutex` / 字符串模板）；真只能 JVM 做的放进 `jvmMain`/`jvmSharedMain` + expect/actual；自建同名方法（`SharedMap`/`LockedMap`）列进 `tools/common-jvm-api-guard.py` 的 `ALLOWED` 并写理由 |
 | `designSpecDrift` / `designTokenUsageGate` / `designStateSlotGate` / `designLocaleParityGate` | 设计契约：规格漂移、token 采用率、状态槽覆盖、多语言对账 | 见 `design/` 与 `tools/design-*.py` |
 | `envDependentTestGate` | 测试结论不许依赖**这台机器**：读网卡/时钟、用固定 `delay` 赌同步都算。例外写进 `tools/env-test-allowlist.txt` 并给理由（`A/B/C/D` 口径见 `tools/env-test-scan.py --help`） | 抽纯函数+合成输入 / 用「确定会发生的事件」做探针 / 真环境测试写清理由后入账 |
 | `testStabilityGate` | 同一套测试连跑 N 轮（默认 3），任何一轮红即失败。抓的是「每 3 轮红 1 次」那类竞态 | 先看红在哪几条 → 修测试替身的线程安全（`InMemoryQueueStore` / `InMemoryDedupStore` / `InMemoryMessageStore` 都已改 `MutableStateFlow`），**不要放宽断言** |

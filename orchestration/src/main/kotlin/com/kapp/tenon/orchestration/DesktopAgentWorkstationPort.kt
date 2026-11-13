@@ -57,7 +57,7 @@ class DesktopAgentWorkstationPort(
                     // 群没有项目目录指针 ⇒ 拿不到执行档主键（D16），这一条无从判断，
                     // 跳过 ≠ 没指派：它与「指派过」是两件事，所以不往集合里塞空串。
                     val dirId = execution.groupPointerDirId(group.groupId) ?: return@forEach
-                    val workerDriver = execution.profileOf(group.groupId, dirId, seat.agentId)
+                    val workerDriver = execution.profileOf(dirId, seat.agentId)
                         ?.members?.firstOrNull { it.isWorker }?.driverKey
                     AgentProfiles.normalizeKey(workerDriver)?.let { bound += it }
                 }

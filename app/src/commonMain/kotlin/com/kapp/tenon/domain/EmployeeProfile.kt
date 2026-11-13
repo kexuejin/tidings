@@ -4,6 +4,8 @@ package com.kapp.tenon.domain
 
 import com.kapp.tenon.core.protocol.AgentDuties
 import com.kapp.tenon.core.protocol.AgentMemberName
+import com.kapp.tenon.core.protocol.GroupMeta
+import com.kapp.tenon.core.protocol.sameAgent
 import kotlinx.serialization.Serializable
 
 /**
@@ -70,6 +72,46 @@ public fun List<EmployeeProfile>.byAgentId(agentId: String?): EmployeeProfile? {
     val key = agentId?.trim().orEmpty()
     if (key.isEmpty()) return null
     return firstOrNull { it.agentId.equals(key, ignoreCase = true) }
+}
+
+/**
+ * 按**身份**找档案：与智能体页投影（`hubAgents`）同一条判据（[sameAgent]，前缀归一）。
+ *
+ * 为什么不能只用 [byAgentId] 的精确比：档案里可能存的是短 id（`dsh`），而席位上写的是
+ * 完整实例 id（`dsh-029bbbf3`）。精确比会让「卡片上明明写着员工名、入驻时却认不出这是谁」，
+ * 于是同一个人在一端叫员工名、在另一端叫 `kind-职责`。展示与写入必须用同一把尺子。
+ */
+public fun List<EmployeeProfile>.byAgentIdentity(agentId: String?): EmployeeProfile? {
+    val key = agentId?.trim().orEmpty()
+    if (key.isEmpty()) return null
+    return firstOrNull { sameAgent(it.agentId, null, key) }
+}
+
+/**
+ * 哪些群正在引用这份档案（席位 `employeeId` 相等）—— **全仓唯一一份判定**。
+ *
+ * 两处读它：写路径（改名要重建哪些群的快照、注销要摘哪些群的引用）与界面（「他在几个群里」）。
+ * 各写一遍 `filter` 的后果不是重复代码，是**判据分叉**：某天一方加了条件、另一边没加，
+ * 界面就会把一个还在两个群里的员工写成「不在任何群」，或者反过来 —— 注销时少摘一个群，
+ * 那个群的席位就一直挂着一份已经不存在的档案。
+ *
+ * 返回群对象而不只是 id：界面要判「空」还要群名，写路径要 id（`.map { it.groupId }`）。
+ */
+public fun List<GroupMeta>.groupsReferencingEmployee(employeeId: String): List<GroupMeta> =
+    filter { group -> group.virtualAgents.orEmpty().any { it.employeeId == employeeId } }
+
+/**
+ * 入驻时这条席位该用的名字（本群 `@` token）：档案 token；库里脏了（非归一形态）回落
+ * `kind-职责`。
+ *
+ * 与 [defaultEmployeeToken] 的回落、`AttachEmployee` 的 token 校验是同一条口径：
+ * 席位名必须是**能直接打出来**的 ASCII 短名，脏 token 会产出「@ 了却叫不醒」的席位。
+ * 同名冲突不在这里解决 —— 那是调用方的 token 池（`AgentMemberName.unique`）。
+ */
+public fun EmployeeProfile.seatToken(agentKind: String?, duty: String?): String {
+    val raw = token.trim()
+    if (raw.isNotEmpty() && raw == AgentMemberName.slug(raw)) return raw
+    return AgentMemberName.base(agentKind, agentId, AgentDuties.normalize(duty ?: this.duty))
 }
 
 /**

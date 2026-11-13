@@ -452,7 +452,11 @@ private fun hubHostOnlineStates(
     }
     settingsSlice.settings.groups.forEach { group ->
         group.virtualAgents.orEmpty().forEach { seat ->
-            onlineByHost.putIfAbsent(seat.hostNodeId, seat.hostNodeId == selfNodeId)
+            // `putIfAbsent` 是 JVM 的 Map 默认方法，commonMain 里写它会让 iOS 目标编译不过；
+            // 语义等价写法（先到的优先：`agentPeers` 给的在线态不被席位声明覆盖）。
+            if (seat.hostNodeId !in onlineByHost) {
+                onlineByHost[seat.hostNodeId] = seat.hostNodeId == selfNodeId
+            }
         }
     }
     return onlineByHost
@@ -692,7 +696,8 @@ private fun assembleEntity(
         val bound = groupBoundToWorkspace(wsId, settingsSlice.settings.groups) ?: return@forEach
         if (entityGroups.any { it.groupId == bound.groupId }) {
             pendingGroupNames += bound.name
-            pendingCountByGroup.merge(bound.groupId, 1, Int::plus)
+            // 同上：`Map.merge` 也是 JVM 专有，commonMain 里用累加写法。
+            pendingCountByGroup[bound.groupId] = (pendingCountByGroup[bound.groupId] ?: 0) + 1
         }
     }
 

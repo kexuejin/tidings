@@ -118,12 +118,12 @@ class TeamExecutionResolver(
         if (dirId.isEmpty()) {
             return null to "group has no project directory bound"
         }
-        val profile = store.profileFor(groupId, dirId, seat.agentId) ?: return null to if (
+        val profile = store.profileFor(dirId, seat.agentId) ?: return null to if (
             seat.teamMembers.isEmpty()
         ) {
             "team has no members declared"
         } else {
-            "team execution is not configured for this seat"
+            "team execution is not configured for this team"
         }
         val declaredIds = seat.teamMembers.map { it.agentId.trim().lowercase() }.toSet()
         val dangling = profile.members.filter { it.agentId.trim().lowercase() !in declaredIds }

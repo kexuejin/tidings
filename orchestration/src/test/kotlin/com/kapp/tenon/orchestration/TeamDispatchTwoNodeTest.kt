@@ -184,7 +184,7 @@ class TeamDispatchTwoNodeTest {
         if (withProfile) {
             val verdict = store.save(
                 TeamExecutionProfile(
-                    groupId = groupId, dirId = "ws-1", leaderAgentId = "dsh-lead",
+                    dirId = "ws-1", leaderAgentId = "dsh-lead",
                     updatedAt = 0,
                     members = listOf(
                         TeamExecutionMemberSpec("m-coder", TeamExecutionKinds.WORKER, "codex"),

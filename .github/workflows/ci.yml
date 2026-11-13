@@ -124,6 +124,7 @@ jobs:
             :constructionTraceGate \
             :staleCommentRefGate \
             :domainComposeFreeGate \
+            :commonJvmApiGate \
             :envDependentTestGate \
             :designSpecDrift \
             :designTokenUsageGate \

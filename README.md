@@ -149,6 +149,12 @@ open Tenon.xcodeproj
 
 本项目实施严格的代码质量工程标准。提交前须确保以下全量流水线通过（口径与 [AGENTS.md](AGENTS.md) §1 完全一致）：
 
+> **依赖前置：luciola 当前钉的是 `0.11.0-local.1`（未上 Maven Central）。** 本机要先在 luciola 仓库跑
+> `scripts/publish-maven-local.sh`，再给所有 gradle 命令加 `LUCIOLA_LOCAL=1`（`settings.gradle.kts`
+> 里那面开关把 `mavenLocal()` 提到最前）；不带它会在依赖解析阶段直接失败。原生库与 bindings 必须同版，
+> `:desktopApp:verifyLuciolaNative` 会逐项比对 UniFFI checksum（不一致 = 装完启动即崩，不许跳）。
+> 换成一版公开发布的 luciola 时，把这里与这条说明一起改掉。
+
 ```bash
 # 测试（九个任务 / 八个模块，验收时加 --max-workers=1 避免并行竞争）
 ./gradlew :core:jvmTest :app:jvmTest :cli:test :agent-contract:test :orchestration:test \
@@ -157,7 +163,7 @@ open Tenon.xcodeproj
 
 # 质量门禁（缺一不可）
 ./gradlew :cjkLiteralGate :constructionTraceGate :staleCommentRefGate \
-          :domainComposeFreeGate :envDependentTestGate :designSpecDrift \
+          :domainComposeFreeGate :commonJvmApiGate :envDependentTestGate :designSpecDrift \
           :designTokenUsageGate :designStateSlotGate :designLocaleParityGate \
           :jlinkModulesGate --continue
 python3 tools/unused-imports.py --check

@@ -29,13 +29,47 @@ pluginManagement {
 val mirrorFirst =
     (providers.gradleProperty("relayMirror").orNull ?: System.getenv("RELAY_MAVEN_MIRROR")) == "aliyun"
 
+/**
+ * `libs.versions.toml` 里钉的 luciola 版本。
+ *
+ * 直接读文件而不是走 `VersionCatalogsExtension`：这里只在**设置阶段**用一次，
+ * 用不上版本目录的解析语义；`the<VersionCatalogsExtension>()` 在某些初始化顺序下
+ * （IDE 同步、只跑 `:help`）拿不到，那时连这条提示都发不出来。
+ */
+val pinnedLuciolaVersion: String? = file("gradle/libs.versions.toml")
+    .takeIf { it.isFile }
+    ?.readLines()
+    ?.firstOrNull { it.trimStart().startsWith("luciola") && it.trimStart().contains("=") && !it.trimStart().startsWith("luciola-") }
+    ?.substringAfter('=', "")
+    ?.substringAfter('"', "")
+    ?.substringBefore('"')
+    ?.trim()
+
+val luciolaLocalOptIn = System.getenv("LUCIOLA_LOCAL") == "1"
+
+// 钉到 `-local` 版本却没开 mavenLocal 时，Gradle 的报错只有
+// `Could not resolve io.github.kexuejin:luciola-jvm:<ver>`，看着像坐标写错了。
+// 在设置阶段就说清楚怎么办 —— 这是**唯一**一个可以提前发现的「环境没配好」，
+// 不是可以靠改代码绕过去的错误（绕过去的下场：原生库与 bindings 不同版 ⇒ 装完启动即崩）。
+if (pinnedLuciolaVersion != null && pinnedLuciolaVersion.contains("-local") && !luciolaLocalOptIn) {
+    throw GradleException(
+        "luciola 钉的是本地版本 $pinnedLuciolaVersion（未发布到 Maven Central），本次构建没开 mavenLocal。\n" +
+            "  修法（二选一）：\n" +
+            "    1) 在 luciola 仓库跑 `scripts/publish-maven-local.sh`，然后给命令加 `LUCIOLA_LOCAL=1`" +
+            "（例如 `LUCIOLA_LOCAL=1 ./gradlew :core:jvmTest`）；\n" +
+            "    2) 把 gradle/libs.versions.toml 的 luciola 换成已发布版本（Maven Central 上的正式版）并" +
+            "同步桌面原生库（`:desktopApp:verifyLuciolaNative` 会校验）。\n" +
+            "  口径说明见 AGENTS.md §1 / README「质量门禁与验证」。",
+    )
+}
+
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
         // luciola 本地验证：luciola 仓库 scripts/publish-maven-local.sh 之后，
         // 设 LUCIOLA_LOCAL=1 让本仓优先解析 ~/.m2 里的 luciola-android/jvm
         //（含未发布的 Rust 修复）。默认关闭 —— 不污染正常构建。
-        if (System.getenv("LUCIOLA_LOCAL") == "1") {
+        if (luciolaLocalOptIn) {
             mavenLocal()
         }
         if (mirrorFirst) {

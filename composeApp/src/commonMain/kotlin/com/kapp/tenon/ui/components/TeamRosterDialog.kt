@@ -143,7 +143,7 @@ fun TeamRosterDialog(
      * 非宿主看到的是只读投影）。
      */
     selfNodeId: String? = null,
-    /** 群 id：执行档主键 `(groupId, dirId, leaderAgentId)` 之一（§3.2）。 */
+    /** 群 id：**用来解析项目目录指针**（执行档主键是 `(目录, 领队)`，群只决定目录）。 */
     groupId: String? = null,
     /**
      * 团队执行档端口（§6.3）：null = 该壳没有执行面（手机等非宿主）⇒ 执行配置段
@@ -180,8 +180,8 @@ fun TeamRosterDialog(
     var issues by remember(selectedSeat) { mutableStateOf<List<TeamRosterIssue>>(emptyList()) }
     // **执行配置段**（§7.1）：仅席位宿主 + 端口在位。初值 = 既有执行档沿同 agentId
     // 对齐（编辑保全：改名/改角色不重算执行配置）；保存时按 agentId 映射回去。
-    // 读档键按 D16 = `(groupId, dirId, leaderAgentId)` —— dirId 来自群指针，
-    // 不再拿席位 wsId 顶数（那是旧键的残留）。
+    // 读档键按 D16 = `(dirId, leaderAgentId)` —— dirId 来自群指针，不含群：
+    // 同一支队在这个群配过，另一个群里 `@团队` 读到的就是同一份档。
     val executionEditable = executionPort != null &&
         selectedSeat != null && selectedSeat.hostNodeId == selfNodeId
     var execMembers by remember(selectedSeat) {
@@ -194,7 +194,7 @@ fun TeamRosterDialog(
                 val existing = if (pointerDirId == null) {
                     null
                 } else {
-                    executionPort.profileOf(groupId, pointerDirId, seat.agentId)
+                    executionPort.profileOf(pointerDirId, seat.agentId)
                 }
                 seat.teamMembers.mapIndexed { index, member ->
                     val prior = existing?.members?.firstOrNull {
@@ -462,7 +462,6 @@ fun TeamRosterDialog(
                                 pointerDirId != null
                             ) {
                                 val execProfile = TeamExecutionProfileUi(
-                                    groupId = groupId,
                                     dirId = pointerDirId,
                                     leaderAgentId = seat.agentId,
                                     members = execMembers,
@@ -856,9 +855,10 @@ internal fun selectedSeatOf(
 private fun List<TeamMemberDraft>.updateAt(index: Int, transform: (TeamMemberDraft) -> TeamMemberDraft): List<TeamMemberDraft> =
     mapIndexed { i, d -> if (i == index) transform(d) else d }
 
-// 与上面的 updateAt 在 JVM 层同签名（(List, int, Function1) -> List）—— 平台声明冲突。
-// @JvmName 只改 JVM 方法名，Kotlin 调用点不动。
-@JvmName("updateExecMemberAt")
+// 与上面的 updateAt 是两份同形（`(List, int, Function1) -> List`）的扩展函数，
+// 但 Kotlin 名不同 ⇒ JVM 方法名不同，不需要 `@JvmName` 消歧。
+// **别再加 `@JvmName`**：它住在 `kotlin.jvm`，commonMain 里写会让 iOS 目标编译不过
+// （`Unresolved reference 'JvmName'`）—— 这一行就是那么挂掉的。
 private fun List<TeamExecutionMemberUi>.updateExecAt(index: Int, transform: (TeamExecutionMemberUi) -> TeamExecutionMemberUi): List<TeamExecutionMemberUi> =
     mapIndexed { i, d -> if (i == index) transform(d) else d }
 

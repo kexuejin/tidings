@@ -45,7 +45,7 @@ class DispatchPreflightTest {
     }
 
     @Test
-    fun `unknown authorization is honest, not a fake green`() {
+    fun `unknown authorization is honest -- not a fake green`() {
         val answers = DispatchPreflight.evaluate(
             hostOnline = true, agentPresent = true, directoryResolved = true, authorized = null,
         )

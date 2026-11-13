@@ -158,9 +158,58 @@ sealed interface GroupDeclarationCommand {
 **席位层**：`AttachEmployee` / `DetachEmployee`，仍然走 `applyDeclaration` —— 每群各自 rev+1、
 各自广播、各自一行审计，与人工入驻同一套。
 
-判据（`EmployeeProfileWritePathTest`，14 条 + 守卫 3 条）：先建档一个群都不进也成立；
+**入驻（`JoinSeat`）也带上档案**（后补的一处）：`planJoinSeat` 按
+`employeeProfiles.byAgentIdentity(agentId)` 取本机档案，命中就写 `employeeId` + `employeeName`
+快照，新席位的名字用档案 token（撞名走本群别名），已有席位保留它现在的名字。
+
+补这条的理由是「群信息 → 邀请智能体入驻」是**唯一**能把已有员工加进第二个群的入口
+（员工详情页只有名字 / 职责 / 谁可调用）。这条路原先不带引用，于是宿主按 `agentId` 读档案
+立刻显示员工名、手机只有席位 token ⇒ 两端两个名字；更贵的是 `Update` 按 `employeeId`
+找引用群，这条席位不在其中，**改名永远到不了这个群**且没有报错。判据：
+`joiningAGroupAdoptsTheExistingProfile` / `joiningWithATakenTokenGetsALocalAliasNotADerivedName` /
+`reJoiningKeepsTheSeatNameTheGroupAlreadyUses` / `aDirtyProfileTokenFallsBackToTheDerivedSeatName`。
+
+边界（如实留下）：本次修复之前建的、引用缺失的老席位不会被改名波及 ——
+它们在下一次入驻（含建群流程末尾的那次）时补上引用。不做批量迁移，因为「哪些席位是谁」
+只能按 `agentId` 推断，而那是猜测。
+
+判据（`EmployeeProfileWritePathTest`，24 条 + 守卫 3 条）：先建档一个群都不进也成立；
 一份档案多群复用；改名一次生效而 **token 不漂**；显式改 token 才重写席位名；
-撞名走本群别名而不是拒绝；删档案只摘引用、席位与名字都留；同一 agent 第二份档案被拒。
+撞名走本群别名而不是拒绝；删档案只摘引用、席位与名字都留；同一 agent 第二份档案被拒；
+**入驻当场挂上引用与快照**；**档案里的短 id 也认得出实例 id 席位**（见下）。
+
+**短 id ≠ 实例 id**（后补的一处，与入驻那条同源）：登记时的 `agentId` 取自卡片聚类的代表键
+（可能来自会话自报的短 `dsh`），席位在入驻时写的是 agent 自报的完整实例 id
+（`dsh-029bbbf3`）。席位写路径的 `localSeat` 是精确比，所以「按档案里的字符串去定位席位」
+会 `SEAT_MISSING`：改名到不了那些群、注销摘不掉那些引用，横幅却仍是绿的。
+现在 `seatAgentIdFor` 两段查找（先认 `employeeId` 引用、再认 `sameAgent` 身份），
+`AttachEmployee` / `DetachEmployee` 都按**席位的**身份键下发。判据：
+`aShortIdProfileAttachesToOneExistingInstanceIdSeat` / `renamingReachesASeatThatUsesTheLongInstanceId` /
+`forgettingDetachesASeatThatUsesTheLongInstanceId`。
+
+### 3.5 员工档案管理：第三档（登记簿）
+
+**为什么需要一个新的面**：名录（`hubAgents`）是「谁在跑」，装一张卡要有一份运行时事实；
+档案是「谁登记过」—— `Create` 允许一个群都不进，席位全撤、agent 下线之后档案也还在。
+于是那种档案在名录里**没有任何位置**，而 `Forget` 此前**没有任何界面入口**：
+库里删得掉、界面上找不到。与其给每个入口各加一个删除键，不如给登记簿一个落点。
+
+**投影**：`employeeProfileLedger(settingsSlice)` → `AgentEmployeeProfileUi`
+（`employeeId` / `agentId` / `name` / `token` / `duty` / `groupNames`）。
+「在几个群里」走 `groupsReferencingEmployee` —— 与注销时真的会去摘引用的那几个群**同一份判据**。
+空名回落身份键（坏数据不许画成一行空白），排序按名字钉稳定序（档案没有「最近使用」可排）。
+
+**界面**：智能体页第三档「档案」（`AgentProfileSection`）。行 = 首字头像 + 员工名 +
+`@token · 职责 · N 个群`；整行点击 = 编辑（同一个 `EmployeeEditDialog`），行尾垃圾桶 = 注销
+（`EmployeeForgetDialog` 二次确认，正文说清「删的是档案、席位不撤」）。
+这一档**只在有档案时出现**（与手机端「读不到 ⇒ 不画」同一条纪律的两半：
+手机 `employeeProfiles` 恒空 ⇒ 连切换器都没有）。
+
+**判据**：`EmployeeProfileLedgerTest` 5 条（无群仍在册 / 计数与写路径同一判据 / 名字序 /
+空名兜底 / 没有档案就没有登记簿）+ `EmployeeProfileWiringGuardTest` 2 条
+（桌面壳必须接 `controller.forgetEmployeeProfile(`；手机壳不许出现 `onForgetEmployee`）。
+横幅两条：`EmployeeProfileForgotten(name)` 摘干净走 info，带 `failedGroupCount` 走 warn 并报数
+——「半成功说成全绿」正是这一档最容易犯的错。
 
 ## 4. 三个入口（同一命令，不同面）
 
@@ -185,6 +234,30 @@ sealed interface GroupDeclarationCommand {
 入口只在**桌面壳**画（`DesktopPaneActions.saveEmployeeProfile`）：档案只住宿主机，
 手机读不到也写不了；手机端详情页 `onEditEmployee == null` ⇒ 不画这颗按钮。
 没有身份键（`agentKey == null`）时也不画 —— 点了只会失败。
+
+**A2. 档案视图（已落地，桌面壳）：登记簿的管理面**
+
+智能体页第三档「档案」= `employeeProfileLedger` 的行，整行点击 = 同一个
+`EmployeeEditDialog`，行尾垃圾桶 = `Forget`（`forgetEmployeeProfileEntry`）。
+两条纪律与团队档案一致：手机端读不到 `employeeProfiles` ⇒ 连这一档都不出现；
+桌面壳是**唯一**写入口（`EmployeeProfileWiringGuardTest` 钉两端）。
+细节见 §3.5。
+
+**A3. 「新建档案」（已落地，桌面壳）：不必先有一张卡**
+
+此前**建档**（`Create`）只挂在员工详情页上，而详情页要先点一张卡才进得去 ——
+「一个档案都没有」或「这个 agent 还没进任何群」时，第一份档案其实建不出来。
+现在档案段顶部有「新建档案」：先选人（`employeeProfileCandidates`：本机、还没有档案、
+有身份键的卡片行），再填同一个表单（名字 / 职责 / 谁能调用）。
+
+三个判据：
+
+- **候选表 = 写路径认的那批人**：只留本机（`hostNodeId == selfNodeId`）且 `employeeId == null`；
+  收进别人的 agent 会被 `Create` 以 `EMPLOYEE_UNKNOWN` 拒掉，收进已建档的会撞 `EMPLOYEE_EXISTS`。
+- **不预填名字**：候选的显示名是席位 token / 身份键，原样存下去等于没起名；表单顶部只写
+  「登记对象：<身份键>」，让用户确认点的是哪个进程。
+- **这一档不再取决于「有没有档案」**：`hasProfileView = 有档案 || 能建档`（手机两样都没有，
+  照旧不出现）。写死 `isNotEmpty()` 的话，空表时那颗新建按钮自己所在的这一档就消失了。
 
 **B. 团队视图 → 「新建团队」（已落地，桌面壳）**
 
@@ -284,8 +357,11 @@ sealed interface GroupDeclarationCommand {
 > - **员工级执行档不做**：现在没有消费方（执行档是团队粒度、按群存），加了就是死字段。
 > - **手机端只读**：档案只住宿主机；手机端 `onEditEmployee == null` ⇒ 详情页不画入口。
 > - `aliasedGroupIds`（哪些群用了本群别名）已在返回值里，但界面还没提示 —— 下一步。
-> - 团队执行档仍按 `(groupId, dirId, leaderAgentId)` 存：团队跨群复用后，同一支队进三个群
->   要配三份执行档。这是 B 档留下的尾巴，独立于本轮，未修。
+> - ~~团队执行档仍按 `(groupId, dirId, leaderAgentId)` 存：团队跨群复用后，同一支队进三个群
+>   要配三份执行档。~~ **已修**：主键改为 `(dirId, leaderAgentId)`（键里不再有群），
+>   一支队进几个群共用一份；v2 文件读时折叠（同键保留 `updatedAt` 最新那条），下次保存落成 v3。
+>   解散团队时同步删掉该队各群目录下的执行档（否则同群同领队重建会静默继承上一次的底座）。
+>   见 `TeamExecutionStore` 与 `TeamExecutionPort.forget`。
 
 **P2b · 团队档案（B 档，已落地）**
 

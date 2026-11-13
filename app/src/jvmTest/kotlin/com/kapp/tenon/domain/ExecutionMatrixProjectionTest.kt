@@ -49,11 +49,11 @@ class ExecutionMatrixProjectionTest {
     private class FakePort(
         val catalog: Set<String>,
         val pointers: Map<String, String>,
-        val saved: Map<Triple<String, String, String>, TeamExecutionProfileUi> = emptyMap(),
+        val saved: Map<Pair<String, String>, TeamExecutionProfileUi> = emptyMap(),
     ) : TeamExecutionPort {
         override fun driverCatalog(): Set<String> = catalog
-        override fun profileOf(groupId: String, dirId: String, leaderAgentId: String) =
-            saved[Triple(groupId, dirId, leaderAgentId)]
+        override fun profileOf(dirId: String, leaderAgentId: String) =
+            saved[dirId to leaderAgentId]
         override fun validate(profile: TeamExecutionProfileUi, declaredMemberIds: Set<String>) = emptyList<String>()
         override fun save(profile: TeamExecutionProfileUi, declaredMemberIds: Set<String>) =
             TeamExecutionSaveResult.Saved
@@ -64,7 +64,7 @@ class ExecutionMatrixProjectionTest {
         groups: List<GroupMeta>,
         catalog: Set<String> = setOf("claude", "dsh"),
         pointers: Map<String, String> = groups.associate { it.groupId to ("dir-" + it.groupId) },
-        saved: Map<Triple<String, String, String>, TeamExecutionProfileUi> = emptyMap(),
+        saved: Map<Pair<String, String>, TeamExecutionProfileUi> = emptyMap(),
     ) = executionMatrixRows(groups, self, FakePort(catalog, pointers, saved))
 
     @Test
@@ -114,8 +114,8 @@ class ExecutionMatrixProjectionTest {
     fun unknownDriverIsNotInstalled() {
         val group = group("g1", "群", listOf(seat("dsh-a", "独狼")))
         val saved = mapOf(
-            Triple("g1", "dir-g1", "dsh-a") to TeamExecutionProfileUi(
-                groupId = "g1", dirId = "dir-g1", leaderAgentId = "dsh-a",
+            ("dir-g1" to "dsh-a") to TeamExecutionProfileUi(
+                dirId = "dir-g1", leaderAgentId = "dsh-a",
                 members = listOf(TeamExecutionMemberUi(agentId = "dsh-a", kind = TeamExecutionKindsUi.WORKER, driverKey = "codex")),
             ),
         )
@@ -131,8 +131,8 @@ class ExecutionMatrixProjectionTest {
         assertFalse(baseline.single().overridden, "没落过盘的行是推导值，必须标成「继承」")
 
         val saved = mapOf(
-            Triple("g1", "dir-g1", "dsh-a") to TeamExecutionProfileUi(
-                groupId = "g1", dirId = "dir-g1", leaderAgentId = "dsh-a",
+            ("dir-g1" to "dsh-a") to TeamExecutionProfileUi(
+                dirId = "dir-g1", leaderAgentId = "dsh-a",
                 members = listOf(
                     TeamExecutionMemberUi(
                         agentId = "dsh-a",

@@ -44,6 +44,11 @@ apply(from = "tools/construction-trace-gate.gradle.kts")
 // 「守卫红了」是错觉。见 tools/domain-compose-free-gate.gradle.kts 的说明。
 apply(from = "tools/domain-compose-free-gate.gradle.kts")
 
+// common 源集的 JVM 专有 API：`putIfAbsent` / `@JvmName` / `synchronized` 这类只在 JVM 上
+// 存在，Android 与桌面照常绿、只有 iOS 目标编不过 —— 而 iOS 不在收工清单里，所以会静默躺着。
+// 见 tools/common-jvm-api-gate.gradle.kts（与同目录 common-jvm-api-guard.py）。
+apply(from = "tools/common-jvm-api-gate.gradle.kts")
+
 // 测试结论不许依赖机器状态（网卡/时钟/固定 sleep 同步）。实现见
 // tools/env-dependent-test-gate.gradle.kts 与同目录的 env-test-scan.py。
 apply(from = "tools/env-dependent-test-gate.gradle.kts")

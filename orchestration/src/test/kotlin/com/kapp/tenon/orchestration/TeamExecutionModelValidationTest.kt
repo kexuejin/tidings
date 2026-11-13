@@ -32,7 +32,7 @@ class TeamExecutionModelValidationTest {
     ) = TeamExecutionMemberSpec(agentId, kind, driverKey, models)
 
     private fun profile(members: List<TeamExecutionMemberSpec>) = TeamExecutionProfile(
-        groupId = "g1", dirId = "ws-1", leaderAgentId = "dsh-lead",
+        dirId = "ws-1", leaderAgentId = "dsh-lead",
         updatedAt = 0, members = members,
     )
 

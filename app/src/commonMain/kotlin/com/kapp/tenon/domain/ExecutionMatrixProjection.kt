@@ -70,12 +70,12 @@ public fun executionMatrixRows(
         val editable = dirId != null
         for (seat in group.virtualAgents.orEmpty()) {
             if (seat.hostNodeId != selfNodeId) continue
-            val saved = dirId?.let { port.profileOf(group.groupId, it, seat.agentId) }
+            val saved = dirId?.let { port.profileOf(it, seat.agentId) }
             // 群还没有目录指针时**照样出行**：执行档键的一半缺失只说明「没法改」，
             // 不说明「这个席位不存在」。早退会让整支团队从矩阵里消失，用户以为它没了。
             val profile = saved
                 ?: dirId?.let { initialExecutionProfileUi(port, group, seat) }
-                ?: declaredProfileUi(group, seat)
+                ?: declaredProfileUi(seat)
             val nameByAgent: (String) -> String? = { id ->
                 if (id == seat.agentId) seat.name else seat.teamMembers.firstOrNull { it.agentId == id }?.name
             }
@@ -127,9 +127,8 @@ public fun executionMatrixByGroup(
  *
  * 此时 `driverKey` 恒空 —— 没有落盘的配置就没有生效的底座，写个默认值才是编数据。
  */
-private fun declaredProfileUi(group: GroupMeta, seat: VirtualAgentMember): TeamExecutionProfileUi =
+private fun declaredProfileUi(seat: VirtualAgentMember): TeamExecutionProfileUi =
     TeamExecutionProfileUi(
-        groupId = group.groupId,
         dirId = "",
         leaderAgentId = seat.agentId,
         members = if (seat.teamMembers.isEmpty()) {

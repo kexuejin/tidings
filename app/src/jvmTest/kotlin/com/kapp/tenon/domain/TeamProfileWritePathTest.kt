@@ -443,4 +443,89 @@ class TeamProfileWritePathTest {
         assertEquals(BannerTone.Warn, banner.tone)
         assertEquals(BannerMessage.TeamProfileRejected, banner.message)
     }
+
+    /**
+     * 界面解散（`dissolveTeamProfileEntry`）：档案删掉、各群席位回单兵、横幅报出群数。
+     *
+     * 这条命令（`Dissolve`）一直都在，缺的是界面：没有这条入口时，一支队伍建起来就
+     * **删不掉** —— 席位撤光后它从智能体页的名录里消失（名录按席位装配），档案却还
+     * 留在设置里。两个入口现在都通了：详情页的垃圾桶，以及名录「未入驻」那一段的
+     * 垃圾桶（席位已撤光、进不了详情页时走后者）。
+     */
+    @Test
+    fun dissolvingFromTheUiDeletesTheProfileAndReportsTheGroupsItReleased() {
+        val controller = controller().also { seed(it) }
+        controller.saveTeamProfileEntry(null, "开发团队", "dsh", roster, listOf("g1"))
+        val teamId = controller.state.value.settings.teamProfiles.single().teamId
+        controller.attachTeamToGroupEntry(teamId, "g2")
+
+        controller.dissolveTeamProfileEntry(teamId)
+
+        assertTrue(
+            controller.state.value.settings.teamProfiles.isEmpty(),
+            "解散要真的删掉档案 —— 留着就是一支删不掉的幽灵队伍",
+        )
+        for (groupId in listOf("g1", "g2")) {
+            val seat = assertNotNull(seatOf(controller, groupId), "解散不删席位：领队还在群里")
+            assertNull(seat.teamId, "$groupId 的席位不许再指着已删的档案")
+            assertEquals(EntityTypes.SINGLE, seat.entityType)
+        }
+        val banner = assertNotNull(controller.state.value.banner)
+        assertEquals(BannerTone.Info, banner.tone, "摘干净了就走信息位")
+        assertEquals(BannerMessage.TeamProfileDissolved("开发团队", 2), banner.message)
+    }
+
+    /** 解散一个不存在的团队：警告位、且什么都不写（不造幽灵档案、不动任何席位）。 */
+    @Test
+    fun dissolvingAnUnknownTeamIsReportedAsAWarning() {
+        val controller = controller().also { seed(it) }
+
+        controller.dissolveTeamProfileEntry("tm-nope")
+
+        val banner = assertNotNull(controller.state.value.banner)
+        assertEquals(BannerTone.Warn, banner.tone)
+        assertEquals(BannerMessage.TeamProfileRejected, banner.message)
+    }
+    /**
+     * 解散一支**没有任何群席位**的档案（名录「未入驻任何群」那一段的落点）。
+     *
+     * 这是上面那条剩下的死角：席位撤光之后队伍从名录消失，档案却还在，群信息的
+     * 「添加团队」照样列着它 —— 能看见、删不掉。用例走的是用户真实路径：先在 g1 把它
+     * 「移除」（`DetachTeam`，席位回单兵，**不是**解散），再从「未入驻」里解散它。
+     */
+    @Test
+    fun dissolvingAnOrphanTeamThatLeftEveryGroupDeletesTheProfile() {
+        val controller = controller().also { seed(it) }
+        controller.saveTeamProfileEntry(null, "开发团队", "dsh", roster, listOf("g1"))
+        val teamId = controller.state.value.settings.teamProfiles.single().teamId
+
+        // 群信息里「移除」：席位回单兵，档案必须还在（这一步不是解散）。
+        val detached = controller.applyDeclaration(
+            GroupDeclarationCommand.DetachTeam(
+                groupId = "g1",
+                agentId = "dsh",
+                actor = DeclarationActor.Human(self),
+                origin = DeclarationOrigin.GROUP_INFO,
+            ),
+        )
+        assertTrue(detached is DeclarationResult.Applied, "摘席位本身要成功，否则这条用例测的是别的事")
+        assertEquals(1, controller.state.value.settings.teamProfiles.size, "摘席位不是删档案")
+
+        // 名录侧此刻看到它成了孤儿 —— 这一段就是本次补的落点。
+        assertEquals(
+            listOf(teamId),
+            orphanTeams(controller.state.value.toSettingsSlice()).map { it.teamId },
+        )
+
+        controller.dissolveTeamProfileEntry(teamId)
+
+        assertTrue(
+            controller.state.value.settings.teamProfiles.isEmpty(),
+            "没有任何群席位的档案也要能删掉，否则它永远出现在「添加团队」列表里",
+        )
+        val banner = assertNotNull(controller.state.value.banner)
+        assertEquals(BannerTone.Info, banner.tone)
+        // 0 个群：走 `team_profile_dissolved_bare`，文案里不许出现「0 个群」。
+        assertEquals(BannerMessage.TeamProfileDissolved("开发团队", 0), banner.message)
+    }
 }
