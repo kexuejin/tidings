@@ -306,6 +306,14 @@ fun memberOnlineCount(group: GroupMeta?, node: NodeSlice, settingsSlice: Setting
 /** 单聊的「对端」：没有真实记录时也回一个占位（切片版，与 [RelayUiState.chatPeer] 同义）。 */
 fun chatPeer(chat: ChatSlice, node: NodeSlice, settingsSlice: SettingsSlice, nodeId: String?): PeerUi? =
     peer(nodeId, node, settingsSlice)
+        // 私人助理伪 peer：不是真节点（无网络语义），但 ChatScreen 的整条渲染链
+        // （头部/输入栏/信息弹窗）需要非空 peer —— 真机验收实测：助理线程为空时
+        // 这里返回 null，点行只看到「选一个会话」空态。nick 给 "assistant" 是
+        // 刻意的：ChatHeader 的助理标题分支按 `rawPeerTitle == ConvId.ASSISTANT`
+        // 接管，换成本地化的「私人助理」。
+        ?: nodeId?.takeIf { it == ConvId.ASSISTANT }?.let {
+            PeerUi(nodeId = it, nick = ConvId.ASSISTANT, caps = listOf(MsgTypes.CAP_AGENT), online = true)
+        }
         ?: nodeId?.takeIf { chat.messages[it].orEmpty().isNotEmpty() }
             ?.let { PeerUi(nodeId = it, nick = "") }
 

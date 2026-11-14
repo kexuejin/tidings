@@ -165,7 +165,10 @@ internal fun ChatHeader(
         null
     }
     val rawPeerTitle = resolvedPeer?.displayName?.takeIf { it.isNotBlank() } ?: peer.displayName
-    val peerTitle = if (ConvId.isAssistant(peer.nodeId) && (rawPeerTitle == ConvId.ASSISTANT || rawPeerTitle.isBlank())) {
+    // 助理会话的标题不走身份解析：伪 peer 没有8位节点名可言（真机实测 displayName
+    // 回退成 "assistan"），一律本地化「私人助理」。机主自定义名的头部显示待
+    // ChatHeader 参数化 settings 后再接（conv info 已可改）。
+    val peerTitle = if (ConvId.isAssistant(peer.nodeId)) {
         stringResource(Res.string.assistant_default_title)
     } else {
         rawPeerTitle
