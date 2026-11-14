@@ -45,6 +45,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import com.kapp.tenon.ui.components.KindBadge
+import com.kapp.tenon.ui.components.AssistantBadge
+import com.kapp.tenon.generated.resources.assistant_default_title
+import com.kapp.tenon.generated.resources.conv_active_quests_badge
 import com.kapp.tenon.ui.components.PeerAvatar
 import com.kapp.tenon.ui.components.StatusDot
 import com.kapp.tenon.ui.components.badgeCountText
@@ -286,6 +289,21 @@ private fun PinnedTag() {
     }
 }
 
+/** 支线任务进行中指示胶囊。 */
+@Composable
+private fun ActiveQuestCountTag(count: Int) {
+    val sp = LocalAppSpacing.current
+    Surface(color = SurfaceTiers.Raised, shape = CircleShape) {
+        Text(
+            text = stringResource(Res.string.conv_active_quests_badge, count),
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.padding(horizontal = sp.sm6, vertical = sp.xxs),
+        )
+    }
+}
+
 @Composable
 internal fun ConversationRow(
     row: ConversationUi,
@@ -495,9 +513,15 @@ internal fun ConversationRow(
         // 圆角的图标块）。此前注释说"会话行是原型里唯一用方形头像的地方"——那是
         // 桌面侧栏 `.li` 的形状（12px 圆角方块）；同一份原型里手机屏的会话行从来
         // 都是正圆。合并行时把桌面形状带给了手机，与"头像偏小"是同一次反馈的两面。
+        val rowTitle = if (row.isAssistant && row.title.isBlank()) {
+            stringResource(Res.string.assistant_default_title)
+        } else {
+            row.title
+        }
+
         Box {
             PeerAvatar(
-                name = row.title,
+                name = rowTitle,
                 isAgent = row.isAgent,
                 size = avatarSize,
                 isGroup = row.isGroup,
@@ -532,7 +556,7 @@ internal fun ConversationRow(
                 horizontalArrangement = Arrangement.spacedBy(sp.oxs5),
             ) {
                 Text(
-                    text = row.title,
+                    text = rowTitle,
                     // 原型 `.li .t1{font-size:14px;font-weight:600}`；密集档 `.winset .li .t1` 降 12px
                     // ⇒ [RelayTypography.labelMedium]（字阶里 12sp 的那一档，lineHeight 16）。
                     // 合并前手机用 bodyLarge(16sp)/Medium(500)、桌面用 bodyMedium(14sp)/Medium，
@@ -549,8 +573,13 @@ internal fun ConversationRow(
                 // （`prototype/relay.html` 的 `${c.isAgent?'<span class="tag agent">Agent</span>':''}`）。
                 // 以前无条件调用，`isAgent=false` 就落到"同事"分支 —— 于是群会话被标成「同事」，
                 // 而群既不是 Agent 也不是一个人。与团队折叠同屏时更会被读成"这个团队是同事"。
-                if (!row.isGroup) {
+                if (row.isAssistant) {
+                    AssistantBadge()
+                } else if (!row.isGroup) {
                     KindBadge(row.isAgent)
+                }
+                if (row.activeQuestCount > 0) {
+                    ActiveQuestCountTag(row.activeQuestCount)
                 }
                 // 置顶/静音过去只在长按菜单里可见，行上没有任何痕迹 —— 用户钉完一条，
                 // 过两天忘了它为什么一直排在最上面。置顶给一枚行内 tag（位置在标题之后，

@@ -8,6 +8,7 @@ import com.kapp.tenon.domain.model.ChatRowKinds
 
 import com.kapp.tenon.generated.resources.chat_agent_request_grant
 import com.kapp.tenon.generated.resources.chat_abort_no_task
+import com.kapp.tenon.generated.resources.chat_notice_external_chat_disabled
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
@@ -926,6 +927,8 @@ private fun noticeText(
             NoticeKind.RemovedFromGroup -> Res.string.chat_group_removed
             // 发了「停」但本机没在跑：从前完全静默，用户以为停了（真机踩过）。
             NoticeKind.AbortNoRunningTask -> Res.string.chat_abort_no_task
+            // 外部 Agent 发起单聊但未开启接入开关
+            NoticeKind.ExternalChatDisabled -> Res.string.chat_notice_external_chat_disabled
         },
     )
 }

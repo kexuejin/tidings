@@ -461,6 +461,12 @@ const val SETTINGS_PAGE_NOTIFY = "notify"
 const val SETTINGS_PAGE_ACCESS = "access"
 
 /**
+ * 「自动化任务控制台」独立页。
+ */
+const val SETTINGS_PAGE_AUTOMATION = "automation"
+
+
+/**
  * 「宿主授权」（手机设置）：各宿主的免批规则读撤（cap `atr1`）。补发现性 ——
  * 原先唯一入口是「智能体 → 工作区 → 详情」两层深。执行设备与授权清单有意不进
  * 这一页（agent × 宿主键，家在智能体页）；写编制档位有意不做跨端（见

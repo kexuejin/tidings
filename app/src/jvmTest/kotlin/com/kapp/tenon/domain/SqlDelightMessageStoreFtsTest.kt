@@ -8,6 +8,7 @@ import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import com.kapp.tenon.domain.model.MessageUi
 
@@ -168,6 +169,13 @@ class SqlDelightMessageStoreFtsTest {
         // 18.sqm 的 card_payload 同理（升级轮 T-2a，(cardId, rev) 原位刷新的最新载荷）——
         // 漏退这一列的现场：migrate(10→19) 跑 18.sqm 的 ALTER 时 duplicate column name。
         runCatching { driver.execute(null, "ALTER TABLE MessageEntity DROP COLUMN card_payload", 0) }
+        // 22.sqm 的 quest_id / quest_rev / client_token 同理。
+        // 索引必须先删 —— SQLite 不允许删一个被索引引用的列。
+        runCatching { driver.execute(null, "DROP INDEX IF EXISTS index_message_quest_id", 0) }
+        runCatching { driver.execute(null, "DROP INDEX IF EXISTS index_message_client_token", 0) }
+        runCatching { driver.execute(null, "ALTER TABLE MessageEntity DROP COLUMN quest_id", 0) }
+        runCatching { driver.execute(null, "ALTER TABLE MessageEntity DROP COLUMN quest_rev", 0) }
+        runCatching { driver.execute(null, "ALTER TABLE MessageEntity DROP COLUMN client_token", 0) }
         // 14.sqm 的 seq 同理：最新 .sq 建表已含它，退回旧形状时也要退掉。
         // 索引必须先删 —— SQLite 不允许删一个被索引引用的列。
         runCatching { driver.execute(null, "DROP INDEX IF EXISTS message_conv_seq", 0) }
@@ -290,6 +298,47 @@ class SqlDelightMessageStoreFtsTest {
         val entityRows = entityRowIds()
         assertEquals(1, entityRows.size, "实体表应当只剩一条")
         assertEquals(entityRows, ftsRowIds(), "FTS 里必须只剩同一条 —— 行数不等就是 AGENTS.md §2.3 那类孤儿索引")
+    }
+
+    @Test
+    fun updateCardContentRespectsOptimisticLockOnQuestRev() {
+        val msg = MessageUi(
+            id = "msg-card-1",
+            peerId = "assistant",
+            mine = false,
+            text = "Initial card",
+            at = 1_000L,
+            questId = "quest-lock-1",
+            questRev = 1L,
+        )
+        store.save(mapOf("assistant" to listOf(msg)))
+
+        // 尝试用更低或相等的 rev (1L) 更新 -> 应该被拒绝 (乐观锁生效)
+        val rejected = store.updateCardContent(
+            questId = "quest-lock-1",
+            newJsonContent = "{\"state\":\"blocked\"}",
+            status = "blocked",
+            expectedRev = 1L,
+        )
+        assertFalse(rejected)
+
+        // 用更高的 rev (2L) 更新 -> 应该成功
+        val accepted = store.updateCardContent(
+            questId = "quest-lock-1",
+            newJsonContent = "{\"state\":\"review_ready\"}",
+            status = "review_ready",
+            expectedRev = 2L,
+        )
+        assertTrue(accepted)
+
+        // 再次尝试用 2L 更新 -> 应该被拒绝
+        val rejectedAgain = store.updateCardContent(
+            questId = "quest-lock-1",
+            newJsonContent = "{\"state\":\"working\"}",
+            status = "working",
+            expectedRev = 2L,
+        )
+        assertFalse(rejectedAgain)
     }
 
     /** 实体表的 rowid 集合。 */

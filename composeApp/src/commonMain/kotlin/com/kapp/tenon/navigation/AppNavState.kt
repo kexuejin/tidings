@@ -108,6 +108,10 @@ data class AppNavState(
     val detailTeamGroupId: String? = null,
     /** 团队详情页的领队席位键；与 [detailTeamGroupId] 成对。 */
     val detailTeamLeaderAgentId: String? = null,
+    /** 支线作战室 ID。null 为第 0 层主线。 */
+    val activeQuestId: String? = null,
+    /** Subagent 单兵白盒 ID。null 为非第 2 层。 */
+    val activeSubagentId: String? = null,
     /**
      * 聊天页当前收窄在哪个**工作区**（null = 不收窄）。
      *
@@ -247,12 +251,15 @@ data class AppNavState(
         // 点进来的」，而 `openSession` 是「直接跟这个节点聊」—— 留着上一轮的 wsId 会让
         // 这一屏继续按旧工作区过滤，用户看到的会话列表莫名其妙地少。
         val detailLayersClear = detailPeerId == null && detailWorkspaceId == null &&
-            detailAgentSessionId == null && !inAgentEntityDetail && !inAgentTeamDetail
+            detailAgentSessionId == null && !inAgentEntityDetail && !inAgentTeamDetail &&
+            activeQuestId == null && activeSubagentId == null
         return if (activeSessionId == peerId && chatWorkspaceId == null && detailLayersClear) {
             this
         } else {
             copy(
                 activeSessionId = peerId,
+                activeQuestId = null,
+                activeSubagentId = null,
                 chatWorkspaceId = null,
                 detailPeerId = null,
                 detailWorkspaceId = null,
@@ -283,13 +290,40 @@ data class AppNavState(
      */
     fun openWorkspaceChat(peerId: String, wsId: String): AppNavState {
         val detailLayersClear = detailPeerId == null && detailWorkspaceId == null &&
-            detailAgentSessionId == null && !inAgentEntityDetail && !inAgentTeamDetail
+            detailAgentSessionId == null && !inAgentEntityDetail && !inAgentTeamDetail &&
+            activeQuestId == null && activeSubagentId == null
         return if (activeSessionId == peerId && chatWorkspaceId == wsId && detailLayersClear) {
             this
         } else {
             copy(
                 activeSessionId = peerId,
+                activeQuestId = null,
+                activeSubagentId = null,
                 chatWorkspaceId = wsId,
+                detailPeerId = null,
+                detailWorkspaceId = null,
+                detailAgentSessionId = null,
+                detailAgentEntityHost = null,
+                detailAgentEntityKey = null,
+                detailTeamGroupId = null,
+                detailTeamLeaderAgentId = null,
+            )
+        }
+    }
+
+    /**
+     * 进入特定支线作战室或 Subagent 白盒会话。
+     */
+    fun openQuestChat(peerId: String, questId: String, subagentId: String? = null): AppNavState {
+        val detailLayersClear = detailPeerId == null && detailWorkspaceId == null &&
+            detailAgentSessionId == null && !inAgentEntityDetail && !inAgentTeamDetail
+        return if (activeSessionId == peerId && activeQuestId == questId && activeSubagentId == subagentId && detailLayersClear) {
+            this
+        } else {
+            copy(
+                activeSessionId = peerId,
+                activeQuestId = questId,
+                activeSubagentId = subagentId,
                 detailPeerId = null,
                 detailWorkspaceId = null,
                 detailAgentSessionId = null,
@@ -305,7 +339,8 @@ data class AppNavState(
      * 退出聊天详情，回到当前页签。
      */
     fun leaveChatDetail(): AppNavState =
-        if (activeSessionId == null) this else copy(activeSessionId = null)
+        if (activeSessionId == null && activeQuestId == null && activeSubagentId == null) this
+        else copy(activeSessionId = null, activeQuestId = null, activeSubagentId = null)
 
     /**
      * 选中顶级页签。
@@ -380,11 +415,13 @@ data class AppNavState(
         detailAgentEntityKey.orSaverNull(),
         detailTeamGroupId.orSaverNull(),
         detailTeamLeaderAgentId.orSaverNull(),
+        activeQuestId.orSaverNull(),
+        activeSubagentId.orSaverNull(),
     )
 }
 
 /** [AppNavState.toSaverValue] 的项数；恢复时项数对不上就放弃（见 [appNavStateFromSaverValue]）。 */
-internal const val APP_NAV_STATE_SAVER_FIELDS = 12
+internal const val APP_NAV_STATE_SAVER_FIELDS = 14
 
 /**
  * 可空 String 在存档里的 null 哨兵。
@@ -419,6 +456,8 @@ internal fun appNavStateFromSaverValue(saved: List<*>): AppNavState? {
     val detailAgentEntityKey = saved[9] as? String ?: return null
     val detailTeamGroupId = saved[10] as? String ?: return null
     val detailTeamLeaderAgentId = saved[11] as? String ?: return null
+    val activeQuestId = saved[12] as? String ?: return null
+    val activeSubagentId = saved[13] as? String ?: return null
     return AppNavState(
         selectedTabId = selectedTabId,
         activeSessionId = activeSessionId.saverNullToReal(),
@@ -432,6 +471,8 @@ internal fun appNavStateFromSaverValue(saved: List<*>): AppNavState? {
         detailAgentEntityKey = detailAgentEntityKey.saverNullToReal(),
         detailTeamGroupId = detailTeamGroupId.saverNullToReal(),
         detailTeamLeaderAgentId = detailTeamLeaderAgentId.saverNullToReal(),
+        activeQuestId = activeQuestId.saverNullToReal(),
+        activeSubagentId = activeSubagentId.saverNullToReal(),
     )
 }
 

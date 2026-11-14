@@ -14,6 +14,9 @@ import kotlin.test.assertTrue
  * 被分诊成工单 / 说好只读却写了盘」的形式出现：
  * 1. 通道函数体不许引用 WorktreeSandbox / DesktopStageChain / activeTickets——
  *    「没有那条路径」才是零副作用，注释里写了「只读」不算数；
+ *    wsPath 白名单：webhook / 清单 cron 通道硬 null；自动化任务是唯一显式携带
+ *    工作区的通道（DesktopExtension 传 AutomationTask.workspacePath），CliRunRequest
+ *    的默认值必须保持 null —— 「不带就是零 worktree」的结构性防线不许松动；
  * 2. 写工具拦截（allowsTool）必须在通道体里；
  * 3. 触发通道不许调用 CognitiveFlow.classify——分诊对触发任务是「只读」本身，
  *    调它等于让一句 prompt 决定能不能写盘；
@@ -57,16 +60,29 @@ class TriggerChannelWiringGuardTest {
             !executor.contains("activeTickets"),
             "触发任务不许进工单台账（那是 Deliver 流的账本）",
         )
-        // 文件级判定：通道里每一处 wsPath 赋值都必须是 null（非空 wsPath 会让
-        // SandboxedCliDriver 建临时 worktree——哪怕只错一处就是全通道破防）。
+        // 文件级判定：通道里每一处 wsPath 赋值必须是**白名单里的形状之一**
+        //（非空字面量 / 计算值会让 SandboxedCliDriver 建临时 worktree——哪怕只错一处
+        // 就是全通道破防）。白名单只有三个形状：
+        //   ① `wsPath = null`          —— webhook / 清单 cron 通道，硬零 worktree；
+        //   ② `wsPath = request.wsPath`—— cliRunner 把请求字段透传给驱动；
+        //   ③ `wsPath = wsPath`        —— execute() 把自己的参数透传给 CliRunRequest。
+        // 结构性防线仍在：CliRunRequest.wsPath 的默认值必须是 null（下方单独断言），
+        // 即**不显式携带工作区的调用方（webhook 通道）拿到的永远是零 worktree**；
+        // 唯一能带非空值的是自动化任务（DesktopExtension 显式传 AutomationTask.workspacePath）。
         val wsPathAssignments = Regex("wsPath\\s*=\\s*[^,)]+").findAll(executor).toList()
         assertTrue(wsPathAssignments.isNotEmpty(), "触发通道必须显式给出 wsPath（不许依赖默认值隐式建 worktree）")
+        val allowedShapes = setOf("wsPath = null", "wsPath = request.wsPath", "wsPath = wsPath")
         wsPathAssignments.forEach { match ->
+            val normalized = match.value.replace(Regex("\\s+"), " ")
             assertTrue(
-                match.value.replace(Regex("\\s+"), " ").startsWith("wsPath = null"),
-                "通道里的 wsPath 赋值必须为 null，实际：「" + match.value + "」",
+                normalized in allowedShapes,
+                "通道里的 wsPath 赋值必须是白名单形状之一 " + allowedShapes + "，实际：「" + match.value + "」",
             )
         }
+        assertTrue(
+            executor.contains("wsPath: String? = null"),
+            "CliRunRequest.wsPath 的默认值必须是 null —— 不显式携带工作区的调用方（webhook 通道）结构性零 worktree",
+        )
     }
 
     @Test

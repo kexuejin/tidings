@@ -242,6 +242,11 @@ enum class NoticeKind {
      * 用户要做的事完全不同（前者不用管，后者是"我以后发不出话"）。
      */
     RemovedFromGroup,
+
+    /**
+     * 外部 Agent 试图发起 1:1 单聊，但机主未开启「外部单聊接入」开关，消息未交给本机 Agent 执行。
+     */
+    ExternalChatDisabled,
 }
 
 @Serializable
@@ -360,6 +365,12 @@ data class MessageUi(
     val cardPayload: JsonObject? = null,
     /** 插件 → 全群的执行状态（方案 §4.1 四态）：accept / blocked / completed / failed。 */
     val agentState: String? = null,
+    /** 支线任务关联 ID */
+    val questId: String? = null,
+    /** 支线任务乐观锁版本号 */
+    val questRev: Long = 0L,
+    /** 客户端离线便签唯一 Token */
+    val clientToken: String? = null,
 ) {
     /**
      * 渲染用载荷 = 原位刷新的最新（[cardPayload]），从未刷新回退首帧（[card]）。

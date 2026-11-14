@@ -23,11 +23,14 @@ import androidx.compose.ui.unit.Dp
 import com.kapp.tenon.domain.RelayUiState
 import com.kapp.tenon.domain.SenderIdentityContext
 import com.kapp.tenon.domain.resolveNodeIdentity
+import com.kapp.tenon.core.protocol.ConvId
 import com.kapp.tenon.core.protocol.GroupMeta
 import com.kapp.tenon.generated.resources.Res
+import com.kapp.tenon.generated.resources.assistant_default_title
 import com.kapp.tenon.ui.components.AppIconButton
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Info
 import com.kapp.tenon.ui.components.ChatIbtnIconSize
 import com.kapp.tenon.ui.components.ChatIbtnSize
 import com.kapp.tenon.ui.theme.IconSizes
@@ -55,6 +58,7 @@ import com.kapp.tenon.generated.resources.chat_group_online
 import com.kapp.tenon.generated.resources.chat_clear_local_action
 import com.kapp.tenon.generated.resources.chat_close_and_clear_action
 import com.kapp.tenon.generated.resources.chat_more_actions
+import com.kapp.tenon.generated.resources.conv_info_title
 import com.kapp.tenon.generated.resources.ic_close
 import com.kapp.tenon.generated.resources.ic_folder
 import com.kapp.tenon.generated.resources.chat_nudge
@@ -106,6 +110,7 @@ internal fun ChatHeader(
     /** 群里当前在线人数（不含自己）。由调用方算好传进来，头部不碰 [RelayUiState]。 */
     memberOnlineCount: Int = 0,
     onOpenGroupInfo: (() -> Unit)? = null,
+    onOpenConversationInfo: (() -> Unit)? = null,
     onSearchHistory: (() -> Unit)? = null,
     /**
      * 「清空本会话聊天记录」。null = 不画这个入口。
@@ -159,7 +164,12 @@ internal fun ChatHeader(
     } else {
         null
     }
-    val peerTitle = resolvedPeer?.displayName?.takeIf { it.isNotBlank() } ?: peer.displayName
+    val rawPeerTitle = resolvedPeer?.displayName?.takeIf { it.isNotBlank() } ?: peer.displayName
+    val peerTitle = if (ConvId.isAssistant(peer.nodeId) && (rawPeerTitle == ConvId.ASSISTANT || rawPeerTitle.isBlank())) {
+        stringResource(Res.string.assistant_default_title)
+    } else {
+        rawPeerTitle
+    }
     val peerIsAgent = resolvedPeer?.isAgent ?: peer.isAgent
     // 「请求查看屏幕」的确认表单：以前点那颗图标按钮**直接发请求**，原型 d30-reqscreen
     // 在中间有一张确认卡（说明 + 取消 / 发送请求）。改成先开表单、确认后才发。
@@ -306,6 +316,20 @@ internal fun ChatHeader(
                 Icon(
                     painter = painterResource(Res.drawable.ic_groups),
                     contentDescription = stringResource(Res.string.chat_group_info_title),
+                    tint = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.size(size),
+                )
+            }
+        }
+        if (group == null && onOpenConversationInfo != null) {
+            actions += ChatHeaderAction(
+                label = stringResource(Res.string.conv_info_title),
+                onClick = onOpenConversationInfo,
+                overflowOnly = true,
+            ) { size ->
+                Icon(
+                    imageVector = Icons.Default.Info,
+                    contentDescription = stringResource(Res.string.conv_info_title),
                     tint = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.size(size),
                 )

@@ -62,6 +62,7 @@ import com.kapp.tenon.feature.chat.updateDraft
 import com.kapp.tenon.feature.chat.ChatScreenState
 import com.kapp.tenon.feature.chat.DraftsByConvSaver
 import com.kapp.tenon.feature.conversations.createWorkspaceGroupForNewDirectory
+import com.kapp.tenon.feature.automation.AutomationConsoleScreen
 import com.kapp.tenon.feature.conversations.createWorkspaceGroupWithDirectory
 import com.kapp.tenon.feature.conversations.ConversationsScreen
 import com.kapp.tenon.feature.conversations.systemDirectoryPicker
@@ -69,6 +70,7 @@ import com.kapp.tenon.feature.nodes.NodesScreen
 import com.kapp.tenon.feature.scan.ScanScreen
 import com.kapp.tenon.feature.search.GlobalSearchScreen
 import com.kapp.tenon.feature.settings.SETTINGS_PAGE_ACCESS
+import com.kapp.tenon.feature.settings.SETTINGS_PAGE_AUTOMATION
 import com.kapp.tenon.feature.settings.SETTINGS_PAGE_APPEAR
 import com.kapp.tenon.feature.settings.SETTINGS_PAGE_AVATAR
 import com.kapp.tenon.feature.settings.SETTINGS_PAGE_CAPS
@@ -439,6 +441,8 @@ fun RelayApp(
                             unreadOnEntry = chatUnreadOnEntry,
                             cacheDir = controller.cacheDirectory,
                             messageFlow = nav.activeSessionId?.let { id -> remember(id) { controller.messageFlowOf(id) } },
+                            questId = nav.activeQuestId,
+                            subagentId = nav.activeSubagentId,
                         ),
                         actions = ChatScreenActions(
                             onSend = controller::sendToConversation,
@@ -573,6 +577,28 @@ fun RelayApp(
                                     nav = nav.leaveChatDetail()
                                 }
                             },
+                            onSetPeerRemark = controller::setPeerRemark,
+                            onUpdateAssistantConfig = { customName, roleKey ->
+                                if (customName != null) controller.updateAssistantCustomName(customName)
+                                if (roleKey != null) controller.updateAssistantRoleKey(roleKey)
+                            },
+                            onOpenAutomationConsole = {
+                                nav = nav.selectTab(AppRoutes.SETTINGS)
+                                settingsPage = SETTINGS_PAGE_AUTOMATION
+                            },
+                            onNavigateQuest = { qId ->
+                                nav = nav.openQuestChat(nav.activeSessionId ?: com.kapp.tenon.core.protocol.ConvId.ASSISTANT, qId)
+                            },
+                            onNavigateSubagent = { qId, subId ->
+                                nav = nav.openQuestChat(nav.activeSessionId ?: com.kapp.tenon.core.protocol.ConvId.ASSISTANT, qId, subId)
+                            },
+                            onInterveneSubagent = controller::interveneSubagent,
+                            onSubmitQuestIntervention = controller::submitQuestIntervention,
+                            onResumePausedQuest = controller::resumePausedQuest,
+                            onApplyQuestPatch = controller::applyQuestPatch,
+                            onCancelQuest = controller::cancelQuest,
+                            onRetryQuest = controller::retryQuest,
+                            onDispatchQuest = controller::dispatchAssistantQuest,
                         ),
                         groupActions = ChatScreenGroupActions(
                             onAddGroupMembers = controller::addGroupMembers,
@@ -720,6 +746,19 @@ fun RelayApp(
                             settingsSlice = settingsSlice,
                             port = controller.accessChannelPort,
                             onBack = { settingsPage = null },
+                            onToggleAssistantEnabled = controller::updateAssistantEnabled,
+                            onToggleAllowExternalPrivateChat = controller::updateAllowExternalPrivateChat,
+                            onOpenAutomationConsole = { settingsPage = SETTINGS_PAGE_AUTOMATION },
+                            modifier = Modifier.fillMaxSize(),
+                        )
+
+                        SETTINGS_PAGE_AUTOMATION -> AutomationConsoleScreen(
+                            tasks = settingsSlice.settings.automationTasks,
+                            onSaveTask = controller::saveAutomationTask,
+                            onDeleteTask = controller::deleteAutomationTask,
+                            onToggleTask = controller::toggleAutomationTask,
+                            onRunTaskNow = controller::triggerAutomationTaskNow,
+                            onBack = { settingsPage = SETTINGS_PAGE_ACCESS },
                             modifier = Modifier.fillMaxSize(),
                         )
 

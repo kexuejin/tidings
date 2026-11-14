@@ -2085,4 +2085,70 @@ Collaboration channel connected; project directory events and progress will sync
     <string name="set_access_route_bound_to_1to1">This session is a direct message, so it stays out of groups</string>
     <string name="set_access_route_unknown">Reason %1$s</string>
     <string name="set_access_pairing_open">Open</string>
+    <!-- Personal Assistant, Quest Collaboration and External Chat -->
+    <string name="conv_badge_assistant">Assistant</string>
+    <string name="conv_active_quests_badge">%1$d quests</string>
+    <string name="chat_notice_external_chat_disabled">External agent chat is disabled; message was not dispatched to local agent</string>
+    <string name="card_action_reply">Reply &amp; Tune</string>
+    <string name="card_action_resume">Resume</string>
+    <string name="card_action_merge">Merge to Main</string>
+    <string name="card_action_retry">Retry</string>
+    <string name="quest_input_dialog_title">Reply to Quest</string>
+    <string name="quest_input_dialog_confirm">Submit Reply</string>
+    <string name="quest_input_dialog_cancel">Cancel</string>
+    <string name="quest_input_dialog_hint">Enter instructions or reply for the agent…</string>
+    <!-- Automation Console -->
+    <string name="automation_console_title">Automation Tasks</string>
+    <string name="automation_console_subtitle">Scheduled triggers, worktree sandbox &amp; merge controls</string>
+    <string name="automation_task_create">New Automation Task</string>
+    <string name="automation_task_edit">Edit Task</string>
+    <string name="automation_task_delete">Delete Task</string>
+    <string name="automation_task_name_label">Task Name</string>
+    <string name="automation_task_cron_label">Schedule (Cron or Interval)</string>
+    <string name="automation_task_gate_label">Gate command (runs before merge; exit 0 = pass)</string>
+    <string name="automation_task_gate_hint">Empty = no gate, e.g. ./gradlew test</string>
+    <string name="quest_dispatch_toggle">Quest dispatch</string>
+    <string name="automation_task_workspace_label">Local Project Directory Path</string>
+    <string name="automation_task_prompt_label">Instructions (Prompt)</string>
+    <string name="automation_task_persona_label">Assigned Persona</string>
+    <string name="automation_task_automerge_title">Merge Strategy</string>
+    <string name="automation_task_automerge_confirm">Approval Before Merge (Recommended)</string>
+    <string name="automation_task_automerge_unattended">Fully Unattended Fast-Forward Merge</string>
+    <string name="automation_task_run_now">Run Now</string>
+    <string name="automation_empty_title">No Automation Tasks</string>
+    <string name="automation_empty_desc">Schedule tasks to let agents work safely inside isolated worktree sandboxes</string>
+    <!-- 1:1 Conversation & Assistant Roster Info -->
+    <string name="conv_info_title">Conversation Info</string>
+    <string name="conv_info_peer_title">Peer Settings &amp; Remarks</string>
+    <string name="conv_info_assistant_title">Personal Assistant &amp; Roster</string>
+    <string name="conv_info_remark_label">Remark Name</string>
+    <string name="conv_info_node_id">Node ID</string>
+    <string name="assistant_name_label">Assistant Custom Name</string>
+    <string name="assistant_persona_title">Persona Roster</string>
+    <string name="assistant_persona_desc">Select active persona and role assignment</string>
+    <string name="assistant_default_title">Assistant</string>
+    <string name="automation_task_cron_error">Cron expression must have 5 valid fields (minute hour day-of-month month day-of-week)</string>
+    <string name="subagent_empty_output">No output</string>
+    <string name="assistant_tasks_shortcut">Associated Automation Tasks (%1$d)</string>
+    <string name="persona_leader">Lead Orchestrator (Leader)</string>
+    <string name="persona_architect">System Architect (Architect)</string>
+    <string name="persona_tester">Test Guard (Tester)</string>
+    <string name="persona_docs">Technical Writer (Documenter)</string>
+    <!-- Main/Side Quest & Subagent Progressive Disclosure -->
+    <string name="nav_breadcrumb_main">Main</string>
+    <string name="nav_breadcrumb_quest">Quest: %1$s</string>
+    <string name="nav_breadcrumb_subagent">Subagent: %1$s</string>
+    <string name="subagent_thought_title">Reasoning &amp; Thought Chain</string>
+    <string name="subagent_output_title">Terminal &amp; Execution Log</string>
+    <string name="subagent_intervene_action">Pause &amp; Intervene</string>
+    <string name="subagent_intervene_synced">Intervention synced to Leader</string>
+    <string name="card_action_open_quest">Enter Quest War Room</string>
+    <!-- Settings Page Entries -->
+    <string name="set_assistant_section_title">Assistant &amp; Collaboration</string>
+    <string name="set_assistant_enable_title">Enable Personal Assistant</string>
+    <string name="set_assistant_enable_desc">Pin personal assistant in chat list for memos &amp; automation</string>
+    <string name="set_external_chat_title">Allow External 1:1 Chat</string>
+    <string name="set_external_chat_desc">Default off; allow external nodes to start 1:1 chat via agent protocol</string>
+    <string name="set_automation_entry_title">Automation Tasks Console</string>
+    <string name="set_automation_entry_desc">Manage scheduled tasks and unattended merges</string>
 </resources>

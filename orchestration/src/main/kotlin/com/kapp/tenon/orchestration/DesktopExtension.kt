@@ -6,6 +6,8 @@ import com.kapp.tenon.agent.AgentExecPolicyStore
 import com.kapp.tenon.agent.DelegationTeam
 import com.kapp.tenon.agent.DelegationTeamConfigParser
 import com.kapp.tenon.agent.drivers.AgentProfiles
+import com.kapp.tenon.agent.executeCliTask
+import com.kapp.tenon.agent.schedule.MissedFirePolicies
 import com.kapp.tenon.core.protocol.AgentGrantScopes
 import com.kapp.tenon.domain.execDeviceRows
 import com.kapp.tenon.domain.rebroadcastGroupMeta
@@ -610,6 +612,84 @@ class DesktopExtension(
                     )
                 }
                 val executor = TriggerExecutor(controller, { createdPlane })
+
+                // 支线 runner：绑定了工作区的自动化任务的完整执行体。CLI 步注
+                // [ControlPlane.executeCliTask]（wsPath = quest worktree：沙箱在支线
+                // worktree 内再开一层任务面，patch 收割后由 runner 落成 quest 分支上的
+                // 真提交）；通知走 [RelayController.handleAssistantQuestNotice]——
+                // 助理会话卡片的原位翻面在那一层收口。
+                val questRunner = QuestRunner(
+                    worktreeRoot = java.io.File(System.getProperty("java.io.tmpdir"), "tenon-quests"),
+                    onNotice = { notice -> controller.handleAssistantQuestNotice(notice) },
+                    database = (store as? com.kapp.tenon.domain.SqlDelightSchedulerStore)?.database,
+                    runTask = { questId, worktreeDir, prompt, agentKey ->
+                        var patchPath: String? = null
+                        val (_, status, error) = createdPlane.executeCliTask(
+                            agentKey = agentKey,
+                            prompt = prompt,
+                            wsPath = worktreeDir.absolutePath,
+                            requestedSessionId = null,
+                            sessionTitle = "quest:" + questId,
+                            convId = com.kapp.tenon.core.protocol.ConvId.ASSISTANT,
+                            onArtifact = { path, name, _, _, _ -> if (name == "patch.diff") patchPath = path },
+                            onEvent = { _, _, _, _ -> },
+                        )
+                        QuestRunner.CliTaskRun(ok = status == "finished", patchPath = patchPath, summary = null, error = error)
+                    },
+                )
+
+                // 自动化任务的一次真实运行：绑工作区走支线生命周期，未绑定走轻量通道。
+                suspend fun runAutomationTask(autoTask: com.kapp.tenon.domain.AutomationTask, taskKey: String): String? {
+                    val startedAt = com.kapp.tenon.core.nowMillis()
+                    controller.saveAutomationTask(autoTask.copy(lastRunAt = startedAt, lastStatus = "RUNNING"))
+                    val resolvedKey = resolveAutomationAgentKey(autoTask.assignedPersona)
+                    if (!resolvedKey.equals(autoTask.assignedPersona.trim(), ignoreCase = true)) {
+                        RelayLog.info(
+                            "RELAY-QUEST",
+                            "automation agentKey resolved: persona='" + autoTask.assignedPersona + "' -> driver='" + resolvedKey + "'",
+                        )
+                    }
+                    // 绑定了工作区 = 完整支线生命周期（持久 worktree、幂等认领、合流策略、
+                    // 真提交与 QuestSerialMergeLock 合流）；未绑定 = 既有轻量通道
+                    // （零 worktree，行为不变）。卡面生命周期通知由 QuestRunner/Executor 发。
+                    val terminal: String? = if (autoTask.workspacePath.isNotBlank()) {
+                        when (val result = questRunner.dispatch(
+                            prompt = autoTask.prompt,
+                            workspacePath = autoTask.workspacePath,
+                            title = autoTask.name,
+                            agentKey = resolvedKey,
+                            autoMerge = autoTask.autoMerge,
+                            gateCommand = autoTask.gateCommand.ifBlank { null },
+                            // fire 级幂等键：同一 fire 的重放/并发重入归并到已有单；
+                            // 定时再触发（新 fire）正常开新单。
+                            clientToken = taskKey + "/" + startedAt,
+                        )) {
+                            is QuestRunner.DispatchResult.Started -> result.terminalStatus
+                            is QuestRunner.DispatchResult.Duplicate -> "RUNNING"
+                            is QuestRunner.DispatchResult.Rejected -> "FAILED"
+                        }
+                    } else {
+                        val outcome = executor.execute(
+                            agentKey = resolvedKey,
+                            title = "automation:" + autoTask.name,
+                            instruction = autoTask.prompt,
+                            sourceId = null,
+                            event = null,
+                            targetGroupId = null,
+                            convId = com.kapp.tenon.core.protocol.ConvId.ASSISTANT,
+                        )
+                        if (!outcome.done) {
+                            RelayLog.info("RELAY-TRIGGER", "automation task " + taskKey + " failed: " + (outcome.error ?: "unknown"))
+                        }
+                        if (outcome.done) "COMPLETED" else "FAILED"
+                    }
+                    // 等机主确认（autoMerge=false）时任务面如实停在 RUNNING ——
+                    // 真实状态在卡面（WAITING_INPUT），台账不替它撒谎。
+                    val endStatus = terminal ?: "RUNNING"
+                    controller.saveAutomationTask(autoTask.copy(lastRunAt = startedAt, lastStatus = endStatus))
+                    return if (endStatus == "FAILED") "automation task failed" else null
+                }
+
                 val queue = TriggerEventDrain(store, scope)
                 queue.handler = { event ->
                     val route = triggerRegistry.resolve(event.sourceId)
@@ -636,19 +716,32 @@ class DesktopExtension(
                     }
                 }
                 val scheduler = DesktopHostScheduler(store, scope, executeCronTask = { task ->
-                    val outcome = executor.execute(
-                        agentKey = task.agentKey,
-                        title = "cron:" + task.taskId.substringAfterLast('/'),
-                        instruction = task.prompt,
-                        sourceId = null,
-                        event = null,
-                        targetGroupId = task.targetConvId,
-                        convId = task.targetConvId?.let { com.kapp.tenon.core.protocol.ConvId.group(it) },
-                    )
-                    if (!outcome.done) {
-                        // cron 任务失败已由执行通道回投失败卡；这里再如实打日志，
-                        // 让「调度器派了但执行失败」在宿主侧留痕。
-                        RelayLog.info("RELAY-TRIGGER", "cron task " + task.taskId + " failed: " + (outcome.error ?: "unknown"))
+                    val isAutomation = task.taskId.startsWith("automation/")
+                    val autoTaskId = if (isAutomation) task.taskId.substringAfter("automation/") else null
+                    val autoTask = autoTaskId?.let { id ->
+                        controller.state.value.settings.automationTasks.firstOrNull { it.id == id }
+                    }
+                    if (autoTask != null) {
+                        // 自动化任务走统一入口：绑工作区 = QuestRunner 完整支线生命周期；
+                        // 未绑定 = 轻量通道。null = fire 本身成功（COMPLETED 或等机主确认）。
+                        val failure = runAutomationTask(autoTask, taskKey = task.taskId)
+                        if (failure == null) TriggerVerdict.Done else TriggerVerdict.Fail(failure)
+                    } else {
+                        val outcome = executor.execute(
+                            agentKey = task.agentKey,
+                            title = "cron:" + task.taskId.substringAfterLast('/'),
+                            instruction = task.prompt,
+                            sourceId = null,
+                            event = null,
+                            targetGroupId = task.targetConvId,
+                            convId = task.targetConvId?.let { com.kapp.tenon.core.protocol.ConvId.group(it) },
+                        )
+                        if (!outcome.done) {
+                            // cron 任务失败已由执行通道回投失败卡；这里再如实打日志，
+                            // 让「调度器派了但执行失败」在宿主侧留痕。
+                            RelayLog.info("RELAY-TRIGGER", "cron task " + task.taskId + " failed: " + (outcome.error ?: "unknown"))
+                        }
+                        if (outcome.done) TriggerVerdict.Done else TriggerVerdict.Fail(outcome.error ?: "trigger task failed")
                     }
                 })
                 // cron 任务目录在阶段三由注册通过的 manifest triggers 填充
@@ -699,6 +792,129 @@ class DesktopExtension(
                 triggerQueue = queue
                 hostScheduler = scheduler
                 lastTriggerFingerprint = null
+
+                val interventionHub = (store as? com.kapp.tenon.domain.SqlDelightSchedulerStore)?.let { sqlStore ->
+                    QuestInterventionHub(sqlStore.database) { qId, status ->
+                        // 状态迁移必须真到 UI：只打日志 = 「编排层知道、助理会话什么都没有」
+                        // —— §3 的直系形态（首轮评审 P1-1）。挂起行的 prompt 就是给机主的
+                        // 问题原文，补进通知的 title/questionText。
+                        runCatching {
+                            val row = sqlStore.database.relayDatabaseQueries
+                                .selectQuestSuspendedStateById(qId).executeAsOneOrNull()
+                            controller.handleAssistantQuestNotice(
+                                com.kapp.tenon.core.protocol.AssistantQuestNotice(
+                                    questId = qId,
+                                    title = row?.prompt?.take(80) ?: qId,
+                                    status = status,
+                                    summary = row?.prompt ?: "Quest status changed to " + status.name + ".",
+                                    questionText = row?.prompt,
+                                    rev = row?.rev ?: 0L,
+                                ),
+                            )
+                        }.onFailure {
+                            RelayLog.info(
+                                "RELAY-QUEST",
+                                "quest status notice failed for " + qId + ": " + (it.message ?: "unknown"),
+                            )
+                        }
+                    }
+                }
+                controller.onTriggerAutomationTask = { task ->
+                    scope.launch { runAutomationTask(task, taskKey = "manual/" + task.id) }
+                }
+                controller.onQuestIntervention = { qId, actionId, text ->
+                    val hub = interventionHub
+                    when (actionId) {
+                        com.kapp.tenon.domain.AssistantQuestCardPayload.Actions.REPLY_TUNE ->
+                            hub?.submitHumanInput(qId, text) ?: false
+                        com.kapp.tenon.domain.AssistantQuestCardPayload.Actions.RESUME_QUEST -> {
+                            // 支线 runner 的 PAUSED（主仓脏阻断）重试合流优先：
+                            // 机主清理完主仓再点恢复 = 重新走一遍 rebase+门禁+ff。
+                            if (questRunner.find(qId)) {
+                                scope.launch { questRunner.confirmMerge(qId) }
+                                true
+                            } else {
+                                val submitted = hub?.submitHumanInput(qId, text) ?: false
+                                if (!submitted) {
+                                    // 无在途等待（超时 PAUSED / 重启 INTERRUPTED）：按 Hub 契约翻面回
+                                    // WAITING_INPUT 并通知前端；机主的补充指令并进挂起行 prompt ——
+                                    // 重拉的 runner 读行即拿到完整上下文，输入不许蒸发（§3）。
+                                    if (hub != null) {
+                                        scope.launch { hub.resumePausedQuest(qId, additionalInput = text) }
+                                    }
+                                }
+                            }
+                            // 已翻面/已投递：对 UI 恒报已受理
+                            true
+                        }
+                        com.kapp.tenon.domain.AssistantQuestCardPayload.Actions.RETRY_QUEST -> {
+                            // 中断/失败支线的一键恢复：台账里取 prompt/agentKey 原
+                            // questId 重跑（卡面链路不断）。PAUSED 走 confirmMerge。
+                            scope.launch { questRunner.resumeQuest(qId) }
+                            true
+                        }
+                        com.kapp.tenon.domain.AssistantQuestCardPayload.Actions.CANCEL_QUEST -> {
+                            // in-flight：取消 dispatch 协程，取消沿挂起链传播进沙箱看门狗
+                            // TERM 掉 CLI 进程树；停靠态：直接清场。
+                            scope.launch { questRunner.cancelQuest(qId) }
+                            true
+                        }
+                        com.kapp.tenon.domain.AssistantQuestCardPayload.Actions.MERGE_PATCH -> {
+                            // 支线卡的批准合流：走 runner 的真合流（QuestSerialMergeLock，
+                            // rebase + 门禁 + ff）。非支线卡不进这里——ChatScreen 的守卫
+                            // 已按 type/conv 分流，群工单卡仍走 HostCardActions。
+                            if (questRunner.find(qId)) {
+                                scope.launch { questRunner.confirmMerge(qId) }
+                                true
+                            } else {
+                                false
+                            }
+                        }
+                        else -> false
+                    }
+                }
+                controller.onAssistantQuestDispatch = { prompt, token ->
+                    // 便签派发：工作区用宿主解析的默认仓（机主白名单内，D10/D15 判据）；
+                    // 没有可写仓 = 如实返回 false，便签留在会话里（Phase 2 跨端同步接手）。
+                    val ws = workerOrchestrator?.resolveWorkspacePath(null)
+                    if (ws == null) {
+                        RelayLog.info("RELAY-QUEST", "assistant quest dispatch rejected: no writable workspace bound")
+                        false
+                    } else {
+                        scope.launch {
+                            questRunner.dispatch(
+                                prompt = prompt,
+                                workspacePath = ws,
+                                title = prompt.take(40),
+                                agentKey = resolveAutomationAgentKey(""),
+                                autoMerge = false, // 人派的默认变更前确认（机主在场）
+                                clientToken = token,
+                            )
+                        }
+                        true
+                    }
+                }
+                controller.onSubagentIntervention = { qId, subId, text ->
+                    // 第 2 层介入同步给第 1 层 Leader：路由到 quest 级的在途等待（带前缀，
+                    // Leader 的输入侧能区分这是关于哪个单兵的）。
+                    val delivered = interventionHub?.submitHumanInput(qId, "[subagent:" + subId + "] " + text) ?: false
+                    if (!delivered) {
+                        // 没有在途等待时如实留痕，而不是静默吞掉（§2.5：诊断要么如实、要么不存在）。
+                        RelayLog.info(
+                            "RELAY-QUEST",
+                            "subagent intervention dropped (no in-flight wait): quest=" + qId + " subagent=" + subId,
+                        )
+                    }
+                }
+                scope.launch {
+                    interventionHub?.recoverInterruptedQuestsOnStartup()
+                    // 支线台账恢复：等机主确认的支线重启后 confirmMerge 照常可用；
+                    // 运行中被重启打断的翻 INTERRUPTED 并通知。
+                    val recovered = questRunner.recoverFromLedger()
+                    if (recovered > 0) {
+                        RelayLog.info("RELAY-QUEST", "quest ledger recovery: " + recovered + " in-flight quest(s) rehydrated")
+                    }
+                }
             }
             sessions = registry
             // 托管模式插件：目录里有就拉起（token 注入 + 自注册）；坏了如实记录但不上抛。
@@ -1365,13 +1581,29 @@ class DesktopExtension(
         val scheduler = hostScheduler ?: return
         val currentPlane = plane ?: return
         val manifests = currentPlane.plugins.list().map { it.manifest }.filter { it.triggers.isNotEmpty() }
-        // 指纹用**整份清单的 toString()**，而不是手挑几个字段（判据与理由见
-        // triggerManifestFingerprint 的 KDoc）。
-        val fingerprint = triggerManifestFingerprint(manifests)
+        val automationTasks = controller.state.value.settings.automationTasks.filter { it.enabled && it.cron.isNotBlank() }
+        val fingerprint = triggerManifestFingerprint(manifests) + ";auto:" + automationTasks.map { "${it.id}:${it.cron}:${it.enabled}" }.joinToString(",")
         if (fingerprint == lastTriggerFingerprint) return
         try {
             val tasks = TriggerAssembly.fromManifests(manifests)
-            scheduler.syncCronTasks(tasks.cronTasks)
+            val autoCronTasks = automationTasks.mapNotNull { task ->
+                val cronExpr = task.cron.trim()
+                if (com.kapp.tenon.core.protocol.CronValidation.validate(cronExpr) == null) {
+                    CronTaskDef(
+                        taskId = "automation/" + task.id,
+                        schedule = cronExpr,
+                        timezoneId = null,
+                        jitterSeconds = 0,
+                        missedFirePolicy = MissedFirePolicies.SKIP,
+                        prompt = task.prompt,
+                        targetConvId = com.kapp.tenon.core.protocol.ConvId.ASSISTANT,
+                        // 运行路径（executeCronTask → runAutomationTask）会再解析一次并留痕；
+                        // 这里先给解析结果，台账里的键不是名册键（见 resolveAutomationAgentKey）。
+                        agentKey = resolveAutomationAgentKey(task.assignedPersona),
+                    )
+                } else null
+            }
+            scheduler.syncCronTasks(tasks.cronTasks + autoCronTasks)
             // 整表一次换快照：clear()+逐条 register() 之间的空表窗口会让并发消费
             // 把一条已落盘事件判成「无路由」而永久失败（见 TriggerRegistry KDoc）。
             val rejected = triggerRegistry.replaceAll(tasks.eventRoutes)
@@ -1386,7 +1618,7 @@ class DesktopExtension(
             }
             RelayLog.info(
                 "RELAY-TRIGGER",
-                "trigger tasks synced: " + tasks.cronTasks.size + " cron, " + tasks.eventRoutes.size + " webhook route(s)",
+                "trigger tasks synced: " + (tasks.cronTasks.size + autoCronTasks.size) + " cron, " + tasks.eventRoutes.size + " webhook route(s)",
             )
             // **整拍成功才记账**：指纹是「对账成功」的判据，不是「试过了」的判据。
             // 旧写法在干活之前就写指纹，fromManifests / syncCronTasks 一抛错，
@@ -1457,6 +1689,32 @@ class DesktopExtension(
 
     /** 事件路由诊断：只有类型/游标/长度/原因与计数，**没有任何正文**。 */
     val eventDiagnostics: EventRouterDiagnostics get() = eventForwarder.eventDiagnostics
+
+    /**
+     * 自动化任务的 persona → 驱动键解析：名册键（leader/architect/tester/docs）
+     * 不在驱动键取值域（codex/claude/agy/opencode/dsh，[com.kapp.tenon.agent.drivers.DriverKeys]
+     * 是唯一来源）—— 直接拿去派单必报 no executor，任务永远 FAILED。
+     * 按档案表顺序找第一个**在位**的驱动兜底并留痕；一个在位驱动都没有时维持原样，
+     * 让执行通道如实报错（不许静默编一个驱动键出来）。
+     */
+    private fun resolveAutomationAgentKey(personaRaw: String): String {
+        val canonical = com.kapp.tenon.agent.drivers.DriverKeys.canonicalKey(personaRaw)
+        val currentPlane = plane ?: return canonical ?: personaRaw
+        if (canonical != null && currentPlane.resolveCliDriver(canonical) != null) return canonical
+        val fallback = com.kapp.tenon.agent.drivers.AgentProfiles.knownKeys()
+            .sorted()
+            .firstOrNull { currentPlane.resolveCliDriver(it) != null }
+        if (fallback != null) {
+            if (canonical != null) {
+                RelayLog.info(
+                    "RELAY-QUEST",
+                    "automation persona '" + personaRaw + "' is not a driver key; using in-place driver '" + fallback + "'",
+                )
+            }
+            return fallback
+        }
+        return canonical ?: personaRaw
+    }
 
     private companion object {
         /**

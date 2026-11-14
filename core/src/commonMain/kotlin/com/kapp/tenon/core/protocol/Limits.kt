@@ -29,6 +29,16 @@ object Protocol {
 /** 字段长度上限（UTF-16 码元数），对应 TS 侧 `LIMITS`。 */
 object Limits {
     /**
+     * 智能体支线与助理轻量通知帧（`AssistantQuestNotice`）的硬预算（字节数）。
+     *
+     * 必须严格 <= 650 字节，按 UDP 单包 800 字节扣除信封头（~150 字节）倒算（650 + 150 = 800），
+     * 绝不超出 [Protocol.TEXT_UDP_LIMIT] (800)，防止超帧拆链。
+     */
+    const val QUEST_NOTICE_FRAME_BUDGET: Int = 650
+
+    /** 系统预置卡片动作 ID：批准并合入主分支。 */
+    const val SYSTEM_ACTION_MERGE_PATCH: String = "merge-patch"
+    /**
      * 一条 TCP 控制帧**帧体**的硬上限（与 TS `frame.ts` 的 `MAX_FRAME` 逐字一致）。
      *
      * 单一定义：`pull-ok` 之后紧跟的裸流字节不受此限，但每条 JSON 帧都受。

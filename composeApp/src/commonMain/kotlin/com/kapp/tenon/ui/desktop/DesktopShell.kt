@@ -432,6 +432,11 @@ public fun DesktopShell(
     }
     var selectedWsId by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedAgentSessionId by rememberSaveable(selectedPeerId) { mutableStateOf<String?>(null) }
+    // 桌面壳的分形层级（第 0/1/2 层）：与手机壳 App.kt 的 nav.activeQuestId 同语义。
+    // rememberSaveable(selectedPeerId) —— 换会话即清层，与 ChatScreen 的 in-screen 退层互补：
+    // 这里管「点卡片下钻时层级进壳级状态」，退出键/面包屑仍由 ChatScreen 内部处理。
+    var selectedQuestId by rememberSaveable(selectedPeerId) { mutableStateOf<String?>(null) }
+    var selectedSubagentId by rememberSaveable(selectedPeerId) { mutableStateOf<String?>(null) }
     var showWsQrFor by remember { mutableStateOf<WorkspaceUi?>(null) }
     var query by rememberSaveable { mutableStateOf(initialQuery) }
     // 窄档搜索面板的展开态由壳持有，工具栏只负责呈现这个开关。
@@ -884,6 +889,11 @@ public fun DesktopShell(
                             selectedWsId = selectedWsId,
                             activeSessionId = selectedAgentSessionId,
                             onSelectAgentSession = { selectedAgentSessionId = it },
+                            activeQuestId = selectedQuestId,
+                            activeSubagentId = selectedSubagentId,
+                            onNavigateQuest = { questId -> selectedQuestId = questId; selectedSubagentId = null },
+                            onNavigateSubagent = { questId, subId -> selectedQuestId = questId; selectedSubagentId = subId },
+
                             unreadOnEntry = desktopChatUnreadOnEntry,
                             // 草稿预览：与手机壳同一份表（App.kt 传同形 lambda）。空白草稿按
                             // 「没有」处理，否则列表上会出现一个只剩空格的「草稿：」。

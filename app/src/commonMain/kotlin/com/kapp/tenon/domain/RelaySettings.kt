@@ -100,6 +100,28 @@ data class ScanRangeEntry(
 )
 
 /**
+ * 自动化定时任务配置项。
+ */
+@Serializable
+data class AutomationTask(
+    val id: String,
+    val name: String,
+    val cron: String = "",
+    val intervalMinutes: Int = 0,
+    val workspacePath: String = "",
+    val prompt: String = "",
+    val assignedPersona: String = "",
+    val autoMerge: Boolean = false,
+    /** 门禁命令（如 `./gradlew test`）：合流前在支线 worktree 里执行，退出 0 才放行；空 = 不跑门禁。 */
+    val gateCommand: String = "",
+    val enabled: Boolean = true,
+    val createdAt: Long = 0L,
+    val updatedAt: Long = 0L,
+    val lastRunAt: Long? = null,
+    val lastStatus: String? = null,
+)
+
+/**
  * 本节点的持久设置。
  *
  * [nodeId] 与 [profileRev] 是**协议状态**，不是用户偏好：
@@ -418,6 +440,18 @@ data class RelaySettings(
      * 所以默认值只能是空 map，老用户升级后行为不变。
      */
     val peerRemarks: Map<String, String> = emptyMap(),
+    /** 私人助理功能开关 (默认关闭，启用或有助理会话时置顶呈现)。 */
+    val assistantEnabled: Boolean = false,
+    /** 外部节点 1:1 单聊开关 (默认关闭，机主显式开启后才放行)。 */
+    val allowExternalPrivateChat: Boolean = false,
+    /** 私人助理自定义昵称 (null 时展示默认标题)。 */
+    val assistantCustomName: String? = null,
+    /** 私人助理当前绑定的员工角色 Key (null 时回落默认领队)。 */
+    val assistantRoleKey: String? = null,
+    /** 群聊中被允许发起智能体指令的操作员白名单 (为空时默认全群成员按群角色授权)。 */
+    val allowedOperators: List<String> = emptyList(),
+    /** 自动化定时任务列表。 */
+    val automationTasks: List<AutomationTask> = emptyList(),
 ) {
     /**
      * 按当前能力开关生成的 `caps` 列表。

@@ -2,6 +2,7 @@
 
 package com.kapp.tenon.feature.chat
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.input.key.Key
@@ -33,6 +34,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.unit.dp
 import com.kapp.tenon.domain.SenderIdentity
+import com.kapp.tenon.domain.AssistantQuestCardPayload
 import com.kapp.tenon.domain.DispatchWorkspaceChoice
 import com.kapp.tenon.domain.directChatMentionTargets
 import com.kapp.tenon.domain.groupParticipantRows
@@ -87,6 +89,7 @@ import com.kapp.tenon.generated.resources.chat_no_selection_title
 import com.kapp.tenon.generated.resources.chat_nudge
 import com.kapp.tenon.generated.resources.chat_peer_offline
 import com.kapp.tenon.generated.resources.chat_offline_host_send_hint
+import com.kapp.tenon.generated.resources.quest_dispatch_toggle
 import com.kapp.tenon.generated.resources.chat_pk
 import com.kapp.tenon.generated.resources.common_agent
 import com.kapp.tenon.generated.resources.common_profile_unavailable
@@ -155,6 +158,7 @@ fun ChatScreen(
     val onSend = actions.onSend
     val onSendWithIntent = actions.onSendWithIntent
     val onDispatchToWorkspace = actions.onDispatchToWorkspace
+    val onDispatchQuest = actions.onDispatchQuest
     val onOpenAgentConsole = actions.onOpenAgentConsole
     val onDismissBanner = actions.onDismissBanner
     val onAttachFile = actions.onAttachFile
@@ -518,6 +522,10 @@ fun ChatScreen(
     var localActiveWsId by rememberSaveable(peerId) {
         mutableStateOf(data.wsId)
     }
+    // 支线派单模式（仅助理会话出现）：开 = 这一次发送走支线派单（盖 clientToken 落
+    // 便签 + 交执行体），发完即熄（与胶囊「发送即消费」同语义）；关 = 普通便签。
+    // 默认关——主线先负责生活，派单是显式动作（评审 P0 教训：不嗅探文本）。
+    var questDispatchMode by rememberSaveable(peerId) { mutableStateOf(false) }
     // 四件事必须一起发生，漏一件都是一条独立的真机缺陷：
     // ① 复位本地草稿；② 清外部草稿表（否则已发出的正文会在切回来时「复活」进输入框，
     // 见 [notifyDraftCleared]）；③ 清引用态（否则发完引用条还挂着，下一条又变成"回复"）；
@@ -543,6 +551,16 @@ fun ChatScreen(
         // `@coder` 不该因为正文里写了 `@coder2` 就弹提示。
         offlineHostName = offlineMentionTokenIn(body, offlineMentionByToken.keys)
             ?.let { offlineMentionByToken[it] }
+        // 助理会话的支线派单：显式开关开 + 纯文本时，发送改道派单口（盖 clientToken
+        // 落便签 + 交执行体），**不走 onSend**——往 "assistant" 伪 peer 发帧只会进
+        // 离线队列永久重试（P0 的队列形态）。文件不在支线 v1 范围，落回普通发送。
+        if (com.kapp.tenon.core.protocol.ConvId.isAssistant(peer.nodeId) &&
+            questDispatchMode && body.isNotBlank() && filesToSend.isEmpty()
+        ) {
+            questDispatchMode = false
+            onDispatchQuest?.invoke(body) ?: onSend(peer.nodeId, body, replyId)
+            return
+        }
         if (body.isNotBlank() || filesToSend.isEmpty()) {
             if (intentSelection != null && onSendWithIntent != null) {
                 onSendWithIntent(peer.nodeId, body, replyId, intentSelection.toIntentJson())
@@ -575,6 +593,11 @@ fun ChatScreen(
     var forwardingMessage by forwardingMessageState
     val showGroupInfoState = remember(peerId) { mutableStateOf(false) }
     var showGroupInfo by showGroupInfoState
+    val showConversationInfoState = remember(peerId) { mutableStateOf(false) }
+    var showConversationInfo by showConversationInfoState
+    var interventionCard by remember { mutableStateOf<AgentCardUi?>(null) }
+    var activeQuestId by remember(data.questId) { mutableStateOf(data.questId) }
+    var activeSubagentId by remember(data.subagentId) { mutableStateOf(data.subagentId) }
     // 「清空本会话记录」的确认框开合。动作来自头部（⋮），确认框画在这一层 —— 桌面壳的
     // 头部不进 ChatScreen，它自己那份确认框在 DesktopChatPane 里。
     val showClearConfirmState = remember(peerId) { mutableStateOf(false) }
@@ -632,9 +655,14 @@ fun ChatScreen(
     BackHandler(
         enabled = forwardingMessage != null || previewingImagePath != null ||
             showClearConfirm || showCloseAndClearConfirm || showGroupInfo || showVoiceRecord || showPkPicker ||
-            showHistorySearch || showSessionPicker || showTaskPicker || showWorkspacePicker,
+            showHistorySearch || showSessionPicker || showTaskPicker || showWorkspacePicker ||
+            showConversationInfo || interventionCard != null || activeSubagentId != null || activeQuestId != null,
     ) {
         when {
+            interventionCard != null -> interventionCard = null
+            showConversationInfo -> showConversationInfo = false
+            activeSubagentId != null -> activeSubagentId = null
+            activeQuestId != null -> activeQuestId = null
             showWorkspacePicker -> showWorkspacePicker = false
             forwardingMessage != null -> forwardingMessage = null
             previewingImagePath != null -> previewingImagePath = null
@@ -778,6 +806,9 @@ fun ChatScreen(
                 .onPreviewKeyEvent { event ->
                 if (event.type == KeyEventType.KeyDown && event.key == Key.Escape) {
                     when {
+                        showConversationInfo -> { showConversationInfo = false; true }
+                        activeSubagentId != null -> { activeSubagentId = null; true }
+                        activeQuestId != null -> { activeQuestId = null; true }
                         forwardingMessage != null -> { forwardingMessage = null; true }
                         previewingImagePath != null -> { previewingImagePath = null; true }
                         showClearConfirm -> { showClearConfirm = false; true }
@@ -827,6 +858,7 @@ fun ChatScreen(
                 group = group,
                 memberOnlineCount = memberOnlineCount,
                 onOpenGroupInfo = if (group != null) ({ showGroupInfo = true }) else null,
+                onOpenConversationInfo = if (group == null) ({ showConversationInfo = true }) else null,
                 onSearchHistory = null,
                 // 「清空本会话记录」：只在壳真的接了这条动作时画（null = 不画），
                 // 点了先开确认框，确认后才真的清（见 ClearConversationDialog）。
@@ -834,6 +866,21 @@ fun ChatScreen(
                 onCloseAndClearConversation = onCloseAndClearConversation?.let { { showCloseAndClearConfirm = true } },
                 onOpenSessionPicker = null,
                 visibleSessionCount = agentSessions.size,
+            )
+            HorizontalDivider()
+        }
+
+        if (activeQuestId != null) {
+            FractalBreadcrumbBar(
+                questId = activeQuestId,
+                subagentId = activeSubagentId,
+                onNavigateBackToMain = {
+                    activeQuestId = null
+                    activeSubagentId = null
+                },
+                onNavigateBackToQuest = {
+                    activeSubagentId = null
+                },
             )
             HorizontalDivider()
         }
@@ -899,7 +946,7 @@ fun ChatScreen(
                         painter = org.jetbrains.compose.resources.painterResource(Res.drawable.ic_moon),
                         contentDescription = null,
                         tint = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(14.dp),
+                        modifier = Modifier.size(IconSizes.Inline),
                     )
                     androidx.compose.material3.Text(
                         text = org.jetbrains.compose.resources.stringResource(Res.string.agent_host_sleeping_banner),
@@ -938,42 +985,98 @@ fun ChatScreen(
             }
         }
 
-        Box(Modifier.weight(1f).fillMaxWidth()) {
-            // 消息列表主体：空态 / LazyColumn / 回到最新胶囊整块（ARP-14 后半）。
-            // 五个回写状态以 MutableState 下传（本侧 var 委托与宿主内 var 委托同源）。
-            ChatMessageList(
-                messages = messages,
-                group = group,
-                peer = peer,
-                peerId = peerId,
-                now = now,
-                agentSlice = agentSlice,
-                listState = listState,
-                isNearBottom = isNearBottom,
-                historyAtBeginning = historyAtBeginning,
-                highlightedMessageId = highlightedMessageId,
-                historyLoading = historyLoading,
-                scrollFollow = scrollFollow,
-                bubbleCtx = bubbleCtx,
-                bubbleFraction = bubbleFraction,
-                messageAvatarSize = messageAvatarSize,
-                composerSlot = composerSlot,
-                composerFocus = composerFocus,
-                requestComposerFocus = ::requestComposerFocus,
-                scrollToMessage = ::scrollToMessage,
-                quotedSenderNameOf = ::quotedSenderNameOf,
-                mentionSender = mentionSender,
-                coroutineScope = coroutineScope,
-                actions = actions,
-                receivedFileActions = receivedFileActions,
-                onDraftChangeExternal = onDraftChangeExternal,
-                forwardingMessageState = forwardingMessageState,
-                previewingImagePathState = previewingImagePathState,
-                replyingToMessageState = replyingToMessageState,
-                lastRecalledTextState = lastRecalledTextState,
-                pendingCardActionsState = pendingCardActionsState,
-                draftState = draftState,
+        if (activeSubagentId != null && activeQuestId != null) {
+            SubagentWhiteboxView(
+                questId = activeQuestId!!,
+                subagentId = activeSubagentId!!,
+                prompt = "",
+                thoughtChain = "",
+                executionLog = "",
+                onIntervene = { qId, subId, text ->
+                    actions.onInterveneSubagent?.invoke(qId, subId, text)
+                },
+                modifier = Modifier.weight(1f).fillMaxWidth(),
             )
+        } else {
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                val effectiveActions = remember(actions, activeQuestId) {
+                    actions.copy(
+                        onCardAction = { convId, card, actionId ->
+                            // 劫持守卫：quest 动作分支只认**支线卡**（type 标或助理会话）。
+                            // 群工单卡的 merge-patch 是既有动作（BoardCardFlip 发出），语义走
+                            // HostCardActions 的补丁合并 —— 不加这道守卫，它会被本分支吃掉，
+                            // 而 applyQuestPatch 按 assistant 会话查卡查不到 ⇒ 群卡合并静默丢失。
+                            val isQuestCard = card.type == AssistantQuestCardPayload.TYPE_ASSISTANT_QUEST ||
+                                com.kapp.tenon.core.protocol.ConvId.isAssistant(convId)
+                            if (!isQuestCard) {
+                                actions.onCardAction?.invoke(convId, card, actionId)
+                                return@copy
+                            }
+                            when (actionId) {
+                                AssistantQuestCardPayload.Actions.OPEN_QUEST, "open_quest" -> {
+                                    activeQuestId = card.cardId
+                                    activeSubagentId = null
+                                    actions.onNavigateQuest?.invoke(card.cardId)
+                                }
+                                AssistantQuestCardPayload.Actions.REPLY_TUNE, "reply",
+                                AssistantQuestCardPayload.Actions.RESUME_QUEST, "resume",
+                                -> {
+                                    interventionCard = card
+                                }
+                                AssistantQuestCardPayload.Actions.MERGE_PATCH, "merge" -> {
+                                    actions.onApplyQuestPatch?.invoke(card.cardId)
+                                        ?: actions.onCardAction?.invoke(convId, card, actionId)
+                                }
+                                AssistantQuestCardPayload.Actions.CANCEL_QUEST -> {
+                                    actions.onCancelQuest?.invoke(card.cardId)
+                                }
+                                AssistantQuestCardPayload.Actions.RETRY_QUEST -> {
+                                    actions.onRetryQuest?.invoke(card.cardId)
+                                }
+                                else -> {
+                                    actions.onCardAction?.invoke(convId, card, actionId)
+                                }
+                            }
+                        }
+                    )
+                }
+
+                // 消息列表主体：空态 / LazyColumn / 回到最新胶囊整块（ARP-14 后半）。
+                // 五个回写状态以 MutableState 下传（本侧 var 委托与宿主内 var 委托同源）。
+                ChatMessageList(
+                    messages = messages,
+                    group = group,
+                    peer = peer,
+                    peerId = peerId,
+                    now = now,
+                    agentSlice = agentSlice,
+                    listState = listState,
+                    isNearBottom = isNearBottom,
+                    historyAtBeginning = historyAtBeginning,
+                    highlightedMessageId = highlightedMessageId,
+                    historyLoading = historyLoading,
+                    scrollFollow = scrollFollow,
+                    bubbleCtx = bubbleCtx,
+                    bubbleFraction = bubbleFraction,
+                    messageAvatarSize = messageAvatarSize,
+                    composerSlot = composerSlot,
+                    composerFocus = composerFocus,
+                    requestComposerFocus = ::requestComposerFocus,
+                    scrollToMessage = ::scrollToMessage,
+                    quotedSenderNameOf = ::quotedSenderNameOf,
+                    mentionSender = mentionSender,
+                    coroutineScope = coroutineScope,
+                    actions = effectiveActions,
+                    receivedFileActions = receivedFileActions,
+                    onDraftChangeExternal = onDraftChangeExternal,
+                    forwardingMessageState = forwardingMessageState,
+                    previewingImagePathState = previewingImagePathState,
+                    replyingToMessageState = replyingToMessageState,
+                    lastRecalledTextState = lastRecalledTextState,
+                    pendingCardActionsState = pendingCardActionsState,
+                    draftState = draftState,
+                )
+            }
         }
 
         // agent 会话的输入提示：放在输入区正上方。两条壳（手机内置输入栏 / 桌面 composerSlot）
@@ -989,6 +1092,37 @@ fun ChatScreen(
             now = data.now,
         )
 
+        // 助理会话专属：支线派单 toggle（显式动作，不嗅探文本——P0 教训）。
+        if (com.kapp.tenon.core.protocol.ConvId.isAssistant(peer.nodeId)) {
+            Row(
+                modifier = Modifier
+                    .padding(horizontal = sp.lg, vertical = sp.xs)
+                    .fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(sp.xs),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Surface(
+                    color = if (questDispatchMode) {
+                        MaterialTheme.colorScheme.primaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.surfaceVariant
+                    },
+                    shape = MaterialTheme.shapes.small,
+                    modifier = Modifier.clickable { questDispatchMode = !questDispatchMode },
+                ) {
+                    Text(
+                        text = stringResource(Res.string.quest_dispatch_toggle),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (questDispatchMode) {
+                            MaterialTheme.colorScheme.onPrimaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        modifier = Modifier.padding(horizontal = sp.md, vertical = sp.xs),
+                    )
+                }
+            }
+        }
         // §2.4 发送侧温暖提示：紧跟状态线、紧贴输入区上方。它**不是**常驻横幅 ——
         // 只在刚把任务派给一台离线宿主之后出现，下一次编辑草稿就撤。
         // 与会话内那条「宿主睡眠/离线」常驻横幅分工不同：那条说状态，这条说刚发生的这一下。
@@ -1298,6 +1432,46 @@ fun ChatScreen(
                 actions.onSelectWorkspace?.invoke(selectedWsId)
             },
             onDismiss = { showWorkspacePicker = false },
+        )
+    }
+
+    if (showConversationInfo) {
+        val isAssistant = com.kapp.tenon.core.protocol.ConvId.isAssistant(peer.nodeId)
+        com.kapp.tenon.ui.components.ConversationInfoDialog(
+            isAssistant = isAssistant,
+            nodeId = peer.nodeId,
+            currentDisplayName = peer.displayName,
+            currentRemark = settingsSlice.settings.peerRemarks[peer.nodeId].orEmpty(),
+            currentAssistantRoleKey = settingsSlice.settings.assistantRoleKey,
+            automationTaskCount = settingsSlice.settings.automationTasks.size,
+            onDismiss = { showConversationInfo = false },
+            onSaveRemark = { remark ->
+                actions.onSetPeerRemark?.invoke(peer.nodeId, remark)
+            },
+            onSaveAssistantConfig = { customName, roleKey ->
+                actions.onUpdateAssistantConfig?.invoke(customName, roleKey)
+            },
+            onOpenAutomationConsole = actions.onOpenAutomationConsole,
+        )
+    }
+
+    interventionCard?.let { card ->
+        val isResume = card.actions.any { it.actionId == "resume" || it.actionId == "resume-quest" }
+        QuestInterventionDialog(
+            questTitle = card.title ?: card.cardId,
+            prompt = card.context,
+            onDismiss = { interventionCard = null },
+            onSubmit = { input ->
+                val questId = card.cardId
+                interventionCard = null
+                if (isResume) {
+                    actions.onResumePausedQuest?.invoke(questId, input)
+                        ?: actions.onCardAction?.invoke(peer.nodeId, card, "resume-quest:$input")
+                } else {
+                    actions.onSubmitQuestIntervention?.invoke(questId, input)
+                        ?: actions.onCardAction?.invoke(peer.nodeId, card, "reply-tune:$input")
+                }
+            },
         )
     }
     // 根 Box 收口（见函数头的说明：内容 Column + 浮层宿主同层）。

@@ -10,7 +10,15 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import com.kapp.tenon.generated.resources.set_assistant_section_title
+import com.kapp.tenon.generated.resources.set_assistant_enable_title
+import com.kapp.tenon.generated.resources.set_assistant_enable_desc
+import com.kapp.tenon.generated.resources.set_external_chat_title
+import com.kapp.tenon.generated.resources.set_external_chat_desc
+import com.kapp.tenon.generated.resources.set_automation_entry_title
+import com.kapp.tenon.generated.resources.set_automation_entry_desc
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
@@ -128,6 +136,9 @@ fun SettingsAccessChannelSubpage(
     onBack: (() -> Unit)? = null,
     /** 信任设备页的入口（桌面设置窗）；null = 本端没有那一页（手机），整块不画。 */
     onOpenTrustedDevices: (() -> Unit)? = null,
+    onToggleAssistantEnabled: ((Boolean) -> Unit)? = null,
+    onToggleAllowExternalPrivateChat: ((Boolean) -> Unit)? = null,
+    onOpenAutomationConsole: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val settings = settingsSlice.settings
@@ -392,6 +403,45 @@ fun SettingsAccessChannelSubpage(
                         AppTextButton(
                             text = stringResource(Res.string.set_access_pairing_open),
                             onClick = openTrusted,
+                            size = AppButtonSize.Small,
+                        )
+                    }
+                }
+            }
+
+            // 私人助理、外部单聊与自动化控制台
+            SectionCard(
+                title = stringResource(Res.string.set_assistant_section_title),
+                icon = Res.drawable.ic_groups,
+            ) {
+                SettingRow(
+                    title = stringResource(Res.string.set_assistant_enable_title),
+                    subtitle = stringResource(Res.string.set_assistant_enable_desc),
+                ) {
+                    Switch(
+                        checked = settings.assistantEnabled,
+                        onCheckedChange = { onToggleAssistantEnabled?.invoke(it) },
+                        enabled = onToggleAssistantEnabled != null,
+                    )
+                }
+                SettingRow(
+                    title = stringResource(Res.string.set_external_chat_title),
+                    subtitle = stringResource(Res.string.set_external_chat_desc),
+                ) {
+                    Switch(
+                        checked = settings.allowExternalPrivateChat,
+                        onCheckedChange = { onToggleAllowExternalPrivateChat?.invoke(it) },
+                        enabled = onToggleAllowExternalPrivateChat != null,
+                    )
+                }
+                if (onOpenAutomationConsole != null) {
+                    SettingRow(
+                        title = stringResource(Res.string.set_automation_entry_title),
+                        subtitle = stringResource(Res.string.set_automation_entry_desc),
+                    ) {
+                        AppTextButton(
+                            text = stringResource(Res.string.set_access_pairing_open),
+                            onClick = onOpenAutomationConsole,
                             size = AppButtonSize.Small,
                         )
                     }

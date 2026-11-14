@@ -39,6 +39,7 @@ dependencies {
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.serialization.json)
     testImplementation(libs.kotlin.test)
+    testImplementation(libs.sqldelight.sqlite.driver)
     // 源码级守卫读仓库里的 .kt（与 :app / :agentNode 同一套工具）。
     testImplementation(project(":testsupport"))
 }

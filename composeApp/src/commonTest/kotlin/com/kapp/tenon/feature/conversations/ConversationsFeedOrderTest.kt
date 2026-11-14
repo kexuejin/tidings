@@ -27,6 +27,7 @@ class ConversationsFeedOrderTest {
         presenceAt: Long = 0L,
         online: Boolean = true,
         isPinned: Boolean = false,
+        isAssistant: Boolean = false,
     ) = ConversationUi(
         convId = id,
         title = id,
@@ -40,6 +41,7 @@ class ConversationsFeedOrderTest {
         lastMessageAt = lastMessageAt,
         presenceAt = presenceAt,
         isPinned = isPinned,
+        isAssistant = isAssistant,
     )
 
     private fun workspace(
@@ -216,5 +218,27 @@ class ConversationsFeedOrderTest {
         val out = orderConversationList(listOf(hit, miss), query = "聚餐")
 
         assertEquals(listOf("老周"), out.map { it.convId })
+    }
+
+    @Test
+    fun assistantRowStaysOnTopEvenAboveManuallyPinnedConversations() {
+        // 评审 P1-2 反向验证钉子：投影层宣称「助理强制置顶」，但旧 orderInboxFeed 的
+        // 第一把尺子是 isPinned + timestamp —— 用户手动置顶且有新消息的会话会压过助理。
+        // 新实现第零把尺子是 isAssistant：助理恒第一。
+        val assistant = conv("assistant", lastMessageAt = 100L, isAssistant = true)
+        val pinnedWithFreshMessage = conv("pinned-peer", lastMessageAt = 9_999L, isPinned = true)
+        val regular = conv("regular-peer", lastMessageAt = 5_000L)
+
+        val ordered = orderInboxFeed(
+            listOf(
+                InboxFeedItem.Conversation(regular),
+                InboxFeedItem.Conversation(pinnedWithFreshMessage),
+                InboxFeedItem.Conversation(assistant),
+            ),
+        )
+
+        assertEquals("assistant", (ordered.first() as InboxFeedItem.Conversation).conv.convId)
+        assertEquals("pinned-peer", (ordered[1] as InboxFeedItem.Conversation).conv.convId)
+        assertEquals("regular-peer", (ordered[2] as InboxFeedItem.Conversation).conv.convId)
     }
 }

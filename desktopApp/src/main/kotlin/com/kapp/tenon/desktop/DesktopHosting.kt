@@ -90,6 +90,7 @@ import com.kapp.tenon.domain.exportDiagnosticsPackage
 import com.kapp.tenon.core.fs.directoryUsageBytes
 import com.kapp.tenon.core.transport.PartFile
 import com.kapp.tenon.ui.components.AppBanner
+import com.kapp.tenon.feature.automation.AutomationConsoleScreen
 import com.kapp.tenon.feature.settings.SettingsAppearSubpage
 import com.kapp.tenon.feature.settings.SettingsAccessChannelSubpage
 import com.kapp.tenon.feature.settings.SettingsCapsSubpage
@@ -1132,6 +1133,7 @@ internal fun DesktopSettingsPane(
     // 「输入法自检」从侧栏一级项改为诊断页的二级入口（`SettingsDiagSubpage.onOpenImeSmoke`），
     // 与手机端同一条路径。这里只留一页级的开关。
     var showImeSmoke by remember { mutableStateOf(false) }
+    var showAutomationConsole by remember { mutableStateOf(false) }
 
     // 占用数字与移动端同一条路：只在用户真的进这一屏时数一次，且在后台线程。
     val usage by produceState<Pair<Long, Long>?>(null) {
@@ -1199,6 +1201,16 @@ internal fun DesktopSettingsPane(
                             } else if (showImeSmoke) {
                                 // 「输入法自检」从侧栏一级项改为诊断页的二级入口（与手机同路径）。
                                 ImeSmokePane(onBack = { showImeSmoke = false })
+                            } else if (showAutomationConsole) {
+                                AutomationConsoleScreen(
+                                    tasks = settingsSlice.settings.automationTasks,
+                                    onSaveTask = controller::saveAutomationTask,
+                                    onDeleteTask = controller::deleteAutomationTask,
+                                    onToggleTask = controller::toggleAutomationTask,
+                                    onRunTaskNow = controller::triggerAutomationTaskNow,
+                                    onBack = { showAutomationConsole = false },
+                                    modifier = Modifier.fillMaxSize(),
+                                )
                             } else {
                                 when (selectedNav) {
                                     DesktopSettingsNav.Identity -> {
@@ -1260,6 +1272,9 @@ internal fun DesktopSettingsPane(
                                             onOpenTrustedDevices = {
                                                 selectedNav = DesktopSettingsNav.TrustedDevices
                                             },
+                                            onToggleAssistantEnabled = controller::updateAssistantEnabled,
+                                            onToggleAllowExternalPrivateChat = controller::updateAllowExternalPrivateChat,
+                                            onOpenAutomationConsole = { showAutomationConsole = true },
                                             onBack = null,
                                         )
                                     }

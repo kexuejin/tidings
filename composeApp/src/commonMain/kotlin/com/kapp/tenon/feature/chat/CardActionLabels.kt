@@ -5,7 +5,12 @@ package com.kapp.tenon.feature.chat
 import androidx.compose.runtime.Composable
 import com.kapp.tenon.generated.resources.Res
 import com.kapp.tenon.generated.resources.card_action_cancel_task
+import com.kapp.tenon.generated.resources.card_action_merge
 import com.kapp.tenon.generated.resources.card_action_open_prototype
+import com.kapp.tenon.generated.resources.card_action_open_quest
+import com.kapp.tenon.generated.resources.card_action_reply
+import com.kapp.tenon.generated.resources.card_action_resume
+import com.kapp.tenon.generated.resources.card_action_retry
 import com.kapp.tenon.generated.resources.card_action_send_as_adjustment
 import com.kapp.tenon.generated.resources.card_action_send_as_new_task
 import com.kapp.tenon.generated.resources.card_action_start_task
@@ -39,6 +44,20 @@ internal object CardActionLabelKeys {
         "card.action.open_prototype" to Res.string.card_action_open_prototype,
         "card.action.send_as_adjustment" to Res.string.card_action_send_as_adjustment,
         "card.action.send_as_new_task" to Res.string.card_action_send_as_new_task,
+        "card.action.reply" to Res.string.card_action_reply,
+        "card.action.reply_tune" to Res.string.card_action_reply,
+        "card.action.reply-tune" to Res.string.card_action_reply,
+        "card.action.resume" to Res.string.card_action_resume,
+        "card.action.resume_quest" to Res.string.card_action_resume,
+        "card.action.resume-quest" to Res.string.card_action_resume,
+        "card.action.merge" to Res.string.card_action_merge,
+        "card.action.merge_patch" to Res.string.card_action_merge,
+        "card.action.merge-patch" to Res.string.card_action_merge,
+        "card.action.retry" to Res.string.card_action_retry,
+        "card.action.retry_quest" to Res.string.card_action_retry,
+        "card.action.retry-quest" to Res.string.card_action_retry,
+        "card.action.open_quest" to Res.string.card_action_open_quest,
+        "card.action.open-quest" to Res.string.card_action_open_quest,
     )
 }
 

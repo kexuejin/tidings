@@ -119,6 +119,7 @@ import com.kapp.tenon.generated.resources.cabinet_upload_started
 import com.kapp.tenon.generated.resources.common_agent
 import com.kapp.tenon.generated.resources.common_close
 import com.kapp.tenon.generated.resources.common_human
+import com.kapp.tenon.generated.resources.conv_badge_assistant
 import com.kapp.tenon.generated.resources.chat_nudge_failed
 import com.kapp.tenon.generated.resources.chat_nudge_throttled
 import com.kapp.tenon.generated.resources.chat_send_failed
@@ -294,6 +295,21 @@ fun KindBadge(isAgent: Boolean) {
             fontWeight = FontWeight.SemiBold,
             // 纵向口径 = sp.xxs(2)（ConversationRow.PinnedTag 批次定档：原型 1.5px
             // 统一 snap 到 2dp，残留的 1.5.dp 字面量随批归一）。
+            modifier = Modifier.padding(horizontal = sp.sm6, vertical = sp.xxs),
+        )
+    }
+}
+
+/** 私人助理专属高亮徽标。 */
+@Composable
+fun AssistantBadge() {
+    val sp = LocalAppSpacing.current
+    Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = CircleShape) {
+        Text(
+            text = stringResource(Res.string.conv_badge_assistant),
+            color = MaterialTheme.colorScheme.onPrimaryContainer,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
             modifier = Modifier.padding(horizontal = sp.sm6, vertical = sp.xxs),
         )
     }

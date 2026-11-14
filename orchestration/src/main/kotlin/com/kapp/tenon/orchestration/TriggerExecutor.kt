@@ -75,7 +75,9 @@ class TriggerExecutor(
      * 任务执行出口：生产 = 先解析 CLI 驱动（`executeCliTask`），解析不到再按
      * agentId 匹配插件 leader（`pluginForAgent` → `executePluginTask`，经插件的
      * HTTP 桥）——内置席位与外部插件两条执行体平铺平等（提案 §4 统一 Tool Schema）；
-     * 都解析不到如实报错。测试注入 fake。两条路径都 `wsPath = null`（零 worktree）。
+     * 都解析不到如实报错。测试注入 fake。wsPath 由请求携带（自动化任务绑定的工作区，
+     * 沙箱语义在 [com.kapp.tenon.agent.drivers.SandboxedCliDriver] 内）；
+     * null = 零 worktree（webhook 触发等既有通道维持原样）。
      */
     internal var cliRunner: suspend (CliRunRequest) -> CliRunResult = { request ->
         val plane = planeProvider()
@@ -85,7 +87,7 @@ class TriggerExecutor(
             val (sessionId, status, error) = plane.executeCliTask(
                 agentKey = request.agentKey,
                 prompt = request.prompt,
-                wsPath = null,
+                wsPath = request.wsPath,
                 requestedSessionId = null,
                 sessionTitle = request.title,
                 convId = request.convId,
@@ -104,7 +106,7 @@ class TriggerExecutor(
                 val (sessionId, status, error) = plane.executePluginTask(
                     entry = entry,
                     rawPrompt = request.prompt,
-                    wsPath = null,
+                    wsPath = request.wsPath,
                     requestedSessionId = null,
                     sessionTitle = request.title,
                     convId = request.convId,
@@ -121,6 +123,12 @@ class TriggerExecutor(
         val title: String,
         /** Tenon 会话键（§9 阶段三对齐键）：审批卡按它归会话。 */
         val convId: String?,
+        /**
+         * 任务绑定的工作区物理路径：非空时 CLI 通路把它交给沙箱驱动开 worktree
+         * （自动化任务的 [com.kapp.tenon.domain.AutomationTask.workspacePath]）。
+         * null = 零 worktree —— 触发通道的既有行为，不可悄悄变掉。
+         */
+        val wsPath: String? = null,
         /**
          * 只读白名单的**执行前**判据（§7.1 第 3 条）：由 [execute] 填
          * `CognitiveFlow::allowsTool`，CLI 通路把它登记到派单会话上，hook 审批
@@ -154,6 +162,8 @@ class TriggerExecutor(
         targetGroupId: String?,
         /** 回投会话的 Tenon 会话键（对齐键）：审批卡/回卡按它归位。 */
         convId: String? = null,
+        /** 任务绑定的工作区物理路径：非空 = CLI 通路进沙箱 worktree；null = 零 worktree。 */
+        wsPath: String? = null,
     ): Outcome {
         val prompt = TriggerPrompts.assemble(instruction, sourceId, event)
         val violated = AtomicReference<String?>(null)
@@ -163,6 +173,7 @@ class TriggerExecutor(
                 prompt = prompt,
                 title = title,
                 convId = convId,
+                wsPath = wsPath,
                 // 执行前的那一半（§7.1 第 3 条）：同一份白名单，交给 CLI 通路登记到
                 // 派单会话上，hook 审批在工具落地之前据此拒绝。提示词是请求，
                 // 代码才是约束 —— 而「拦得住」比「事后判负」更接近约束。

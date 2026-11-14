@@ -26,7 +26,7 @@
    * 任何涉及代码写盘的任务，**必须且强制在独立临时分支 Git Worktree 中执行**；
    * 宿主工作树保持零变化；产物清理严格走 `deleteArtifactsSafely()`，誓死捍卫机主 `$HOME` 目录免受软链穿透。
 6. **帧预算与信令指针化（Budget & Pointerization）**：
-   * 严守单聊 4096 B / 卡片 24 KiB 预算底线；超限大内容在本地落库，线上传输只发精简结构化通知帧（<= 700 B，统一对齐 `Limits.QUEST_NOTICE_FRAME_BUDGET = 700`）。
+   * 严守单聊 4096 B / 卡片 24 KiB 预算底线；超限大内容在本地落库，线上传输只发精简结构化通知帧（<= 650 B，统一对齐 `Limits.QUEST_NOTICE_FRAME_BUDGET = 650`——按 UDP 信封余量倒算）。
 7. **本地优先与状态对齐（Local-First & Rev Alignment）**：
    * 私人助理零延迟瞬时写入本地 SQLite，离线自动变身草稿便签；
    * 多端卡片流转依托单向递增 `rev` 实现原位翻面（Flip），多端状态绝对一致。
@@ -71,7 +71,7 @@
 | **2. 释放 Worktree 沙箱能力** | `SandboxedCliDriver.kt` 已支持 `wsPath.isNotBlank()` 自动切入 `sandbox.run(...)` | **极轻**。此前定时通道硬编码 `wsPath = null`；仅需将控制台绑定的项目目录物理路径透传，即可 100% 激活已有沙箱。 | **极高 (Ready)** | 0.5 天 |
 | **3. 1:1 详情页与员工名册换人** | 现有 `GroupInfoDialog`，1:1 缺乏详情页；名册体系已有 `VirtualAgentMember` | **中等**。补齐 `ConversationInfoDialog`；普通对端改备注名，助理切换当班角色与离线 Key 配置。纯 UI 扩展。 | **高 (High)** | 2.0 天 |
 | **4. 主支线分形导航与下钻** | 底层已有 `activeTickets`、`StageChain`、`taskId` 独立日志；缺乏 UI 分级页面 | **中等**。将现有的 `TicketCard` 扩充点击路由，利用已有 `ChatScreen` 外壳复用出沉浸专注流与 Subagent 独立视图。 | **高 (High)** | 3.0 天 |
-| **5. 单聊帧预算轻量通知协议** | `Limits.kt` 单聊硬上限 4096 B，卡片 24 KiB；现行机制 1:1 卡片不随帧外发 | **中等 (需严守纪律)**。桌面端卡片在本地全量落库；跨端同步仅发送带有 `cardId` 的精简通知帧（<= 700 B，`Limits.QUEST_NOTICE_FRAME_BUDGET`），绝不超帧。 | **中高 (Careful)** | 1.5 天 |
+| **5. 单聊帧预算轻量通知协议** | `Limits.kt` 单聊硬上限 4096 B，卡片 24 KiB；现行机制 1:1 卡片不随帧外发 | **中等 (需严守纪律)**。桌面端卡片在本地全量落库；跨端同步仅发送带有 `cardId` 的精简通知帧（<= 650 B，`Limits.QUEST_NOTICE_FRAME_BUDGET`），绝不超帧。 | **中高 (Careful)** | 1.5 天 |
 
 > **综合评估结论**：**整体方案可执行度为 95%**。本方案没有引入任何需要重构底层数据库或网络协议的破坏性改动，而是**将底层已经具备却被硬编码压抑的强大能力（`SandboxedCliDriver`、`WorktreeSandbox`、`StageChain`）释放并串联到全新的前端分形交互中**。
 

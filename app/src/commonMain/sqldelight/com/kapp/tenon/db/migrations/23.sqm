@@ -1,0 +1,21 @@
+-- 支线执行台账 (QuestLedger)：QuestRunner 的持久注册表。
+--
+-- 为什么必须持久化：QuestRunner 的 in-flight 支线（等机主确认合流 / 运行中）
+-- 此前只活在内存里——桌面端重启后 confirmMerge 不可用，worktree 路径随进程蒸发。
+-- 行的生命周期：dispatch 建（RUNNING）→ 等机主确认翻 WAITING_INPUT →
+-- 终态（合流完成/失败/叫停）删行；开机恢复扫描读它把 in-flight 支线收编回链路。
+-- status 的取值域是 core 的 QuestStatus 枚举名（单一来源）。
+CREATE TABLE IF NOT EXISTS QuestLedger (
+    quest_id TEXT NOT NULL PRIMARY KEY,
+    branch TEXT NOT NULL,
+    worktree_path TEXT NOT NULL,
+    main_workspace TEXT NOT NULL,
+    conv_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    status TEXT NOT NULL,
+    -- 重跑（一键恢复）所需的原始输入：INTERRUPTED 支线从这里拿 prompt/agentKey
+    -- 重新 dispatch，不需要回溯 AutomationTask（任务可能已删）。
+    prompt TEXT NOT NULL DEFAULT '',
+    agent_key TEXT NOT NULL DEFAULT '',
+    updated_at INTEGER NOT NULL
+);

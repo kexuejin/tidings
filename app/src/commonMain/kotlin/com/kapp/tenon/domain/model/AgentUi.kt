@@ -720,6 +720,12 @@ data class ConversationUi(
     val isPinned: Boolean = false,
     /** 这一行被**静音**：消息照收，但不产生通知。 */
     val isMuted: Boolean = false,
+    /** 标识是否为机主唯一的私人助理。 */
+    val isAssistant: Boolean = false,
+    /** 当前会话中正在并发运行的支线任务总数 (用于主界面展示微胶囊)。 */
+    val activeQuestCount: Int = 0,
+    /** 当前私人助理所指派的员工角色名称 (非助理为 null)。 */
+    val assignedRoleName: String? = null,
 )
 
 /**

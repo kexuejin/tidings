@@ -93,6 +93,10 @@ data class ChatScreenState(
     val initialStagedFiles: List<LocalFile> = emptyList(),
     /** 细粒度单会话独立流（Task 2.6）：非空时优先从独立流收集消息，消除跨群重组风暴。 */
     val messageFlow: kotlinx.coroutines.flow.Flow<List<MessageUi>>? = null,
+    /** 支线任务 ID (null 为第 0 层主线，非 null 为第 1 层支线作战室)。 */
+    val questId: String? = null,
+    /** Subagent ID (非 null 为第 2 层单兵白盒会话)。 */
+    val subagentId: String? = null,
 )
 
 /**
@@ -263,6 +267,39 @@ data class ChatScreenActions(
      * null = 头部不画这个入口（预览 / 没有这条能力的壳）。
      */
     val onCloseAndClearConversation: (() -> Unit)? = null,
+    /** 修改对端好友备注。 */
+    val onSetPeerRemark: ((peerId: String, remark: String) -> Unit)? = null,
+    /** 修改私人助理配置（昵称、当班角色、云端备用 Key）。 */
+    val onUpdateAssistantConfig: ((customName: String?, roleKey: String?) -> Unit)? = null,
+    /** 打开自动化任务控制台。 */
+    val onOpenAutomationConsole: (() -> Unit)? = null,
+    /** 导航进入支线作战室。 */
+    val onNavigateQuest: ((questId: String) -> Unit)? = null,
+    /** 顺流点击动作块，导航进入第 2 层 Subagent 白盒会话。 */
+    val onNavigateSubagent: ((questId: String, subagentId: String) -> Unit)? = null,
+    /** 第 2 层 Subagent 暂停与打字微调介入。 */
+    val onInterveneSubagent: ((questId: String, subagentId: String, text: String) -> Unit)? = null,
+    /** 机主在支线主线介入纠偏。 */
+    val onSubmitQuestIntervention: ((questId: String, text: String) -> Unit)? = null,
+    /** 对已超时的 PAUSED 任务一键恢复并补充输入。 */
+    val onResumePausedQuest: ((questId: String, text: String) -> Unit)? = null,
+    /** 机主手动批准合流。 */
+    val onApplyQuestPatch: ((questId: String) -> Unit)? = null,
+    /** 机主叫停一条支线（卡片 cancel-quest 动作）。 */
+    val onCancelQuest: ((questId: String) -> Unit)? = null,
+    /** 中断/失败支线的一键恢复（卡片 retry-quest 动作）。 */
+    val onRetryQuest: ((questId: String) -> Unit)? = null,
+    /** 助理会话的派单发送（支线模式 toggle 开启时走它）：盖 clientToken 落便签并交执行体。 */
+    val onDispatchQuest: ((prompt: String) -> Unit)? = null,
+)
+
+/**
+ * 跨端表现层分形路由参数 (对齐 LLD §6.1 / Spec §4.3 分形模型)。
+ */
+data class ChatScreenArgs(
+    val convId: String,
+    val questId: String? = null,
+    val subagentId: String? = null,
 )
 
 /**

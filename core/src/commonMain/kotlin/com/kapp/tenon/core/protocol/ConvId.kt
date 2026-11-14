@@ -20,13 +20,36 @@ package com.kapp.tenon.core.protocol
  */
 object ConvId {
     const val GROUP_PREFIX: String = "group:"
+    const val AGENT_PREFIX: String = "agent:"
+    const val QUEST_PREFIX: String = "quest:"
+
+    /**
+     * 系统保留：机主唯一专属私人助理会话键。
+     *
+     * 【血泪约束】：绝不含冒号（严禁起名为 "assistant:me"）。
+     * ConversationProjections.kt 中有过滤规则，含有冒号的非群/非外部Agent会话会被静默过滤。
+     */
+    const val ASSISTANT: String = "assistant"
 
     /** 私聊会话键。存在的意义是让调用方不必记"私聊不加前缀"这条约定。 */
     fun single(peerId: String): String = peerId
 
     fun group(groupId: String): String = GROUP_PREFIX + groupId
 
+    /** 外部节点 1:1 单聊会话键 (agent:<nodeId>/<agentId>) */
+    fun externalAgent(nodeId: String, agentId: String): String = "$AGENT_PREFIX$nodeId/$agentId"
+
+    /** 支线任务作战室与 Subagent 独立会话键 (quest:<questId> 或 quest:<questId>/<subagentId>) */
+    fun quest(questId: String, subagentId: String? = null): String =
+        if (subagentId == null) "$QUEST_PREFIX$questId" else "$QUEST_PREFIX$questId/$subagentId"
+
     fun isGroup(convId: String): Boolean = convId.startsWith(GROUP_PREFIX)
+
+    fun isAssistant(convId: String): Boolean = convId == ASSISTANT
+
+    fun isExternalAgent(convId: String): Boolean = convId.startsWith(AGENT_PREFIX)
+
+    fun isQuest(convId: String): Boolean = convId.startsWith(QUEST_PREFIX)
 
     /** 群会话键对应的 groupId；私聊键返回 null。 */
     fun groupIdOf(convId: String): String? =

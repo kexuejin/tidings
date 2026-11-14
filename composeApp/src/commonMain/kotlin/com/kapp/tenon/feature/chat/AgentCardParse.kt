@@ -252,8 +252,14 @@ fun cardRowOutcome(message: MessageUi, visibleCardMessageIds: Set<String>): Card
 // 判红 —— 一条「过期了没有」的判据如果自己读 `System.currentTimeMillis()`，
 // 它在慢机器与快机器上就是两条不同的测试。
 
-/** 宿主端自己发出的系统动作 id（卡片 JSON 里 label 只是占位，文案端上本地化）。 */
-const val SYSTEM_ACTION_MERGE_PATCH = "merge-patch"
+/**
+ * 宿主端自己发出的系统动作 id（卡片 JSON 里 label 只是占位，文案端上本地化）。
+ *
+ * **单一来源在 core 的 [com.kapp.tenon.core.protocol.Limits.SYSTEM_ACTION_MERGE_PATCH]** ——
+ * 这里只是同值别名（const → 编译期内联，无运行时差异）。此前两处各写一份字面量，
+ * 改一边漏另一边时两端都能编译，症状只会是「群卡能合并、支线卡不能」（或反过来）。
+ */
+const val SYSTEM_ACTION_MERGE_PATCH = com.kapp.tenon.core.protocol.Limits.SYSTEM_ACTION_MERGE_PATCH
 
 /**
  * 「停止这件活」。宿主侧接在 `onHostCardAction`，直接摘进程树。

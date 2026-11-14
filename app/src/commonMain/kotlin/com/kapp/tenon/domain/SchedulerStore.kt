@@ -133,7 +133,7 @@ object TriggerEventStates {
 
 /** SQLDelight 落地。表与具名查询的真身在 RelayDatabase.sq（21.sqm 迁移补到老库）。 */
 class SqlDelightSchedulerStore(
-    database: RelayDatabase,
+    val database: RelayDatabase,
     /**
      * 时钟注入：prune/翻态时间戳的测试钉子。
      *

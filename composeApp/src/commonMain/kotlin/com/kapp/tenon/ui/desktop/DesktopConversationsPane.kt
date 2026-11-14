@@ -177,6 +177,11 @@ public fun ConversationsPane(
     onOpenAgentConsole: (() -> Unit)? = null,
     selectedWsId: String? = null,
     activeSessionId: String? = null,
+    /** 桌面壳的分形层级（与 App.kt 的 nav 同语义）：第 1 层 questId / 第 2 层 subagentId。 */
+    activeQuestId: String? = null,
+    activeSubagentId: String? = null,
+    onNavigateQuest: ((questId: String) -> Unit)? = null,
+    onNavigateSubagent: ((questId: String, subagentId: String) -> Unit)? = null,
     onSelectAgentSession: ((String) -> Unit)? = null,
     /**
      * 进入当前会话那一刻的未读条数（task-2 接线，见 [ChatPane.unreadOnEntry]）。
@@ -322,6 +327,10 @@ public fun ConversationsPane(
             modifier = paneModifier,
             selectedWsId = selectedWsId,
             activeSessionId = activeSessionId,
+            activeQuestId = activeQuestId,
+            activeSubagentId = activeSubagentId,
+            onNavigateQuest = onNavigateQuest,
+            onNavigateSubagent = onNavigateSubagent,
             unreadOnEntry = unreadOnEntry,
             onSelectAgentSession = onSelectAgentSession,
         )

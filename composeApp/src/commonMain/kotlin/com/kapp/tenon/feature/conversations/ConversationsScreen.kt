@@ -575,11 +575,18 @@ internal sealed interface InboxFeedItem {
     /**
      * 用户手动**置顶**了这一行。
      *
-     * 它是排序的**第一把尺子**（比"有未处理"更优先）：用户钉它上去的意思就是
-     * "不管多旧、多安静，都留在最上面"。工作区行恒 false —— 置顶是会话列表的概念，
-     * 工作区段由它自己的待审批规则排序。
+     * 它是排序的第二把尺子（"私人助理强制置顶"在第零位，见 [orderInboxFeed]）：
+     * 用户钉它上去的意思就是"不管多旧、多安静，都留在最上面"。工作区行恒 false ——
+     * 置顶是会话列表的概念，工作区段由它自己的待审批规则排序。
      */
     val isPinned: Boolean
+
+    /**
+     * 私人助理行：排序的**第零把尺子**（强制置顶，压过用户置顶的会话）。
+     * 没有这把尺子，投影层「助理放最前」的宣称会被这里的 pinned/timestamp 打架吃掉
+     * （评审 P1-2：两套排序真源）。工作区行恒 false。
+     */
+    val isAssistant: Boolean
 
     data class Conversation(val conv: ConversationUi) : InboxFeedItem {
         override val key: String get() = "conv_${conv.convId}"
@@ -594,6 +601,8 @@ internal sealed interface InboxFeedItem {
         override val pendingCount: Int get() = 0
 
         override val isPinned: Boolean get() = conv.isPinned
+
+        override val isAssistant: Boolean get() = conv.isAssistant
     }
 
     data class Workspace(
@@ -606,6 +615,9 @@ internal sealed interface InboxFeedItem {
 
         // 置顶是**会话列表**的概念；工作区段用它自己的待审批规则排序。
         override val isPinned: Boolean get() = false
+
+        // 助理是会话行的概念；工作区段不参与。
+        override val isAssistant: Boolean get() = false
     }
 }
 
@@ -624,9 +636,13 @@ internal sealed interface InboxFeedItem {
 internal fun orderInboxFeed(items: List<InboxFeedItem>): List<InboxFeedItem> =
     items.distinctBy { it.key }
         .sortedWith(
-            // 第一把尺子 = 用户手动置顶：钉上去的意思就是"不管多旧、多安静，都在最上面"，
-            // 所以它必须排在「有未处理」之前 —— 否则一条待审批就能把置顶会话挤下去。
-            compareByDescending<InboxFeedItem> { it.isPinned }
+            // 第零把尺子 = 私人助理强制置顶：投影层「助理放最前」的宣称要在这里兑现，
+            // 否则用户手动置顶的任何会话（同 pinned 桶、时间戳更新）都会压过助理 ——
+            // 两套排序真源打架（评审 P1-2）。
+            compareByDescending<InboxFeedItem> { it.isAssistant }
+                // 第一把尺子 = 用户手动置顶：钉上去的意思就是"不管多旧、多安静，都在最上面"，
+                // 所以它必须排在「有未处理」之前 —— 否则一条待审批就能把置顶会话挤下去。
+                .thenByDescending { it.isPinned }
                 .thenByDescending { it.pendingCount > 0 }
                 .thenByDescending { it.timestamp },
         )

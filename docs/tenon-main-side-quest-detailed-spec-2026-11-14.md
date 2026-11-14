@@ -3,7 +3,7 @@
 > **文档标识**：`LLD-TENON-MAIN-SIDE-QUEST-2026-11-14`  
 > **文档版本**：v3.1 (全契约无漂移与高危边界修复版)  
 > **文档定位**：可直接指导代码落地的工程级规约（涵盖静态数据结构、状态机跃迁、动态时序、Git 事务防线、五类会话隔离矩阵、协议字段与 SQLDelight 迁移）。  
-> **权威基线**：严格遵守 `AGENTS.md`：纯函数确定性（单测结论不依赖机器与时钟）、不变量代码钉死、帧预算严格对齐（TCP 单聊硬上限 4096 B，通知帧硬上限 `Limits.QUEST_NOTICE_FRAME_BUDGET = 700 B`）、沙箱软链接递归删除铁律、生产代码硬编码中文静态门禁零违规（`cjkLiteralGate`）。
+> **权威基线**：严格遵守 `AGENTS.md`：纯函数确定性（单测结论不依赖机器与时钟）、不变量代码钉死、帧预算严格对齐（TCP 单聊硬上限 4096 B，通知帧硬上限 `Limits.QUEST_NOTICE_FRAME_BUDGET = 650 B`（按 UDP 单包 800 B 扣信封 ~150 B 倒算，代码为准））、沙箱软链接递归删除铁律、生产代码硬编码中文静态门禁零违规（`cjkLiteralGate`）。
 
 ---
 
@@ -12,7 +12,7 @@
 | 模块 | 影响文件路径 | 核心修改实体 / 符号名 | 依赖与构建约束 |
 |---|---|---|---|
 | **`:core`** | `core/src/commonMain/kotlin/com/kapp/tenon/core/protocol/ConvId.kt` | `object ConvId`（新增 `AGENT_PREFIX = "agent:"` 与 `isExternalAgent`） | 零平台依赖，纯 Kotlin |
-| **`:core`** | `core/src/commonMain/kotlin/com/kapp/tenon/core/protocol/Limits.kt` | `object Limits`（单聊正文硬上限 4096 B，通知帧硬上限 `QUEST_NOTICE_FRAME_BUDGET = 700`） | 严格白名单 |
+| **`:core`** | `core/src/commonMain/kotlin/com/kapp/tenon/core/protocol/Limits.kt` | `object Limits`（单聊正文硬上限 4096 B，通知帧硬上限 `QUEST_NOTICE_FRAME_BUDGET = 650`） | 严格白名单 |
 | **`:core`** | `core/src/commonMain/kotlin/com/kapp/tenon/core/protocol/AssistantQuestNotice.kt` | `data class AssistantQuestNotice`（全量状态枚举、`clientToken`、`diffStats`、`convId`） | `@Serializable` 跨端兼容 |
 | **`:app`** | `app/src/commonMain/sqldelight/com/kapp/tenon/database/17.sqm` | SQL 迁移：为 `MessageEntity` 新增 `quest_id`、`quest_rev`、`client_token` 索引列，建 `QuestSuspendedState` 表（含 `conv_id` 与 `rev`） | 对齐 `AGENTS.md §2.3`（版本号递增至 17） |
 | **`:app`** | `app/src/commonMain/kotlin/com/kapp/tenon/domain/store/MessageStore.kt` | `fun updateCardContent(...)`（带 `questId` 与 `rev` 乐观锁原位翻面） | 事务级更新 |
@@ -133,13 +133,13 @@ object ConvId {
 ```
 
 ### 2.3 `AssistantQuestNotice` 跨端契约与状态机全量枚举
-单聊正文（`kind: "text"`）TCP 上限为 **4096 B**（`Limits.TEXT_TCP_LIMIT`）。通知帧上限严格锁定为 `Limits.QUEST_NOTICE_FRAME_BUDGET = 700` 字节：
+单聊正文（`kind: "text"`）TCP 上限为 **4096 B**（`Limits.TEXT_TCP_LIMIT`）。通知帧上限严格锁定为 `Limits.QUEST_NOTICE_FRAME_BUDGET = 650` 字节（实现按 UDP 信封余量倒算取 650，比早期草案的 700 更保守）：
 
 ```kotlin
 // core/src/commonMain/kotlin/com/kapp/tenon/core/protocol/Limits.kt
 object Limits {
     const val TEXT_TCP_LIMIT: Int = 4096
-    const val QUEST_NOTICE_FRAME_BUDGET: Int = 700
+    const val QUEST_NOTICE_FRAME_BUDGET: Int = 650
 }
 ```
 
@@ -179,7 +179,7 @@ data class AssistantQuestNotice(
 
 #### 2.3.1 UTF-8 多级阶梯截断与 UTF-16 代理对防劈裂算法 (`AssistantNoticeClamper.kt`)
 针对极端情况（如包含大量 Emoji、长文本、换行符）保证：
-1. 绝对不产生超过 700 B 的 JSON；
+1. 绝对不产生超过 650 B 的 JSON；
 2. 绝对不在 UTF-16 代理对中间截断产生 `\uFFFD`（Unicode 替换字符）：
 
 ```kotlin
@@ -514,7 +514,7 @@ data class ChatScreenArgs(
 2. 机主在群内发送批准 ➔ Leader 校验通过 `[role=owner]`，开辟支线；卡片在群内展示，但仅机主有操作按钮。
 
 ### 场景 5：跨端 P2P 轻量流转与按需拉取
-1. 桌面后台跑完任务，向机主手机发送 380 字节通知帧（`<= 700 B`）；
+1. 桌面后台跑完任务，向机主手机发送 380 字节通知帧（`<= 650 B`）；
 2. 手机端卡片展示修改概览；机主点击【查看完整 Diff】按需拉取高亮补丁并远程批准合入。
 
 ### 场景 6：门禁自愈失败超限与求助机主
@@ -606,7 +606,7 @@ sealed class QuotaVerdict {
 
 | 测试类全路径 | 核心验证断言 | 对应防范的缺陷 |
 |---|---|---|
-| `composeApp/.../AssistantFrameBudgetGuardTest.kt` | 构造含 500 个汉字 + Emoji 代理对 + 换行引号转义 的极限 `AssistantQuestNotice`，断言截断后 `jsonBytes.size <= 700` 且无 UTF-8 乱码替换符 `\uFFFD` | 仅测短英文样例导致中文场景上线超帧拆链与代理对劈裂 |
+| `composeApp/.../AssistantFrameBudgetGuardTest.kt` | 构造含 500 个汉字 + Emoji 代理对 + 换行引号转义 的极限 `AssistantQuestNotice`，断言截断后 `jsonBytes.size <= 650` 且无 UTF-8 乱码替换符 `\uFFFD` | 仅测短英文样例导致中文场景上线超帧拆链与代理对劈裂 |
 | `orchestration/.../QuestInterventionHubConcurrencyTest.kt` | 并发重入同一 `questId` 时，旧协程收到 `CancellationException`，新协程正常被 `submitHumanInput` 唤醒且不被旧协程 `finally` 误删 | 并发覆盖导致协程永久挂起或误删句柄 |
 | `orchestration/.../QuestInterventionHubRecoveryTest.kt` | 模拟桌面端挂起期间崩溃重启，开机时扫描数据库并断言任务被正确翻面为 `INTERRUPTED` | 进程重启后内存丢失导致手机端永远等待 |
 | `orchestration/.../QuestSerialMergeLockSafetyTest.kt` | 模拟主分支工作区有未提交且与补丁重叠的文件，断言合流被阻断并返回 `Conflict`，且机主本地工作区无任何 `git stash` 痕迹 | 静默 stash 导致机主 IDE 文件闪烁或未保存代码丢失 |

@@ -824,13 +824,36 @@ fun handleOnInbound(envelope: Envelope) {
     // 歧义不执行（§4.2）：发送者自己的屏幕由其发送侧提示（每个成员各自跑 handleSendToGroup）；
     // 入站侧只保证本机不执行。
     val ambiguous = promptTarget is PromptTarget.Ambiguous
-    if (route == AgentPromptRoute.Local && !intentOwnsDispatch && !ambiguous) {
-        val prompt = RelayController.extractAgentPrompt(cleanedText, routeFacts.agentKinds)
-        // 点名事实必须在剥 @ **之前**从同一份 kinds 里取：prompt 里已经没有 @ 了，
-        // 编排层拿它重判只会得到「没点名」（D18：群工单句被分诊成只读讨论）。
-        val mentionedAgentKey = RelayController.mentionedAgentKeys(cleanedText, routeFacts.agentKinds).firstOrNull()
-        host.scope.launch {
-            host.onAgentPrompt?.invoke(convId, envelope.from, prompt, envelope.id, mentionedAgentKey)
+    // 外部 Agent 会话（ConvId.isExternalAgent）单聊管控守卫：
+    // 1. 普通人类 1:1 私聊（convId 为裸 nodeId）与群聊（group:）绝不受此影响，正常派单与接收；
+    // 2. 仅当外部 Agent 会话向本机发起对话并命中 Local 路由，且机主未开启 allowExternalPrivateChat 时方予拦截；
+    // 3. 拦截落专用的 NoticeKind.ExternalChatDisabled 通知行，绝不复用群成员执行权的 AgentNotAuthorized。
+    val isExternalAgentChat = ConvId.isExternalAgent(convId)
+    val externalChatBlocked = isExternalAgentChat && !host.state.value.settings.allowExternalPrivateChat
+    val allowedOps = host.state.value.settings.allowedOperators
+    val operatorBlocked = groupId != null && allowedOps.isNotEmpty() && envelope.from != null &&
+        envelope.from != host.state.value.settings.nodeId && envelope.from !in allowedOps
+    if (route == AgentPromptRoute.Local && !intentOwnsDispatch) {
+        if (externalChatBlocked) {
+            host.handleAppendMessage(
+                MessageUi(
+                    id = host.localMessageId(),
+                    peerId = convId,
+                    mine = false,
+                    text = "",
+                    at = nowMillis(),
+                    notice = NoticeKind.ExternalChatDisabled,
+                    noticeDetail = NoticeDetail(added = emptyList(), removed = emptyList(), actor = envelope.from),
+                ),
+            )
+        } else if (!externalChatBlocked && !operatorBlocked && !ambiguous) {
+            val prompt = RelayController.extractAgentPrompt(cleanedText, routeFacts.agentKinds)
+            // 点名事实必须在剥 @ **之前**从同一份 kinds 里取：prompt 里已经没有 @ 了，
+            // 编排层拿它重判只会得到「没点名」（D18：群工单句被分诊成只读讨论）。
+            val mentionedAgentKey = RelayController.mentionedAgentKeys(cleanedText, routeFacts.agentKinds).firstOrNull()
+            host.scope.launch {
+                host.onAgentPrompt?.invoke(convId, envelope.from, prompt, envelope.id, mentionedAgentKey)
+            }
         }
     }
     // **无权限提示必须独立于路由判定。**

@@ -1684,6 +1684,33 @@ Layer 4 仿真覆盖，真机环节为桌面自派 + 手机 `@agent` 回路（M5
    （§4.6 关键路径）；新发送端 + 旧宿主不执行。
 8. `closeCount` 全程 0；@领队 行为不变（单 agent 派单）。
 
+## 6b. 主支线（Quest）生命周期真机验收（2026-11-14 分支）
+
+前置：**先备份库**（桌面 `~/Library/Application Support/榫卯 Tenon/relay.db`）——
+本分支含 23.sqm（QuestLedger），SQLDelight 不降级迁移，旧构建打不开新库。
+
+每条判据都以**落库/台账读数**为准，不以卡面文案为准（§2.3 同源纪律）。
+
+1. **手动派单（桌面）**：助理会话开「支线派单」chip → 发指令。
+   判据：助理会话出现**一条** mine=true 便签 → 数秒内原位翻面成支线卡
+   （同 questId、RUNNING→终态，行数不增）；`QuestLedger` 出现该 quest_id 行。
+2. **调度派单**：绑定了工作区的自动化任务到点触发。
+   判据：同上；`AutomationTask.lastStatus` 推进 RUNNING→COMPLETED/FAILED，
+   persona 非驱动键时宿主日志有 `automation agentKey resolved` 留痕。
+3. **门禁命令**：任务配 `gateCommand`（如 `exit 1`）。
+   判据：卡面 FAILED、主仓零变化、宿主日志有 gate 失败尾巴；改合法命令后
+   重跑合流真落盘（主仓 HEAD 前进）。
+4. **确认流**：autoMerge=false 的任务跑完。
+   判据：卡面 WAITING_INPUT（merge-patch 按钮）；点批准 → 主仓 HEAD 真前进、
+   worktree 清场、`QuestLedger` 删行。
+5. **叫停**：RUNNING 卡点 cancel-quest。
+   判据：CLI 进程树被摘（ps 无残留）、卡面 CANCELLED、worktree 清场。
+6. **跨重启恢复**：确认流进行到 WAITING_INPUT 时杀掉桌面进程再启动。
+   判据：启动日志 `quest ledger recovery: 1 in-flight quest(s)`；该支线的
+   merge-patch 重启后照常真合流。
+7. **越界写防线**：派一条会改主仓工作树的指令（如让 CLI 写宿主仓绝对路径）。
+   判据：FAILED 且通知含 `Escaped write`，主仓改动不被合流（机主文件不动）。
+
 ## 7. 单条记录模板
 
 ```text

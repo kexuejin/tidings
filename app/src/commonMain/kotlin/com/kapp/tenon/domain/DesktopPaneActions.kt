@@ -86,7 +86,7 @@ public interface DesktopPaneActions {
      *
      * 签名与 `RelayController.setPeerRemark` **逐字相同**：接口成员不是"可选扩展"，
      * 加一个成员就要求**所有实现者**都动 —— 生产侧 `RelayController` 补 `override`
-     * （`RelayController.kt:145`）、预览侧 `DesktopPreviewActions` 补空实现，
+     * （[RelayController.setPeerRemark]）、预览侧 `DesktopPreviewActions` 补空实现，
      * 两件都躲不掉（我把这条写反过一次、把树弄红，Lead 修好并纠正）。
      */
     fun setPeerRemark(nodeId: String, remark: String)
@@ -560,5 +560,28 @@ public interface DesktopPaneActions {
 
     // ------------------------------------------------------------------ 语音消息
     fun sendVoice(peerId: String, filePath: String): Unit = Unit
+
+    // ------------------------------------------------------------------ 助理与自动化
+    fun updateAssistantEnabled(enabled: Boolean): Unit = Unit
+    fun updateAllowExternalPrivateChat(enabled: Boolean): Unit = Unit
+    fun updateAssistantCustomName(name: String?): Unit = Unit
+    fun updateAssistantRoleKey(roleKey: String?): Unit = Unit
+    fun saveAutomationTask(task: AutomationTask): Unit = Unit
+    fun deleteAutomationTask(id: String): Unit = Unit
+    fun toggleAutomationTask(id: String, enabled: Boolean): Unit = Unit
+    fun triggerAutomationTaskNow(id: String): Unit = Unit
+    fun submitQuestIntervention(questId: String, text: String): Unit = Unit
+    fun interveneSubagent(questId: String, subagentId: String, text: String): Unit = Unit
+    /** 机主叫停一条支线（in-flight = 沿挂起链摘 CLI 进程树；停靠态 = 清场）。 */
+    fun cancelQuest(questId: String): Unit = Unit
+    /**
+     * 机主在助理会话用派单模式发出的一条指令：盖 clientToken 落便签，
+     * 有执行体（桌面）时立即进支线生命周期；无执行体（手机/离线）= 便签留存。
+     */
+    fun dispatchAssistantQuest(prompt: String): Unit = Unit
+    /** 中断/失败支线的一键恢复：从台账取 prompt/agentKey 原 questId 重跑。 */
+    fun retryQuest(questId: String): Unit = Unit
+    fun resumePausedQuest(questId: String, text: String): Unit = Unit
+    fun applyQuestPatch(questId: String): Unit = Unit
 }
 

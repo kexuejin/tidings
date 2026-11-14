@@ -486,4 +486,20 @@ class AppNavStateTest {
         val nav = AppNavState(detailTeamGroupId = "g-1", detailTeamLeaderAgentId = "dsh-lead")
         assertEquals(nav, appNavStateFromSaverValue(nav.toSaverValue()))
     }
+
+    @Test
+    fun openQuestChatPreservesFractalStateAndRoundtrips() {
+        val nav = AppNavState().openQuestChat(a, "quest-101", "worker-1")
+        assertEquals(a, nav.activeSessionId)
+        assertEquals("quest-101", nav.activeQuestId)
+        assertEquals("worker-1", nav.activeSubagentId)
+
+        val restored = appNavStateFromSaverValue(nav.toSaverValue())
+        assertEquals(nav, restored)
+
+        val left = nav.leaveChatDetail()
+        assertNull(left.activeSessionId)
+        assertNull(left.activeQuestId)
+        assertNull(left.activeSubagentId)
+    }
 }

@@ -4,6 +4,7 @@
 package com.kapp.tenon.domain
 
 import com.kapp.tenon.core.protocol.ConvId
+import com.kapp.tenon.core.protocol.QUEST_AGENT_STATE_ACTIVE
 import com.kapp.tenon.core.protocol.GroupMeta
 import com.kapp.tenon.core.protocol.MsgTypes
 import com.kapp.tenon.domain.model.AgentSessionKey
@@ -119,11 +120,12 @@ fun conversations(
                         visibleAgentSessionsOf(id).isNotEmpty()
                 })
                 addAll(summariesByConv.keys.filter { key ->
-                    groupsByConv.containsKey(key) || real.containsKey(key) || (!com.kapp.tenon.core.protocol.IpAddressUtils.isIpv4(key) && !com.kapp.tenon.core.protocol.IpAddressUtils.isIpv6(key) && !key.contains(':'))
+                    groupsByConv.containsKey(key) || real.containsKey(key) || ConvId.isExternalAgent(key) || ConvId.isAssistant(key) ||
+                        (!com.kapp.tenon.core.protocol.IpAddressUtils.isIpv4(key) && !com.kapp.tenon.core.protocol.IpAddressUtils.isIpv6(key) && !key.contains(':'))
                 })
                 addAll(groupsByConv.keys)
             }
-            return ids
+            val normalList = ids
                 .map { id ->
                     val group = groupsByConv[id]
                     val peer = real[id]
@@ -167,6 +169,45 @@ fun conversations(
                         .thenByDescending { it.lastMessageAt }
                         .thenByDescending { it.presenceAt },
                 )
+
+            val hasAssistant = settings.assistantEnabled
+            if (!hasAssistant) {
+                return normalList
+            }
+
+            val assistantSummary = summariesByConv[ConvId.ASSISTANT]
+            val assistantUi = ConversationUi(
+                convId = ConvId.ASSISTANT,
+                title = settings.assistantCustomName?.takeIf { it.isNotBlank() } ?: "",
+                preview = assistantSummary?.lastTextPreview,
+                lastMessageIsMine = assistantSummary?.lastMessageIsMine == true,
+                isPinned = true,
+                isMuted = ConvId.ASSISTANT in settings.mutedConvIds,
+                at = assistantSummary?.lastMessageAt ?: 0L,
+                unread = unreadByPeer[ConvId.ASSISTANT] ?: 0,
+                isAgent = true,
+                online = true,
+                pendingCount = pendingByPeer[ConvId.ASSISTANT] ?: 0,
+                isGroup = false,
+                memberOnlineCount = 0,
+                memberCount = 1,
+                avatar = null,
+                lastMessageAt = assistantSummary?.lastMessageAt ?: 0L,
+                presenceAt = 0L,
+                isAssistant = true,
+                // 进行中的支线数：助理线程里每个 questId 的**最新** agentState 是
+                // 「进行中」档（RUNNING / PENDING_DISPATCH，含待投递便签）才计数——
+                // 恒 0 的字段是在撒谎（评审 P2）。
+                activeQuestCount = messages[ConvId.ASSISTANT].orEmpty()
+                    .filter { it.questId != null }
+                    .groupBy { it.questId }
+                    .count { (_, rows) ->
+                        rows.maxByOrNull { it.questRev }?.agentState == QUEST_AGENT_STATE_ACTIVE
+                    },
+                assignedRoleName = settings.assistantRoleKey,
+            )
+
+            return listOf(assistantUi) + normalList.filterNot { it.convId == ConvId.ASSISTANT }
         }
 
 /** 人类对端（切片版）：与 [RelayUiState.humanPeers] 逐字同义。 */

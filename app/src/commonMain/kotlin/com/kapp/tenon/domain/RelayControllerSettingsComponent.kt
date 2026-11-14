@@ -6,6 +6,7 @@ import com.kapp.tenon.domain.model.DeliveryState
 import com.kapp.tenon.domain.model.MessageUi
 import com.kapp.tenon.domain.model.PeerUi
 import com.kapp.tenon.core.nowMillis
+import com.kapp.tenon.core.protocol.CronValidation
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -97,6 +98,62 @@ fun handleUpdateKeepConnectionAlive(enabled: Boolean) {
     if (current.keepConnectionAlive == enabled) return
     host.handlePersist(current.copy(keepConnectionAlive = enabled))
     host.scope.launch { host.platform.backgroundConnection?.setEnabled(enabled) }
+}
+
+fun handleUpdateAssistantEnabled(enabled: Boolean) {
+    val current = host.state.value.settings
+    if (current.assistantEnabled == enabled) return
+    host.handlePersist(current.copy(assistantEnabled = enabled))
+}
+
+fun handleUpdateAllowExternalPrivateChat(enabled: Boolean) {
+    val current = host.state.value.settings
+    if (current.allowExternalPrivateChat == enabled) return
+    host.handlePersist(current.copy(allowExternalPrivateChat = enabled))
+}
+
+fun handleUpdateAssistantCustomName(name: String?) {
+    val current = host.state.value.settings
+    val clean = name?.takeIf { it.isNotEmpty() }
+    if (current.assistantCustomName == clean) return
+    host.handlePersist(current.copy(assistantCustomName = clean))
+}
+
+fun handleUpdateAssistantRoleKey(roleKey: String?) {
+    val current = host.state.value.settings
+    val clean = roleKey?.takeIf { it.isNotEmpty() }
+    if (current.assistantRoleKey == clean) return
+    host.handlePersist(current.copy(assistantRoleKey = clean))
+}
+
+fun handleSaveAutomationTask(task: AutomationTask) {
+    if (task.cron.isNotBlank()) {
+        val err = CronValidation.validate(task.cron)
+        require(err == null) { "Invalid cron expression: $err" }
+    }
+    val current = host.state.value.settings
+    val existingIndex = current.automationTasks.indexOfFirst { it.id == task.id }
+    val updatedList = if (existingIndex >= 0) {
+        current.automationTasks.toMutableList().apply { set(existingIndex, task) }
+    } else {
+        current.automationTasks + task
+    }
+    host.handlePersist(current.copy(automationTasks = updatedList))
+}
+
+fun handleDeleteAutomationTask(taskId: String) {
+    val current = host.state.value.settings
+    val updatedList = current.automationTasks.filterNot { it.id == taskId }
+    if (updatedList.size == current.automationTasks.size) return
+    host.handlePersist(current.copy(automationTasks = updatedList))
+}
+
+fun handleToggleAutomationTask(taskId: String, enabled: Boolean) {
+    val current = host.state.value.settings
+    val updatedList = current.automationTasks.map {
+        if (it.id == taskId) it.copy(enabled = enabled) else it
+    }
+    host.handlePersist(current.copy(automationTasks = updatedList))
 }
 
 /** 置顶 / 取消置顶一个会话。纯本机偏好，不进 wire。 */

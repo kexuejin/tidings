@@ -42,9 +42,12 @@ import com.kapp.tenon.domain.peer
 import com.kapp.tenon.domain.senderContext
 import com.kapp.tenon.domain.ChromeSlice
 import com.kapp.tenon.ui.components.GroupInfoDialog
+import com.kapp.tenon.ui.components.ConversationInfoDialog
 import com.kapp.tenon.generated.resources.chat_group_me
+import com.kapp.tenon.generated.resources.conv_info_title
 import com.kapp.tenon.generated.resources.chat_group_members
 import com.kapp.tenon.generated.resources.chat_group_members_action
+import com.kapp.tenon.generated.resources.assistant_default_title
 import com.kapp.tenon.generated.resources.chat_group_owner_label
 import com.kapp.tenon.generated.resources.chat_group_rev
 import com.kapp.tenon.core.protocol.GroupMeta
@@ -80,6 +83,7 @@ import com.kapp.tenon.generated.resources.ic_close
 import com.kapp.tenon.generated.resources.ic_copy
 import com.kapp.tenon.generated.resources.ic_external
 import com.kapp.tenon.generated.resources.ic_groups
+import com.kapp.tenon.generated.resources.ic_info
 import com.kapp.tenon.generated.resources.ic_list
 import com.kapp.tenon.generated.resources.ic_trash
 import org.jetbrains.compose.resources.stringResource
@@ -112,6 +116,11 @@ public fun ChatPane(
     onDraftChange: ((convId: String, text: String) -> Unit)? = null,
     selectedWsId: String? = null,
     activeSessionId: String? = null,
+    /** 桌面壳的分形层级（与 App.kt 的 nav 同语义）：第 1 层 questId / 第 2 层 subagentId。 */
+    activeQuestId: String? = null,
+    activeSubagentId: String? = null,
+    onNavigateQuest: ((questId: String) -> Unit)? = null,
+    onNavigateSubagent: ((questId: String, subagentId: String) -> Unit)? = null,
     onSelectAgentSession: ((String) -> Unit)? = null,
     /**
      * 进入这个会话**那一刻**的未读条数（真机反馈 #5 的屏外未读指示）。
@@ -152,6 +161,8 @@ public fun ChatPane(
                 peerId = selectedPeerId,
                 wsId = selectedWsId,
                 activeSessionId = activeSessionId,
+                questId = activeQuestId,
+                subagentId = activeSubagentId,
                 unreadOnEntry = unreadOnEntry,
                 cacheDir = null,
                 initialStagedFiles = initialStagedFiles,
@@ -224,6 +235,20 @@ public fun ChatPane(
                     val known = agentSessionsOf(agentSlice, peerId).count { it.wsId == wsId }
                     controller.requestAgentSessionPage(peerId, wsId, offset = known.toLong())
                 },
+                onSetPeerRemark = controller::setPeerRemark,
+                onUpdateAssistantConfig = { customName, roleKey ->
+                    if (customName != null) controller.updateAssistantCustomName(customName)
+                    if (roleKey != null) controller.updateAssistantRoleKey(roleKey)
+                },
+                onInterveneSubagent = controller::interveneSubagent,
+                onSubmitQuestIntervention = controller::submitQuestIntervention,
+                onResumePausedQuest = controller::resumePausedQuest,
+                onApplyQuestPatch = controller::applyQuestPatch,
+                onNavigateQuest = onNavigateQuest,
+                onNavigateSubagent = onNavigateSubagent,
+                onCancelQuest = controller::cancelQuest,
+                onRetryQuest = controller::retryQuest,
+                onDispatchQuest = controller::dispatchAssistantQuest,
             ),
             groupActions = ChatScreenGroupActions(
                 onAddGroupMembers = controller::addGroupMembers,
@@ -298,6 +323,7 @@ public fun ChatPane(
         return
     }
     var showGroupInfo by remember(selectedPeerId) { mutableStateOf(false) }
+    var showConversationInfo by remember(selectedPeerId) { mutableStateOf(false) }
     // 「清空本会话记录」的确认框开合。桌面头部（DesktopChatHeader）画在这一层之下，
     // 所以触发与确认框都由本层持有；手机那条壳的同类确认框在 ChatScreen 里。
     var showClearConfirm by remember(selectedPeerId) { mutableStateOf(false) }
@@ -346,6 +372,7 @@ public fun ChatPane(
                 }
             },
             onViewGroupInfo = if (group != null) ({ showGroupInfo = true }) else null,
+            onViewConvInfo = if (group == null) ({ showConversationInfo = true }) else null,
             // 「清空本会话记录」：会话键直接用 selectedPeerId（私聊=对方 nodeId、
             // 群=group:<groupId>）—— 与 ChatScreenActions 里别的回调同一口径。
             // 与手机端共用同一个确认框（见 ClearConversationDialog）。
@@ -391,6 +418,25 @@ public fun ChatPane(
                 // 团队档案（住本机设置）：面板里「添加团队」段的候选与写通路。
                 teamProfiles = settingsSlice.settings.teamProfiles,
                 onAttachTeam = { teamId -> controller.attachTeamToGroup(teamId, group.groupId) },
+            )
+        }
+        if (showConversationInfo && group == null) {
+            val isAssistant = ConvId.isAssistant(peer.nodeId)
+            ConversationInfoDialog(
+                isAssistant = isAssistant,
+                nodeId = peer.nodeId,
+                currentDisplayName = peer.displayName,
+                currentRemark = settingsSlice.settings.peerRemarks[peer.nodeId].orEmpty(),
+                currentAssistantRoleKey = settingsSlice.settings.assistantRoleKey,
+                automationTaskCount = settingsSlice.settings.automationTasks.size,
+                onDismiss = { showConversationInfo = false },
+                onSaveRemark = { remark ->
+                    controller.setPeerRemark(peer.nodeId, remark)
+                },
+                onSaveAssistantConfig = { customName, roleKey ->
+                    if (customName != null) controller.updateAssistantCustomName(customName)
+                    if (roleKey != null) controller.updateAssistantRoleKey(roleKey)
+                },
             )
         }
         if (showClearConfirm) {
@@ -481,6 +527,7 @@ public fun DesktopChatHeader(
      */
     agentReadyCount: Int = 0,
     onViewGroupInfo: (() -> Unit)? = null,
+    onViewConvInfo: (() -> Unit)? = null,
     /**
      * 「清空本会话聊天记录」。null = 不画这个入口。
      *
@@ -531,8 +578,13 @@ public fun DesktopChatHeader(
                         base
                     }
                 }
+                val chatTitle = if (ConvId.isAssistant(peer.nodeId) && (peer.displayName == ConvId.ASSISTANT || peer.displayName.isBlank())) {
+                    stringResource(Res.string.assistant_default_title)
+                } else {
+                    peer.displayName
+                }
                 ChatHeaderContent(
-                    title = peer.displayName,
+                    title = chatTitle,
                     isAgent = peer.isAgent && group == null,
                     isGroup = group != null,
                     avatarOnline = if (group == null) peer.online else null,
@@ -593,6 +645,9 @@ public fun DesktopChatHeader(
                 val overflowActions = listOfNotNull(
                     onOpenInNewWindow?.let { open ->
                         HeaderAction(stringResource(Res.string.desktop_action_open_in_new_window), Res.drawable.ic_external, open)
+                    },
+                    onViewConvInfo?.let { viewInfo ->
+                        HeaderAction(stringResource(Res.string.conv_info_title), Res.drawable.ic_info, viewInfo)
                     },
                     onRequestScreenView?.let { reqScreen ->
                         HeaderAction(

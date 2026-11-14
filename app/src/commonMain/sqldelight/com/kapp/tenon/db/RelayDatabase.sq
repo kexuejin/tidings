@@ -45,11 +45,19 @@ CREATE TABLE MessageEntity (
     -- （老消息 / 未刷新）时消费方回退读 card_json。更新走 INSERT OR REPLACE +
     -- insertMessageDropStaleIndex（FTS 纪律同既有），AFTER UPDATE 触发器的
     -- WHEN old.text IS NOT new.text 保证它不触发全文重写。
-    card_payload TEXT DEFAULT NULL
+    card_payload TEXT DEFAULT NULL,
+    -- 支线任务关联 ID
+    quest_id TEXT DEFAULT NULL,
+    -- 支线任务乐观锁版本号
+    quest_rev INTEGER NOT NULL DEFAULT 0,
+    -- 客户端离线便签唯一 Token
+    client_token TEXT DEFAULT NULL
 );
 
 CREATE INDEX idx_message_conv_time ON MessageEntity(conv_id, timestamp);
 CREATE INDEX idx_message_peer ON MessageEntity(peer_id);
+CREATE INDEX IF NOT EXISTS index_message_quest_id ON MessageEntity(quest_id);
+CREATE INDEX IF NOT EXISTS index_message_client_token ON MessageEntity(client_token);
 -- 游标查询的专用索引（同时是 seq 的会话内唯一约束）。
 -- 分页的三条 SQL（最近 N 条 / 向上翻 / 向下翻）全部走 (conv_id, seq)。
 CREATE UNIQUE INDEX IF NOT EXISTS message_conv_seq ON MessageEntity(conv_id, seq);
@@ -128,10 +136,21 @@ WHERE conv_id = :convId;
 insertMessage:
 INSERT OR REPLACE INTO MessageEntity (
     id, conv_id, peer_id, sender_id, mine, text, timestamp, delivery, notice, notice_detail, file_json, screen_json,
-    agent_session_id, agent_session_title, seq, card_json, agent_state, card_payload
+    agent_session_id, agent_session_title, seq, card_json, agent_state, card_payload,
+    quest_id, quest_rev, client_token
 ) VALUES (
-    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 );
+
+updateCardPayloadByQuestId:
+UPDATE MessageEntity
+SET card_payload = :cardPayload, quest_rev = :rev, agent_state = :status
+WHERE quest_id = :questId AND (quest_rev IS NULL OR quest_rev < :rev);
+
+bindClientTokenToQuest:
+UPDATE MessageEntity
+SET quest_id = :questId, quest_rev = :rev, card_payload = :cardPayload, agent_state = :status
+WHERE client_token = :clientToken AND (quest_rev IS NULL OR quest_rev < :rev);
 
 selectMessagesByConv:
 SELECT * FROM MessageEntity
@@ -797,5 +816,71 @@ UPDATE TriggerEvent SET state = ?, error = ?, updated_at = ? WHERE source_id = ?
 
 deleteTriggerEventsTerminalBefore:
 DELETE FROM TriggerEvent WHERE state IN ('done', 'failed', 'skipped') AND updated_at < ?;
+
+-- 支线挂起等待状态表 (用于桌面端重启恢复与超时 PAUSED 跟踪)
+CREATE TABLE IF NOT EXISTS QuestSuspendedState (
+    quest_id TEXT NOT NULL PRIMARY KEY,
+    conv_id TEXT NOT NULL,
+    prompt TEXT NOT NULL,
+    status TEXT NOT NULL,
+    rev INTEGER NOT NULL DEFAULT 0,
+    suspended_at INTEGER NOT NULL
+);
+
+insertOrReplaceQuestSuspendedState:
+INSERT OR REPLACE INTO QuestSuspendedState(quest_id, conv_id, prompt, status, rev, suspended_at)
+VALUES (?, ?, ?, ?, ?, ?);
+
+updateQuestSuspendedStateStatus:
+UPDATE QuestSuspendedState SET status = ? WHERE quest_id = ?;
+
+-- 机主恢复（resume）时把补充指令并进 prompt：runner 重拉后读行即拿到完整上下文。
+-- 具名查询不是 DDL —— 不需要 .sqm（迁移只跟表/触发器/索引走）。
+updateQuestSuspendedStatePrompt:
+UPDATE QuestSuspendedState SET prompt = ? WHERE quest_id = ?;
+
+deleteQuestSuspendedStateById:
+DELETE FROM QuestSuspendedState WHERE quest_id = ?;
+
+selectAllQuestSuspendedStates:
+SELECT * FROM QuestSuspendedState;
+
+selectQuestSuspendedStateById:
+SELECT * FROM QuestSuspendedState WHERE quest_id = ?;
+
+-- 支线执行台账 (QuestLedger)：QuestRunner 的持久注册表——重启后 in-flight
+-- 支线的 confirmMerge 与恢复扫描靠它（行随终态删除；status 取值域 =
+-- core QuestStatus 枚举名）。老库由 23.sqm 补建（同形状，IF NOT EXISTS）。
+CREATE TABLE IF NOT EXISTS QuestLedger (
+    quest_id TEXT NOT NULL PRIMARY KEY,
+    branch TEXT NOT NULL,
+    worktree_path TEXT NOT NULL,
+    main_workspace TEXT NOT NULL,
+    conv_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    status TEXT NOT NULL,
+    -- 重跑（一键恢复）所需的原始输入：INTERRUPTED 支线从这里拿 prompt/agentKey
+    -- 重新 dispatch，不需要回溯 AutomationTask（任务可能已删）。
+    prompt TEXT NOT NULL DEFAULT '',
+    agent_key TEXT NOT NULL DEFAULT '',
+    updated_at INTEGER NOT NULL
+);
+
+insertOrReplaceQuestLedger:
+INSERT OR REPLACE INTO QuestLedger(quest_id, branch, worktree_path, main_workspace, conv_id, title, status, prompt, agent_key, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+updateQuestLedgerStatus:
+UPDATE QuestLedger SET status = ?, updated_at = ? WHERE quest_id = ?;
+
+deleteQuestLedgerById:
+DELETE FROM QuestLedger WHERE quest_id = ?;
+
+selectAllQuestLedgers:
+SELECT * FROM QuestLedger;
+
+selectQuestLedgerById:
+SELECT * FROM QuestLedger WHERE quest_id = ?;
+
 
 

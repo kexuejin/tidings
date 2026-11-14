@@ -102,6 +102,48 @@ class SqlDelightMessageStore(
         queries.upsertBoardCardRev(cardId, rev.toLong(), nowMillis())
     }
 
+    override fun updateCardContent(
+        questId: String,
+        newJsonContent: String,
+        status: String,
+        expectedRev: Long
+    ): Boolean {
+        var changed = false
+        queries.transaction {
+            queries.updateCardPayloadByQuestId(
+                cardPayload = newJsonContent,
+                rev = expectedRev,
+                status = status,
+                questId = questId
+            )
+            val changes = queries.selectChanges().executeAsOne()
+            changed = changes > 0
+        }
+        return changed
+    }
+
+    override fun bindPendingNoteToQuest(
+        clientToken: String,
+        questId: String,
+        newJsonContent: String,
+        status: String,
+        rev: Long
+    ): Boolean {
+        var changed = false
+        queries.transaction {
+            queries.bindClientTokenToQuest(
+                questId = questId,
+                rev = rev,
+                cardPayload = newJsonContent,
+                status = status,
+                clientToken = clientToken
+            )
+            val changes = queries.selectChanges().executeAsOne()
+            changed = changes > 0
+        }
+        return changed
+    }
+
     /**
      * 按库里的真实状态重算一个会话的摘要。
      *
@@ -288,6 +330,9 @@ class SqlDelightMessageStore(
                         card_json = values.cardJson,
                         agent_state = values.agentState,
                         card_payload = values.cardPayload,
+                        quest_id = values.questId,
+                        quest_rev = values.questRev,
+                        client_token = values.clientToken,
                     )
                     changed = true
                     touched += values.convId
@@ -896,6 +941,9 @@ private fun com.kapp.tenon.db.MessageEntity.toUi(): MessageUi {
             runCatching { MessageStore.json.parseToJsonElement(it) as? kotlinx.serialization.json.JsonObject }.getOrNull()
         },
         agentState = agent_state,
+        questId = quest_id,
+        questRev = quest_rev,
+        clientToken = client_token,
     )
 }
 
@@ -1050,6 +1098,9 @@ private data class MessageRowValues(
     val cardJson: String?,
     val cardPayload: String?,
     val agentState: String?,
+    val questId: String?,
+    val questRev: Long,
+    val clientToken: String?,
 )
 
 /**
@@ -1086,6 +1137,9 @@ private fun MessageUi.toRowValues(peerId: String): MessageRowValues {
         cardJson = card?.let { runCatching { MessageStore.json.encodeToString(kotlinx.serialization.json.JsonObject.serializer(), it) }.getOrNull() },
         cardPayload = cardPayload?.let { runCatching { MessageStore.json.encodeToString(kotlinx.serialization.json.JsonObject.serializer(), it) }.getOrNull() },
         agentState = agentState,
+        questId = questId,
+        questRev = questRev,
+        clientToken = clientToken,
     )
 }
 
@@ -1112,5 +1166,8 @@ private fun com.kapp.tenon.db.MessageEntity.matches(values: MessageRowValues): B
         agent_session_title == values.agentSessionTitle &&
         card_json == values.cardJson &&
         card_payload == values.cardPayload &&
-        agent_state == values.agentState
+        agent_state == values.agentState &&
+        quest_id == values.questId &&
+        quest_rev == values.questRev &&
+        client_token == values.clientToken
 

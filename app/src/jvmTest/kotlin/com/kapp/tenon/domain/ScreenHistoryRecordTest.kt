@@ -223,7 +223,9 @@ class ScreenHistoryRecordTest {
         // root cause #3 —— 重启后广播侧 rev 延续不再依赖 200 条恢复窗口）。
         // 22 = 21.sqm 之后。21.sqm 只做 CREATE：SchedulerTaskState + TriggerEvent
         // （调度中枢的持久化 Job Table，两个半边：任务运行态 + 触发事件队列）。
-        assertEquals(22L, RelayDatabase.Schema.version, "迁移文件数 + 1 —— 加一个 .sqm 就得同步改这条")
+        // 24 = 23.sqm 之后。23.sqm 建立 QuestLedger 表（QuestRunner 的持久注册表：
+        // 重启后 in-flight 支线的 confirmMerge 与恢复扫描靠它）。
+        assertEquals(24L, RelayDatabase.Schema.version, "迁移文件数 + 1 —— 加一个 .sqm 就得同步改这条")
 
         val database = RelayDatabase(driver)
         val old = database.relayDatabaseQueries.selectMessagesByConv("peer-1").executeAsList().single()
@@ -254,6 +256,9 @@ class ScreenHistoryRecordTest {
             card_json = null,
             agent_state = null,
             card_payload = null,
+            quest_id = null,
+            quest_rev = 0L,
+            client_token = null,
         )
         val fresh = database.relayDatabaseQueries.selectMessagesByConv("peer-1").executeAsList()
             .single { it.id == "new-1" }

@@ -9,6 +9,11 @@ import com.kapp.tenon.core.fs.pathJoin
 import com.kapp.tenon.core.fs.use
 import com.kapp.tenon.core.ioDispatcher
 import com.kapp.tenon.core.nowMillis
+import com.kapp.tenon.core.protocol.AssistantNoticeClamper
+import com.kapp.tenon.core.protocol.AssistantQuestNotice
+import com.kapp.tenon.core.protocol.toProtocolAgentState
+import com.kapp.tenon.core.protocol.Limits
+import com.kapp.tenon.core.protocol.AgentSenderId
 import com.kapp.tenon.core.protocol.ConvId
 import com.kapp.tenon.core.protocol.TeamMemberDraft
 import com.kapp.tenon.domain.recovery.NoPlatformRecovery
@@ -669,6 +674,102 @@ class RelayController(
     fun updateNotifyMentionOnly(enabled: Boolean) = settingsCtl.handleUpdateNotifyMentionOnly(enabled)
     fun updateNotifyQuietHours(enabled: Boolean) = settingsCtl.handleUpdateNotifyQuietHours(enabled)
     fun updateKeepConnectionAlive(enabled: Boolean) = settingsCtl.handleUpdateKeepConnectionAlive(enabled)
+    override fun updateAssistantEnabled(enabled: Boolean) = settingsCtl.handleUpdateAssistantEnabled(enabled)
+    override fun updateAllowExternalPrivateChat(enabled: Boolean) = settingsCtl.handleUpdateAllowExternalPrivateChat(enabled)
+    var onTriggerAutomationTask: ((task: AutomationTask) -> Unit)? = null
+    var onQuestIntervention: ((questId: String, actionId: String, text: String) -> Boolean)? = null
+    var onSubagentIntervention: ((questId: String, subagentId: String, text: String) -> Unit)? = null
+    /**
+     * 助理会话派单端口：[dispatchAssistantQuest] 盖好 clientToken 的便签交给执行体
+     * （桌面 = QuestRunner 立即进支线生命周期）。返回 false = 无执行体（手机/离线）——
+     * 便签已落库留存，Phase 2 的跨端同步接手。
+     */
+    var onAssistantQuestDispatch: ((prompt: String, clientToken: String) -> Boolean)? = null
+
+    override fun updateAssistantCustomName(name: String?) = settingsCtl.handleUpdateAssistantCustomName(name)
+    override fun updateAssistantRoleKey(roleKey: String?) = settingsCtl.handleUpdateAssistantRoleKey(roleKey)
+    override fun saveAutomationTask(task: AutomationTask) = settingsCtl.handleSaveAutomationTask(task)
+    override fun deleteAutomationTask(id: String) = settingsCtl.handleDeleteAutomationTask(id)
+    override fun toggleAutomationTask(id: String, enabled: Boolean) = settingsCtl.handleToggleAutomationTask(id, enabled)
+    override fun triggerAutomationTaskNow(id: String) {
+        val task = state.value.settings.automationTasks.firstOrNull { it.id == id } ?: return
+        val now = com.kapp.tenon.core.nowMillis()
+        saveAutomationTask(task.copy(lastRunAt = now, lastStatus = "RUNNING"))
+        onTriggerAutomationTask?.invoke(task)
+    }
+
+    /** 机主在支线/主线介入纠偏。通过挂起中枢唤醒或卡片动作翻面，绝不向聊天流发送方括号假指令。 */
+    override fun submitQuestIntervention(questId: String, text: String) {
+        val handled = onQuestIntervention?.invoke(questId, "reply-tune", text) ?: false
+        if (!handled) {
+            handleCardAction(
+                groupId = com.kapp.tenon.core.protocol.ConvId.ASSISTANT,
+                cardId = questId,
+                cardRev = 1,
+                actionId = "reply-tune:$text",
+            )
+        }
+    }
+
+    /** 第 2 层 Subagent 暂停与打字纠偏介入，自动向第 1 层 Leader 同步状态。 */
+    override fun interveneSubagent(questId: String, subagentId: String, text: String) {
+        onSubagentIntervention?.invoke(questId, subagentId, text)
+    }
+
+    /**
+     * 机主在助理会话的派单发送：盖 clientToken 落便签（普通 mine 消息，尚未是卡），
+     * 再交执行体。便签的翻面由通知链回来做（clientToken 匹配 → bindPendingNoteToQuest）。
+     */
+    override fun dispatchAssistantQuest(prompt: String) {
+        val token = "note-" + com.kapp.tenon.core.protocol.newId().replace("-", "").take(24)
+        handleAppendMessage(
+            MessageUi(
+                id = localMessageId(),
+                peerId = com.kapp.tenon.core.protocol.ConvId.ASSISTANT,
+                mine = true,
+                text = prompt,
+                at = nowMillis(),
+                clientToken = token,
+            ),
+        )
+        val handled = onAssistantQuestDispatch?.invoke(prompt, token) ?: false
+        if (!handled) {
+            diagnosticLogSink?.invoke("RELAY-QUEST", "assistant quest note stored (no executor attached): token=" + token)
+        }
+    }
+
+    /** 机主叫停一条支线（卡片 cancel-quest 动作）。 */
+    override fun cancelQuest(questId: String) {
+        onQuestIntervention?.invoke(questId, com.kapp.tenon.domain.AssistantQuestCardPayload.Actions.CANCEL_QUEST, "") ?: Unit
+    }
+
+    /** 中断/失败支线的一键恢复（卡片 retry-quest 动作）：从台账原 questId 重跑。 */
+    override fun retryQuest(questId: String) {
+        onQuestIntervention?.invoke(questId, com.kapp.tenon.domain.AssistantQuestCardPayload.Actions.RETRY_QUEST, "") ?: Unit
+    }
+
+    /** 对已超时的 PAUSED 任务一键恢复并补充输入。 */
+    override fun resumePausedQuest(questId: String, text: String) {
+        val handled = onQuestIntervention?.invoke(questId, "resume-quest", text) ?: false
+        if (!handled) {
+            handleCardAction(
+                groupId = com.kapp.tenon.core.protocol.ConvId.ASSISTANT,
+                cardId = questId,
+                cardRev = 1,
+                actionId = "resume-quest:$text",
+            )
+        }
+    }
+
+    /** 机主手动批准合流。下发真卡片系统动作 merge-patch。 */
+    override fun applyQuestPatch(questId: String) {
+        handleCardAction(
+            groupId = com.kapp.tenon.core.protocol.ConvId.ASSISTANT,
+            cardId = questId,
+            cardRev = 1,
+            actionId = com.kapp.tenon.core.protocol.Limits.SYSTEM_ACTION_MERGE_PATCH,
+        )
+    }
 
     /** 置顶 / 取消置顶一个会话（纯本机偏好）。 */
     override fun togglePinnedConv(convId: String) = settingsCtl.handleTogglePinnedConv(convId)
@@ -1242,6 +1343,11 @@ class RelayController(
         if (agents.isEmpty()) return null
         val tokens = agents.flatMap { a -> listOfNotNull(a.name, a.agentId).filter { it.isNotBlank() } }
         val hit = meta.mentionedVirtualAgent(text, tokens) ?: return null
+
+        val allowedOps = _state.value.settings.allowedOperators
+        if (allowedOps.isNotEmpty() && senderId != null && senderId != _state.value.settings.nodeId && senderId !in allowedOps) {
+            return hit.name?.takeIf { it.isNotBlank() } ?: hit.agentId
+        }
         // **`selfNodeId` 必须传「执行方」（= agent 宿主），不能传自己。**
         //
         
@@ -1322,6 +1428,114 @@ class RelayController(
      */
     override fun handleCardAction(groupId: String, cardId: String, cardRev: Int, actionId: String) =
         invokeCtl.handleCardAction(groupId, cardId, cardRev, actionId)
+
+    /**
+     * 接收并处理支线任务轻量通知帧（编排层 → 助理会话的**唯一落库口**）。
+     *
+     * 经 [AssistantNoticeClamper] 严格预算校验（Fail-Closed 守卫）：超限整帧拒收，
+     * 但**必须留痕** —— 这条链的消费方是助理会话里的人，静默丢弃就是
+     * 「编排层以为通知过了、用户什么都没看到」（§3 形态）。
+     *
+     * 卡片载荷由 [AssistantQuestCardPayload] 在**同层**构建（不接外部 cardJson）：
+     * 消息带可解析的 agent 发送者身份（`agent:<self>:assistant`，见 [AgentSenderId]），
+     * 卡片动作（merge-patch / resume-quest…）因此能走 [handleCardAction] 的
+     * 身份解析链 —— 首轮评审里「senderId 为 null ⇒ 动作入口必死」的成因。
+     *
+     * **原位翻面（规格 §8.1）**：同一任务在会话里只有一条卡片消息——同 questId 的
+     * 后续通知按 rev 乐观锁推进既有行（状态/载荷翻面，text 保持首条不重索引 FTS），
+     * 绝不追加第二条卡让「一任务一卡」变成卡片流。内存权威在 [handleReplaceMessage]
+     * （stateLock 内按 rev 判定），持久化走全行快照经 persistMutex 串行；
+     * [MessageStore.updateCardContent] 的列级 rev 锁留给跨写者场景（列级更新与
+     * 整行 REPLACE 混用会互相覆写，见 flip 分支注释）。
+     */
+    fun handleAssistantQuestNotice(notice: AssistantQuestNotice) {
+        val clamped = AssistantNoticeClamper.clampNotice(notice)
+        if (clamped !is AssistantNoticeClamper.ClampOutcome.Success) {
+            val exceeded = clamped as? AssistantNoticeClamper.ClampOutcome.Exceeded
+            diagnosticLogSink?.invoke(
+                "RELAY-QUEST",
+                "assistant quest notice dropped: over frame budget" +
+                    " (attempted=" + (exceeded?.attemptedBytes ?: -1) +
+                    ", max=" + (exceeded?.maxBytes ?: Limits.QUEST_NOTICE_FRAME_BUDGET) + ")" +
+                    " questId=" + notice.questId,
+            )
+            return
+        }
+        val validNotice = clamped.notice
+        val payload = AssistantQuestCardPayload.build(validNotice)
+        val conv = validNotice.convId
+
+        // 便签优先：通知带着派发时的 clientToken 回来 = 机主那条离线便签原地翻面
+        // （mine 保持 true，quest 字段盖上去），绝不追加第二条卡（§8.1 / 场景 8）。
+        val noteToken = validNotice.clientToken
+        if (noteToken != null) {
+            val note = stateLock.withLock {
+                core.threads[conv]?.firstOrNull { it.clientToken == noteToken }
+            }
+            if (note != null) {
+                val flipped = note.copy(
+                    card = payload,
+                    agentState = validNotice.status.toProtocolAgentState(),
+                    questId = validNotice.questId,
+                    questRev = validNotice.rev,
+                )
+                handleReplaceMessage(conv, flipped)
+                messageStore.bindPendingNoteToQuest(
+                    clientToken = noteToken,
+                    questId = validNotice.questId,
+                    newJsonContent = payload.toString(),
+                    status = validNotice.status.toProtocolAgentState(),
+                    rev = validNotice.rev,
+                )
+                handlePersistThreads()
+                return
+            }
+            // 便签不在（跨设备通知 / 行已清）：落回 questId 路径，不丢通知。
+        }
+
+        val existing = stateLock.withLock {
+            core.threads[conv]?.filter { it.questId == validNotice.questId }?.maxByOrNull { it.questRev }
+        }
+        if (existing != null) {
+            if (existing.questRev >= validNotice.rev) {
+                // 旧 rev 的迟到通知：如实丢弃并留痕（乐观锁的本体就是会拒绝）。
+                diagnosticLogSink?.invoke(
+                    "RELAY-QUEST",
+                    "stale quest notice dropped: quest=" + validNotice.questId +
+                        " rev=" + validNotice.rev + " current=" + existing.questRev,
+                )
+                return
+            }
+            val flipped = existing.copy(
+                card = payload,
+                agentState = validNotice.status.toProtocolAgentState(),
+                questRev = validNotice.rev,
+            )
+            handleReplaceMessage(conv, flipped)
+            // 持久化走全行快照（handlePersistThreads 经 persistMutex 串行）：append 的
+            // 异步全行保存与直呼 updateCardContent 会互相覆写（后者是列级更新，前者
+            // 是整行 REPLACE）——程序序上翻转在后，FIFO 串行保证翻面后的行最终落库。
+            // text 列保持首条不变，FTS 无需重索引。
+            handlePersistThreads()
+            return
+        }
+
+        val msg = MessageUi(
+            id = localMessageId(),
+            peerId = conv,
+            mine = false,
+            senderId = state.value.selfNodeId.takeIf { it.isNotBlank() }
+                ?.let { AgentSenderId.of(it, agentId = "assistant") },
+            text = validNotice.summary,
+            at = nowMillis(),
+            card = payload,
+            agentState = validNotice.status.toProtocolAgentState(),
+            questId = validNotice.questId,
+            questRev = validNotice.rev,
+        )
+        handleAppendMessage(msg)
+    }
+
     /**
      * 跨端派单的公开入口（M4）：Leader 把子任务派给 [agentId] 的宿主。
      * ControlPlane 的 `/v1/agent/invoke` 路由与超时卡的「重试」都走它。

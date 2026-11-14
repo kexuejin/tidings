@@ -120,6 +120,39 @@ interface MessageStore {
     fun saveBoardCardRev(cardId: String, rev: Int) = Unit
 
     /**
+     * 基于 questId 与乐观锁版本号原位更新卡片最新载荷与状态。
+     *
+     * @param questId 支线 ID
+     * @param newJsonContent 最新卡片载荷 JSON
+     * @param status 状态字符串
+     * @param expectedRev 期望推进的最新 rev，必须大于库中当前 rev 才允许更新
+     * @return 是否成功更新行
+     */
+    fun updateCardContent(
+        questId: String,
+        newJsonContent: String,
+        status: String,
+        expectedRev: Long
+    ): Boolean = false
+
+    /**
+     * 将暂存的离线便签原位绑定为正式支线任务卡片。
+     *
+     * @param clientToken 客户端生成的离线便签 Token
+     * @param questId 正式支线 ID
+     * @param newJsonContent 最新卡片载荷
+     * @param status 任务状态
+     * @param rev 初始版本号
+     */
+    fun bindPendingNoteToQuest(
+        clientToken: String,
+        questId: String,
+        newJsonContent: String,
+        status: String,
+        rev: Long
+    ): Boolean = false
+
+    /**
      * 清空全部历史。
      *
      * 与 `save(emptyMap())` 分开，是因为"删干净"对存储实现往往有额外含义
@@ -277,6 +310,68 @@ class InMemoryMessageStore : MessageStore {
 
     override fun deleteConversation(convId: String) {
         current = current.filterKeys { it != convId }
+    }
+
+    override fun updateCardContent(
+        questId: String,
+        newJsonContent: String,
+        status: String,
+        expectedRev: Long
+    ): Boolean {
+        var found = false
+        val newMap = current.mapValues { (_, list) ->
+            list.map { msg ->
+                if (msg.questId == questId && msg.questRev < expectedRev) {
+                    found = true
+                    val parsedPayload = runCatching {
+                        MessageStore.json.parseToJsonElement(newJsonContent) as? kotlinx.serialization.json.JsonObject
+                    }.getOrNull()
+                    msg.copy(
+                        cardPayload = parsedPayload ?: msg.cardPayload,
+                        agentState = status,
+                        questRev = expectedRev
+                    )
+                } else {
+                    msg
+                }
+            }
+        }
+        if (found) {
+            current = newMap
+        }
+        return found
+    }
+
+    override fun bindPendingNoteToQuest(
+        clientToken: String,
+        questId: String,
+        newJsonContent: String,
+        status: String,
+        rev: Long
+    ): Boolean {
+        var found = false
+        val newMap = current.mapValues { (_, list) ->
+            list.map { msg ->
+                if (msg.clientToken == clientToken) {
+                    found = true
+                    val parsedPayload = runCatching {
+                        MessageStore.json.parseToJsonElement(newJsonContent) as? kotlinx.serialization.json.JsonObject
+                    }.getOrNull()
+                    msg.copy(
+                        questId = questId,
+                        cardPayload = parsedPayload ?: msg.cardPayload,
+                        agentState = status,
+                        questRev = rev
+                    )
+                } else {
+                    msg
+                }
+            }
+        }
+        if (found) {
+            current = newMap
+        }
+        return found
     }
 
     override fun search(query: String, limit: Long): List<MessageSearchResult> {
