@@ -618,9 +618,22 @@ class DesktopExtension(
                 // worktree 内再开一层任务面，patch 收割后由 runner 落成 quest 分支上的
                 // 真提交）；通知走 [RelayController.handleAssistantQuestNotice]——
                 // 助理会话卡片的原位翻面在那一层收口。
+                // 跨端回执映射：questId → 派单端 peer（wire 派发才有）。通知除了本机
+                // 翻面，还要回执给派单端（它的便签靠 clientToken 原地翻面）；终态即摘。
+                val wireNoticeTargets = java.util.concurrent.ConcurrentHashMap<String, String>()
                 val questRunner = QuestRunner(
                     worktreeRoot = java.io.File(System.getProperty("java.io.tmpdir"), "tenon-quests"),
-                    onNotice = { notice -> controller.handleAssistantQuestNotice(notice) },
+                    onNotice = { notice ->
+                        controller.handleAssistantQuestNotice(notice)
+                        val target = wireNoticeTargets[notice.questId] ?: return@QuestRunner
+                        controller.sendQuestNoticeTo(target, notice)
+                        if (notice.status == com.kapp.tenon.core.protocol.QuestStatus.COMPLETED ||
+                            notice.status == com.kapp.tenon.core.protocol.QuestStatus.FAILED ||
+                            notice.status == com.kapp.tenon.core.protocol.QuestStatus.CANCELLED
+                        ) {
+                            wireNoticeTargets.remove(notice.questId)
+                        }
+                    },
                     database = (store as? com.kapp.tenon.domain.SqlDelightSchedulerStore)?.database,
                     runTask = { questId, worktreeDir, prompt, agentKey ->
                         var patchPath: String? = null
@@ -873,7 +886,7 @@ class DesktopExtension(
                         else -> false
                     }
                 }
-                controller.onAssistantQuestDispatch = { prompt, token ->
+                controller.onAssistantQuestDispatch = { prompt, token, replyTo ->
                     // 便签派发：工作区用宿主解析的默认仓（机主白名单内，D10/D15 判据）；
                     // 没有可写仓 = 如实返回 false，便签留在会话里（Phase 2 跨端同步接手）。
                     val ws = workerOrchestrator?.resolveWorkspacePath(null)
@@ -882,7 +895,7 @@ class DesktopExtension(
                         false
                     } else {
                         scope.launch {
-                            questRunner.dispatch(
+                            val result = questRunner.dispatch(
                                 prompt = prompt,
                                 workspacePath = ws,
                                 title = prompt.take(40),
@@ -890,6 +903,10 @@ class DesktopExtension(
                                 autoMerge = false, // 人派的默认变更前确认（机主在场）
                                 clientToken = token,
                             )
+                            // wire 派发（replyTo 非空）：登记回执目标，通知沿 questId 回派单端
+                            if (replyTo != null && result is QuestRunner.DispatchResult.Started) {
+                                wireNoticeTargets[result.questId] = replyTo
+                            }
                         }
                         true
                     }

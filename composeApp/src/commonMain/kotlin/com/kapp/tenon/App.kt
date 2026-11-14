@@ -748,6 +748,7 @@ fun RelayApp(
                             onBack = { settingsPage = null },
                             onToggleAssistantEnabled = controller::updateAssistantEnabled,
                             onToggleAllowExternalPrivateChat = controller::updateAllowExternalPrivateChat,
+                            onToggleQuestPair = controller::setQuestPairNode,
                             onOpenAutomationConsole = { settingsPage = SETTINGS_PAGE_AUTOMATION },
                             modifier = Modifier.fillMaxSize(),
                         )

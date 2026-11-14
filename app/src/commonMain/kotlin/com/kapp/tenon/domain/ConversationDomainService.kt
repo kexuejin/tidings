@@ -133,6 +133,9 @@ internal interface ConversationDomainHost {
 
     /** 横切：按新 id 整条替换（乐观插入的临时 id → 真实 envelope id）。 */
     fun handleReplaceMessage(peerId: String, message: MessageUi)
+    /** 主支线跨设备帧入站（Phase 2）：quest-dispatch / quest-notice。 */
+    fun handleOnQuestDispatch(envelope: com.kapp.tenon.core.protocol.Envelope)
+    fun handleOnQuestNotice(envelope: com.kapp.tenon.core.protocol.Envelope)
 
     /** 横切：按旧 id 找、整条换成新消息（可以换 id —— 乐观插入的临时 id 换成真实 id）。 */
     fun replaceMessage(peerId: String, previousId: String, message: MessageUi)
@@ -334,6 +337,12 @@ internal class ConversationDomainService(
 
     override fun handleReplaceMessage(peerId: String, message: MessageUi) =
         host.handleReplaceMessage(peerId, message)
+
+    override fun handleOnQuestDispatch(envelope: com.kapp.tenon.core.protocol.Envelope) =
+        host.handleOnQuestDispatch(envelope)
+
+    override fun handleOnQuestNotice(envelope: com.kapp.tenon.core.protocol.Envelope) =
+        host.handleOnQuestNotice(envelope)
 
     override fun replaceMessage(peerId: String, previousId: String, message: MessageUi) =
         host.replaceMessage(peerId, previousId, message)

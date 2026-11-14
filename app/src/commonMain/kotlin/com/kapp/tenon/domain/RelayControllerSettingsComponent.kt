@@ -126,6 +126,17 @@ fun handleUpdateAssistantRoleKey(roleKey: String?) {
     host.handlePersist(current.copy(assistantRoleKey = clean))
 }
 
+fun handleToggleQuestPair(nodeId: String, enabled: Boolean) {
+    val current = host.state.value.settings
+    val updated = if (enabled) {
+        current.questPairNodes + nodeId
+    } else {
+        current.questPairNodes - nodeId
+    }
+    if (updated == current.questPairNodes) return
+    host.handlePersist(current.copy(questPairNodes = updated.distinct()))
+}
+
 fun handleSaveAutomationTask(task: AutomationTask) {
     if (task.cron.isNotBlank()) {
         val err = CronValidation.validate(task.cron)

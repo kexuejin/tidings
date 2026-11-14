@@ -47,7 +47,7 @@ class AssistantQuestNoteBindingTest {
     fun dispatchStampsNoteAndNoticeBindsItInPlace(): Unit = runBlocking {
         val controller = createController()
         val dispatched = mutableListOf<Pair<String, String>>() // prompt to token
-        controller.onAssistantQuestDispatch = { prompt, token ->
+        controller.onAssistantQuestDispatch = { prompt, token, _ ->
             dispatched.add(prompt to token)
             true // 桌面：执行体在场
         }
@@ -122,7 +122,7 @@ class AssistantQuestNoteBindingTest {
     @Test
     fun noteWithoutExecutorStaysAsNote(): Unit = runBlocking {
         val controller = createController()
-        controller.onAssistantQuestDispatch = { _, _ -> false } // 手机/离线：无执行体
+        controller.onAssistantQuestDispatch = { _, _, _ -> false } // 手机/离线：无执行体
         controller.dispatchAssistantQuest("记得买牛奶")
         val note = controller.assistantRows().single()
         assertTrue(note.mine)

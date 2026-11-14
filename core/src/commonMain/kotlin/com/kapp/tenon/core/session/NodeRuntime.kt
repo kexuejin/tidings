@@ -1960,6 +1960,14 @@ class NodeRuntime(
         cardRev, decidedBy, sessionId, groupId, groupRev, wsId, convId = convId, at = at,
     )
 
+    /** 主支线：便签跨设备派发（Phase 2）。 */
+    suspend fun sendQuestDispatch(peerId: String, clientToken: String, prompt: String) =
+        outbound.sendQuestDispatch(peerId, clientToken, prompt)
+
+    /** 主支线：轻量通知回执（执行端 → 派单端）。 */
+    suspend fun sendQuestNotice(peerId: String, notice: com.kapp.tenon.core.protocol.AssistantQuestNotice) =
+        outbound.sendQuestNotice(peerId, notice)
+
     /** `agent-invoke` 的应答帧（cap `agi1`）。 */
     suspend fun sendAgentInvokeResult(peerId: String,
         invokeId: String,

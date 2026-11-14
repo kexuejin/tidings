@@ -2108,6 +2108,8 @@ Collaboration channel connected; project directory events and progress will sync
     <string name="automation_task_gate_label">Gate command (runs before merge; exit 0 = pass)</string>
     <string name="automation_task_gate_hint">Empty = no gate, e.g. ./gradlew test</string>
     <string name="quest_dispatch_toggle">Quest dispatch</string>
+    <string name="set_quest_pair_section_title">Quest dispatch peers</string>
+    <string name="set_quest_pair_desc">Paired peers can exchange quest dispatches and notices (symmetric trust)</string>
     <string name="automation_task_workspace_label">Local Project Directory Path</string>
     <string name="automation_task_prompt_label">Instructions (Prompt)</string>
     <string name="automation_task_persona_label">Assigned Persona</string>

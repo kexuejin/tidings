@@ -183,6 +183,8 @@ object CodecWire {
             MsgTypes.SHARE -> validateShare(o)
             MsgTypes.SCAN_RANGES -> validateScanRanges(o)
             MsgTypes.SCREEN -> CodecScreen.validateScreen(o)
+            MsgTypes.QUEST_DISPATCH -> CodecQuest.validateQuestDispatch(o, textLimit)
+            MsgTypes.QUEST_NOTICE -> CodecQuest.validateQuestNotice(o)
             MsgTypes.AVATAR -> validateAvatar(o)
             // exit 与其余已知类型：TS 侧就是 `return isRecord(payload)`。
             else -> true

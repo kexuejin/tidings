@@ -900,3 +900,19 @@ TLPAIR1{"ok":true|false,"reason":"…"}                                        �
 - **legacy 模式下一字不变**：开关关着时，17879/17881/17882 与 legacy 发现照旧。所以凡写「走 17879」的地方，都应读成「**legacy 模式下**走 17879」。
 - **老对端的表现是「发现不到」，不是「静默丢消息」**：数据面开着时 legacy 发现不启动，未升级的老客户端与本机互相发现不到 —— 节点表里没有它，也就没有「发送」这件事。回退路径只有一条：关掉开关并**重启节点**，或让那台设备升级到同一版本。
 
+
+## quest-dispatch / quest-notice（主支线便签跨设备派发，Phase 2）
+
+两个本仓自有帧型（不在上游 0.61.1 的 KNOWN_TYPES 内——旧节点按 `known=false`
+静默忽略，发端便签如实留存，优雅降级）：
+
+| 帧 | 类型 | 键（白名单） | 预算 | 语义 |
+|---|---|---|---|---|
+| 便签派发 | `quest-dispatch` | `clientToken`(≤ID) / `prompt`(≤通道预算) | 随通道（TCP 4096） | 机主助理便签 → 执行端；幂等键 = clientToken |
+| 轻量通知 | `quest-notice` | questId/title/status/summary/convId/rev 必填；clientToken/questionText/questionKind/diffStats/patchSha256 可选 | ≤650 B（clamper 保证） | 执行端 → 派单端，便签按 clientToken 原地翻面 |
+
+**能力协商不进广播 caps**（桌面档 16/16 满额，D-018 同款）：两端以
+`RelaySettings.questPairNodes`（对称配对清单，空 = 双向 fail-closed）显式承担——
+发端只发给名单内的对端，收端只收名单内的发端（发端不在名单 = 回 FAILED 通知，
+派单端便签翻面成失败卡，绝不静默）。`status` 取值域 = QuestStatus 枚举名
+（CodecQuest 校验，§3 第 7 种的收口）。

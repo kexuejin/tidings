@@ -74,6 +74,11 @@ object MessageSpecs {
         MessageSpec(type = MsgTypes.AGENT_INVOKE_RESULT, known = true, reliable = true, handled = true, label = MsgTypes.AGENT_INVOKE_RESULT),
         MessageSpec(type = MsgTypes.AGENT_CHANNEL, known = true, reliable = true, handled = true, label = MsgTypes.AGENT_CHANNEL),
         MessageSpec(type = MsgTypes.AGENT_CHANNEL_RESULT, known = true, reliable = true, handled = true, label = MsgTypes.AGENT_CHANNEL_RESULT),
+        // 主支线（Quest）跨设备帧族（Phase 2）：dispatch 只发给配了对端（旧端 KNOWN_TYPES
+        // 没有该值 → known=false 静默忽略，发端便签如实留存——优雅降级）。notice 同理回执。
+        // handled=true：入站路由在 RelayControllerMessagesComponent（配对校验在 handler 内）。
+        MessageSpec(type = MsgTypes.QUEST_DISPATCH, known = true, reliable = true, handled = true, label = MsgTypes.QUEST_DISPATCH),
+        MessageSpec(type = MsgTypes.QUEST_NOTICE, known = true, reliable = true, handled = true, label = MsgTypes.QUEST_NOTICE),
     )
 
     /** 按帧类型串索引，供按 type 查规格的调用点使用。 */

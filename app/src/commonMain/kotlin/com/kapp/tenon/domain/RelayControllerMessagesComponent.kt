@@ -519,6 +519,14 @@ fun handleOnInbound(envelope: Envelope) {
     }
     // M4 跨端派单网道（规格 §6.2/§6.3）：这两帧的归宿是 invoke 组件（租约/门禁/看板卡），
     // 不是聊天流 —— 它们必须像其余 agent 帧一样在 CHAT_INBOUND_TYPES 之前接走。
+    if (envelope.type == MsgTypes.QUEST_DISPATCH) {
+        host.handleOnQuestDispatch(envelope)
+        return
+    }
+    if (envelope.type == MsgTypes.QUEST_NOTICE) {
+        host.handleOnQuestNotice(envelope)
+        return
+    }
     if (envelope.type == MsgTypes.AGENT_INVOKE) {
         host.agent.handleOnAgentInvoke(envelope)
         return

@@ -25,6 +25,10 @@ object MsgTypes {
     const val UPDATE = "update"
     const val SHARE = "share"
     const val SCREEN = "screen"
+    /** 主支线（Quest）便签跨设备派发：机主助理会话的便签 → 执行端。 */
+    const val QUEST_DISPATCH = "quest-dispatch"
+    /** 主支线（Quest）轻量通知：执行端 → 派单端，原位翻面便签（≤650B，见 Limits.QUEST_NOTICE_FRAME_BUDGET）。 */
+    const val QUEST_NOTICE = "quest-notice"
 
     /**
      * PPE-1 §6.1：agent 会话宣告（cap `agn1`）。

@@ -452,6 +452,12 @@ data class RelaySettings(
     val allowedOperators: List<String> = emptyList(),
     /** 自动化定时任务列表。 */
     val automationTasks: List<AutomationTask> = emptyList(),
+    /**
+     * 支线派单对端（对称配对）：名单内的对端可互为便签派发的两端
+     * （本机发便签给它执行；它执行完的通知回本机翻面）。**空 = 双向 fail-closed**。
+     * 不进广播 caps（桌面档 16/16 满额，D-018 同款裁决）——能力由两端显式设置承担。
+     */
+    val questPairNodes: List<String> = emptyList(),
 ) {
     /**
      * 按当前能力开关生成的 `caps` 列表。

@@ -1274,6 +1274,7 @@ internal fun DesktopSettingsPane(
                                             },
                                             onToggleAssistantEnabled = controller::updateAssistantEnabled,
                                             onToggleAllowExternalPrivateChat = controller::updateAllowExternalPrivateChat,
+                            onToggleQuestPair = controller::setQuestPairNode,
                                             onOpenAutomationConsole = { showAutomationConsole = true },
                                             onBack = null,
                                         )

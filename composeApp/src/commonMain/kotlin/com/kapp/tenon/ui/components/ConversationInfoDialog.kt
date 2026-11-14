@@ -22,7 +22,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
 import com.kapp.tenon.generated.resources.Res
 import com.kapp.tenon.generated.resources.assistant_name_label
 import com.kapp.tenon.generated.resources.assistant_persona_desc

@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
@@ -13,6 +14,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import com.kapp.tenon.generated.resources.set_assistant_section_title
+import com.kapp.tenon.generated.resources.set_quest_pair_desc
+import com.kapp.tenon.generated.resources.set_quest_pair_section_title
 import com.kapp.tenon.generated.resources.set_assistant_enable_title
 import com.kapp.tenon.generated.resources.set_assistant_enable_desc
 import com.kapp.tenon.generated.resources.set_external_chat_title
@@ -139,6 +142,8 @@ fun SettingsAccessChannelSubpage(
     onToggleAssistantEnabled: ((Boolean) -> Unit)? = null,
     onToggleAllowExternalPrivateChat: ((Boolean) -> Unit)? = null,
     onOpenAutomationConsole: (() -> Unit)? = null,
+    /** 支线派单配对开关（Phase 2）：null = 本端没有执行体能力（手机未配对等），区块不画。 */
+    onToggleQuestPair: ((nodeId: String, enabled: Boolean) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val settings = settingsSlice.settings
@@ -433,6 +438,26 @@ fun SettingsAccessChannelSubpage(
                         onCheckedChange = { onToggleAllowExternalPrivateChat?.invoke(it) },
                         enabled = onToggleAllowExternalPrivateChat != null,
                     )
+                }
+                if (onToggleQuestPair != null) {
+                    // 支线派单配对：名单内对端可互为便签派发的两端（对称信任，空 = 双向关闭）。
+                    Text(
+                        text = stringResource(Res.string.set_quest_pair_section_title),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.padding(top = 12.dp),
+                    )
+                    nodeSlice.peers.forEach { peer ->
+                        SettingRow(
+                            title = peer.displayName,
+                            subtitle = stringResource(Res.string.set_quest_pair_desc),
+                        ) {
+                            Switch(
+                                checked = peer.nodeId in settings.questPairNodes,
+                                onCheckedChange = { onToggleQuestPair.invoke(peer.nodeId, it) },
+                            )
+                        }
+                    }
                 }
                 if (onOpenAutomationConsole != null) {
                     SettingRow(

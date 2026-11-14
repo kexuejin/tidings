@@ -919,6 +919,33 @@ internal class NodeOutbound(
      * M4 跨端派单网道的请求帧（cap `agi1`）。**不经群聊** —— 这是规格 §6.2 的
      * 「地下铁」：派单与交接只走点对点，主群聊一条跨设备中间文本都不产生。
      */
+    /** 主支线：便签跨设备派发（机主助理便签 → 执行端）。 */
+    suspend fun sendQuestDispatch(
+        peerId: String,
+        clientToken: String,
+        prompt: String,
+    ): SendOutcome = messenger.sendUserMessage(
+        peerId,
+        makeEnvelope(
+            MsgTypes.QUEST_DISPATCH,
+            selfId(),
+            com.kapp.tenon.core.protocol.CodecQuest.encodeQuestDispatch(clientToken, prompt),
+        ),
+    )
+
+    /** 主支线：轻量通知回执（执行端 → 派单端，便签原位翻面键 = clientToken）。 */
+    suspend fun sendQuestNotice(
+        peerId: String,
+        notice: com.kapp.tenon.core.protocol.AssistantQuestNotice,
+    ): SendOutcome = messenger.sendUserMessage(
+        peerId,
+        makeEnvelope(
+            MsgTypes.QUEST_NOTICE,
+            selfId(),
+            com.kapp.tenon.core.protocol.CodecQuest.encodeQuestNotice(notice),
+        ),
+    )
+
     suspend fun sendAgentInvoke(
         peerId: String,
         invokeId: String,

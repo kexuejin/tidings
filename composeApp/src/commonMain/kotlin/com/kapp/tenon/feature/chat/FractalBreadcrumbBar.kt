@@ -15,7 +15,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
 import com.kapp.tenon.generated.resources.Res
 import com.kapp.tenon.generated.resources.action_back
 import com.kapp.tenon.generated.resources.ic_arrow_back

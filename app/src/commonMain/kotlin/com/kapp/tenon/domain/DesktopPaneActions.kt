@@ -579,6 +579,8 @@ public interface DesktopPaneActions {
      * 有执行体（桌面）时立即进支线生命周期；无执行体（手机/离线）= 便签留存。
      */
     fun dispatchAssistantQuest(prompt: String): Unit = Unit
+    /** 支线派单配对开关（对称信任；空 = 双向关闭）。 */
+    fun setQuestPairNode(nodeId: String, enabled: Boolean): Unit = Unit
     /** 中断/失败支线的一键恢复：从台账取 prompt/agentKey 原 questId 重跑。 */
     fun retryQuest(questId: String): Unit = Unit
     fun resumePausedQuest(questId: String, text: String): Unit = Unit

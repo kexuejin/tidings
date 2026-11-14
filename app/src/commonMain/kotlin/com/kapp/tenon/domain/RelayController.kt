@@ -684,11 +684,12 @@ class RelayController(
      * （桌面 = QuestRunner 立即进支线生命周期）。返回 false = 无执行体（手机/离线）——
      * 便签已落库留存，Phase 2 的跨端同步接手。
      */
-    var onAssistantQuestDispatch: ((prompt: String, clientToken: String) -> Boolean)? = null
+    var onAssistantQuestDispatch: ((prompt: String, clientToken: String, replyTo: String?) -> Boolean)? = null
 
     override fun updateAssistantCustomName(name: String?) = settingsCtl.handleUpdateAssistantCustomName(name)
     override fun updateAssistantRoleKey(roleKey: String?) = settingsCtl.handleUpdateAssistantRoleKey(roleKey)
     override fun saveAutomationTask(task: AutomationTask) = settingsCtl.handleSaveAutomationTask(task)
+    override fun setQuestPairNode(nodeId: String, enabled: Boolean) = settingsCtl.handleToggleQuestPair(nodeId, enabled)
     override fun deleteAutomationTask(id: String) = settingsCtl.handleDeleteAutomationTask(id)
     override fun toggleAutomationTask(id: String, enabled: Boolean) = settingsCtl.handleToggleAutomationTask(id, enabled)
     override fun triggerAutomationTaskNow(id: String) {
@@ -732,11 +733,36 @@ class RelayController(
                 clientToken = token,
             ),
         )
-        val handled = onAssistantQuestDispatch?.invoke(prompt, token) ?: false
+        // 执行体两级：本机端口（桌面）优先；没有 → 设了配对对端就走 wire 派发
+        // （对端在 questPairNodes 内且在线）。都没有 = 便签如实留存（Phase 2 前语义）。
+        val handled = onAssistantQuestDispatch?.invoke(prompt, token, null) ?: false
         if (!handled) {
-            diagnosticLogSink?.invoke("RELAY-QUEST", "assistant quest note stored (no executor attached): token=" + token)
+            val peer = state.value.settings.questPairNodes
+                .firstOrNull { pair -> state.value.peers.any { it.nodeId == pair } }
+            scope.launch {
+                val sent = peer?.let { runtime?.sendQuestDispatch(it, token, prompt) }
+                if (sent == null) {
+                    diagnosticLogSink?.invoke(
+                        "RELAY-QUEST",
+                        "assistant quest note stored (no executor): token=" + token +
+                            " paired=" + state.value.settings.questPairNodes.size,
+                    )
+                }
+            }
         }
     }
+
+    /** 机主叫停一条支线（卡片 cancel-quest 动作）。 */
+    /** Phase 2：跨端回执——桌面把支线通知回执给 wire 派单端（它的便签靠 token 翻面）。 */
+    fun sendQuestNoticeTo(peerId: String, notice: AssistantQuestNotice) {
+        scope.launch { runtime?.sendQuestNotice(peerId, notice) }
+    }
+
+    fun handleOnQuestDispatch(envelope: com.kapp.tenon.core.protocol.Envelope) =
+        RelayControllerQuestWire.handleOnQuestDispatch(this, envelope)
+
+    fun handleOnQuestNotice(envelope: com.kapp.tenon.core.protocol.Envelope) =
+        RelayControllerQuestWire.handleOnQuestNotice(this, envelope)
 
     /** 机主叫停一条支线（卡片 cancel-quest 动作）。 */
     override fun cancelQuest(questId: String) {

@@ -1710,6 +1710,11 @@ Layer 4 仿真覆盖，真机环节为桌面自派 + 手机 `@agent` 回路（M5
    merge-patch 重启后照常真合流。
 7. **越界写防线**：派一条会改主仓工作树的指令（如让 CLI 写宿主仓绝对路径）。
    判据：FAILED 且通知含 `Escaped write`，主仓改动不被合流（机主文件不动）。
+8. **Phase 2 跨设备便签派发**（两端均配 `questPairNodes` 后）：Pixel 助理会话
+   「支线派单」发指令 → Mac 收帧执行。
+   判据：Mac 宿主日志有 dispatch 受理；Pixel 便签原地翻面成支线卡（行数不增、
+   quest_id 非 NULL）；Mac 拒收（未配对）时 Pixel 便签翻面成 FAILED 卡。
+   未配对对端发来的帧在 CodecWire 白名单拒收（多键/缺键/越界 status 均整帧拒）。
 
 ## 7. 单条记录模板
 

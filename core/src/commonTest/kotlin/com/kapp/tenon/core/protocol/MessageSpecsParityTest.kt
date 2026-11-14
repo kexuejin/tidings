@@ -45,7 +45,7 @@ class MessageSpecsParityTest {
     /** 改造前 UNHANDLED 的 2 项。 */
     private val preRefactorUnhandled = setOf("update", "peers")
 
-    /** 改造前 KNOWN 的 34 项（atr1 两帧是后到的本端增补，不在这份清单里 —— 见下方差集断言）。 */
+    /** 改造前 KNOWN 的 38 项（atr1 两帧是后到的本端增补，不在这份清单里 —— 见下方差集断言）。 */
     private val preRefactorKnown = setOf(
         "entry", "alive", "exit", "presence", "profile", "peers", "scan-ranges", "msg", "ack",
         "file-ctl", "group", "avatar", "update", "share", "screen",
@@ -60,9 +60,9 @@ class MessageSpecsParityTest {
 
     @Test
     fun theFourDerivedSetsKeepTheirLegacySizes() {
-        assertEquals(36, MsgTypes.KNOWN.size)
-        assertEquals(28, MsgTypes.RELIABLE.size)
-        assertEquals(34, MsgTypes.HANDLED.size)
+        assertEquals(38, MsgTypes.KNOWN.size)
+        assertEquals(30, MsgTypes.RELIABLE.size)
+        assertEquals(36, MsgTypes.HANDLED.size)
         assertEquals(2, MsgTypes.UNHANDLED.size)
     }
 
@@ -79,7 +79,7 @@ class MessageSpecsParityTest {
 
     @Test
     fun everySpecTypeIsUniqueAndCoversKnown() {
-        assertEquals(36, MessageSpecs.all.size)
+        assertEquals(38, MessageSpecs.all.size)
         assertEquals(MessageSpecs.all.size, MessageSpecs.all.map { it.type }.toSet().size)
         assertEquals(MessageSpecs.all.size, MessageSpecs.byType.size)
         assertEquals(MsgTypes.KNOWN, MessageSpecs.all.map { it.type }.toSet())
@@ -95,7 +95,9 @@ class MessageSpecsParityTest {
         // 免批规则读撤的两帧（atr1）是改造**之后**的本端增补 —— 改造前清单保持原样，
         // 集合对比改为「改造前清单 ⊆ 现清单，差集恰好是这两帧」：既有类型一个不许动、
         // 新增类型必须成对申报，两个方向都钉住。
-        val extensionFrames = setOf("agent-tool-rules-request", "agent-tool-rules-list")
+        val extensionFrames = setOf("agent-tool-rules-request", "agent-tool-rules-list") +
+            // Phase 2 主支线跨设备帧族（quest-dispatch / quest-notice）
+            setOf(MsgTypes.QUEST_DISPATCH, MsgTypes.QUEST_NOTICE)
         assertTrue(MsgTypes.KNOWN.containsAll(preRefactorKnown))
         assertEquals(extensionFrames, MsgTypes.KNOWN - preRefactorKnown)
         assertTrue(MsgTypes.RELIABLE.containsAll(preRefactorReliable))

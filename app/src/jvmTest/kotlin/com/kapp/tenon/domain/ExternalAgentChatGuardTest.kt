@@ -6,7 +6,6 @@ import com.kapp.tenon.core.nowMillis
 import com.kapp.tenon.core.protocol.Envelope
 import com.kapp.tenon.core.protocol.MsgTypes
 import com.kapp.tenon.domain.model.NoticeKind
-import com.kapp.tenon.domain.model.PeerUi
 import com.kapp.tenon.platform.InMemoryAppPlatform
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -14,7 +13,6 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlin.test.Test
-import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 

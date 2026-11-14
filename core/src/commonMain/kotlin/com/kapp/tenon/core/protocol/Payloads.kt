@@ -598,3 +598,11 @@ data class AgentToolRulesListPayload(
     val rules: List<AgentToolRuleRowPayload>,
     val at: Long? = null,
 )
+
+
+/** 主支线（Quest）便签跨设备派发：机主助理会话便签 → 执行端。clientToken 是幂等与翻面键。 */
+@Serializable
+data class QuestDispatchPayload(
+    val clientToken: String,
+    val prompt: String,
+)

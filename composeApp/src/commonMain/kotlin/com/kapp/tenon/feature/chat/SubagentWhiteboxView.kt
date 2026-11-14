@@ -32,7 +32,6 @@ import com.kapp.tenon.generated.resources.subagent_intervene_synced
 import com.kapp.tenon.generated.resources.subagent_output_title
 import com.kapp.tenon.generated.resources.subagent_thought_title
 import com.kapp.tenon.ui.SectionCard
-import com.kapp.tenon.ui.components.AppBanner
 import com.kapp.tenon.ui.components.AppButtonSize
 import com.kapp.tenon.ui.components.AppTextButton
 import com.kapp.tenon.ui.theme.LocalAppSpacing
