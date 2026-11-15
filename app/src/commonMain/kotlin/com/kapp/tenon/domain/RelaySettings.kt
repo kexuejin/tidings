@@ -440,8 +440,12 @@ data class RelaySettings(
      * 所以默认值只能是空 map，老用户升级后行为不变。
      */
     val peerRemarks: Map<String, String> = emptyMap(),
-    /** 私人助理功能开关 (默认关闭，启用或有助理会话时置顶呈现)。 */
-    val assistantEnabled: Boolean = false,
+    /**
+     * 私人助理功能开关（**默认开启**——产品裁决：助理是主入口，不该藏在二级设置里；
+     * 会话列表置顶呈现）。不想要的用户在接入与通道页关掉即可（opt-out）。
+     * 旧安装升级后字段缺省 → 同样默认可见。
+     */
+    val assistantEnabled: Boolean = true,
     /** 外部节点 1:1 单聊开关 (默认关闭，机主显式开启后才放行)。 */
     val allowExternalPrivateChat: Boolean = false,
     /** 私人助理自定义昵称 (null 时展示默认标题)。 */

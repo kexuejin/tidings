@@ -48,6 +48,10 @@ class RelayUiStateTest {
      * 这条是切换读取方的唯一安全阀：`conversations` 的输出在两种输入下必须逐字段相同，
      * 否则那 53 个读取点会以难以觉察的方式漂移（排序、预览、时间各错一点）。
      */
+
+    /** 助理默认已开（产品裁决）——投影列表测试统一关掉；默认可见的覆盖在 AssistantProjectionOrderTest。 */
+    private fun testSettings() = RelaySettings.firstRun().copy(assistantEnabled = false)
+
     @Test
     fun conversationsAreIdenticalWithOrWithoutSummaries() {
         val messages = mapOf(
@@ -72,7 +76,8 @@ class RelayUiStateTest {
             messages = messages,
             unreadByPeer = mapOf("a" to 2),
             pendingByPeer = mapOf("b" to 1),
-        )
+        
+            settings = testSettings(),)
 
         // 无摘要 ⇒ 退回从消息推导（改造前的行为）。有摘要 ⇒ 走新路径。
         val derived = conversations(base.toChatSlice(), base.toAgentSlice(), base.toNodeSlice(), base.toSettingsSlice())
@@ -102,7 +107,8 @@ class RelayUiStateTest {
                     lastMessageIsMine = false,
                 ),
             ),
-        )
+        
+            settings = testSettings(),)
         val row = conversations(state.toChatSlice(), state.toAgentSlice(), state.toNodeSlice(), state.toSettingsSlice()).single { it.convId == "ghost" }
         assertEquals("只存在于摘要里的一句话", row.preview)
         assertEquals(7_000L, row.lastMessageAt)
@@ -115,7 +121,8 @@ class RelayUiStateTest {
                 peer("off", "离线的人", online = false, lastSeenAt = 9_000L),
                 peer("on", "在线的人", online = true, lastSeenAt = 1_000L),
             ),
-        )
+        
+            settings = testSettings(),)
         // 纯时间倒序：更近活跃的排在前面
         assertEquals(listOf("off", "on"), conversations(state.toChatSlice(), state.toAgentSlice(), state.toNodeSlice(), state.toSettingsSlice()).map { it.convId })
     }
@@ -128,7 +135,8 @@ class RelayUiStateTest {
                 peer("b", "乙", online = true, lastSeenAt = 1_000L),
             ),
             unreadByPeer = mapOf("b" to 1),
-        )
+        
+            settings = testSettings(),)
         // 未读只做视觉标记（ConversationRow 画红点），**不参与排序**：
         // 乙有未读也不能压过更近的甲 —— 真机反馈 #1 的另一半
         // （旧口径是"有未读的会话无条件置顶"，与"按最近聊天时间排"矛盾）。
@@ -145,7 +153,8 @@ class RelayUiStateTest {
                 peer("talked", "聊过的电脑", online = false, lastSeenAt = 50_000L),
             ),
             messages = mapOf("talked" to listOf(message("m1", "talked", "在吗", at = 1_000L))),
-        )
+        
+            settings = testSettings(),)
         assertEquals(listOf("talked", "fresh"), conversations(state.toChatSlice(), state.toAgentSlice(), state.toNodeSlice(), state.toSettingsSlice()).map { it.convId })
     }
 
@@ -161,7 +170,8 @@ class RelayUiStateTest {
                 "a" to listOf(message("a1", "a", "更近的一条", at = 2_000L)),
                 "b" to listOf(message("b1", "b", "更早的一条", at = 500L)),
             ),
-        )
+        
+            settings = testSettings(),)
         assertEquals(listOf("a", "b"), conversations(state.toChatSlice(), state.toAgentSlice(), state.toNodeSlice(), state.toSettingsSlice()).map { it.convId })
     }
 
@@ -172,7 +182,8 @@ class RelayUiStateTest {
                 peer("old", "很久没见", online = false, lastSeenAt = 100L),
                 peer("recent", "刚刚见过", online = true, lastSeenAt = 900L),
             ),
-        )
+        
+            settings = testSettings(),)
         // 没聊过的那一档内部仍要有说得通的先后：最近还在线的靠前。
         assertEquals(listOf("recent", "old"), conversations(state.toChatSlice(), state.toAgentSlice(), state.toNodeSlice(), state.toSettingsSlice()).map { it.convId })
     }
@@ -185,7 +196,8 @@ class RelayUiStateTest {
                 "a" to listOf(message("m1", "a", "早", at = 1_000L)),
                 "b" to listOf(message("m2", "b", "晚", at = 5_000L)),
             ),
-        )
+        
+            settings = testSettings(),)
         assertEquals(listOf("b", "a"), conversations(state.toChatSlice(), state.toAgentSlice(), state.toNodeSlice(), state.toSettingsSlice()).map { it.convId })
     }
 
@@ -194,7 +206,8 @@ class RelayUiStateTest {
         // 刚配对完、还没说过话的电脑必须立刻出现在列表里，否则用户以为配对失败。
         val state = RelayUiState(
             peers = listOf(peer("fresh", "刚配对的电脑", online = true, lastSeenAt = 4_200L)),
-        )
+        
+            settings = testSettings(),)
         val row = conversations(state.toChatSlice(), state.toAgentSlice(), state.toNodeSlice(), state.toSettingsSlice()).single()
         assertEquals("fresh", row.convId)
         assertEquals("刚配对的电脑", row.title)
@@ -218,7 +231,8 @@ class RelayUiStateTest {
                     message("m2", "p", "最后一条", at = 7_000L, mine = true),
                 ),
             ),
-        )
+        
+            settings = testSettings(),)
         val row = conversations(state.toChatSlice(), state.toAgentSlice(), state.toNodeSlice(), state.toSettingsSlice()).single()
         assertEquals("最后一条", row.preview)
         assertEquals(7_000L, row.lastMessageAt, "有消息时用最后一条消息的时间，而不是 lastSeenAt")
@@ -232,7 +246,8 @@ class RelayUiStateTest {
             peers = listOf(peer("a", "甲", online = true), peer("b", "乙", online = true)),
             unreadByPeer = mapOf("a" to 2, "b" to 5),
             pendingByPeer = mapOf("a" to 3),
-        )
+        
+            settings = testSettings(),)
         val byId = conversations(state.toChatSlice(), state.toAgentSlice(), state.toNodeSlice(), state.toSettingsSlice()).associateBy { it.convId }
         assertEquals(2, byId.getValue("a").unread)
         assertEquals(3, byId.getValue("a").pendingCount)
@@ -253,7 +268,8 @@ class RelayUiStateTest {
             // （它不是一个会话，见 ConversationSourceTest）。这里给它一条消息，
             // 让下面两条断言测的仍然只是「能力位怎么分人/agent」，而不是列表准入规则。
             messages = mapOf("a1" to listOf(message("m-a1", "a1", "在吗", 1L))),
-        )
+        
+            settings = testSettings(),)
         // 判据只有 ag1 这一个能力位 —— 不靠昵称、不靠 host。
         assertEquals(listOf("a1"), state.agentPeers.map { it.nodeId })
         assertEquals(listOf("h1", "h2"), humanPeers(state.toNodeSlice()).map { it.nodeId })
@@ -263,14 +279,14 @@ class RelayUiStateTest {
 
     @Test
     fun unknownOrMissingPeerLookupsAreEmptyNotCrashes() {
-        val state = RelayUiState(peers = listOf(peer("a", "甲")))
+        val state = RelayUiState(peers = listOf(peer("a", "甲")), settings = testSettings())
         assertNull(peer(null, state.toNodeSlice(), state.toSettingsSlice()))
         assertNull(peer("nobody", state.toNodeSlice(), state.toSettingsSlice()))
         assertEquals("甲", peer("a", state.toNodeSlice(), state.toSettingsSlice())?.nick)
         assertEquals(emptyList(), messagesWith(state.toChatSlice(), null))
         assertEquals(emptyList(), messagesWith(state.toChatSlice(), "nobody"))
-        assertEquals(emptyList(), RelayUiState().convs())
-        assertEquals(0, RelayUiState().onlineCount)
+        assertEquals(emptyList(), RelayUiState(settings = testSettings()).convs())
+        assertEquals(0, RelayUiState(settings = testSettings()).onlineCount)
     }
 
     @Test
@@ -298,7 +314,8 @@ class RelayUiStateTest {
             ),
             unreadByPeer = mapOf("2819d147-rest" to 2),
             pendingByPeer = mapOf("2819d147-rest" to 1),
-        )
+        
+            settings = testSettings(),)
         val row = conversations(state.toChatSlice(), state.toAgentSlice(), state.toNodeSlice(), state.toSettingsSlice()).single()
         assertEquals("2819d147-rest", row.convId)
         // 对端还没被重新发现：离线、非 Agent，标题退回 nodeId 前缀（和 displayName 末级兜底一致）。
@@ -322,11 +339,12 @@ class RelayUiStateTest {
         val thread = mapOf(
             "n1" to listOf(message("m1", "n1", "早安", at = 200L)),
         )
-        val before = RelayUiState(peers = emptyList(), messages = thread).convs()
+        val before = RelayUiState(peers = emptyList(), messages = thread, settings = testSettings()).convs()
         val after = RelayUiState(
             peers = listOf(peer("n1", "书房的电脑", online = true, lastSeenAt = 300L)),
             messages = thread,
-        ).convs()
+        
+            settings = testSettings(),).convs()
         assertEquals(listOf("n1"), before.map { it.convId })
         assertEquals(listOf("n1"), after.map { it.convId })
         assertEquals("书房的电脑", after.single().title)
@@ -344,7 +362,8 @@ class RelayUiStateTest {
         val restored = RelayUiState(
             peers = emptyList(),
             messages = mapOf("2819d147-rest" to listOf(message("m1", "2819d147-rest", "在吗", at = 200L))),
-        )
+        
+            settings = testSettings(),)
         // `assertNotNull` 带 contract，返回的就是非空值 —— 后面不必再写 `?.`。
         val placeholder = assertNotNull(restored.chatPeer("2819d147-rest"))
         assertEquals("2819d147-rest", placeholder.nodeId)
@@ -485,6 +504,7 @@ class RelayUiStateTest {
         val convId = ConvId.group(groupId)
         val state = RelayUiState(
             settings = RelaySettings.firstRun().copy(
+                assistantEnabled = false,
                 groups = listOf(
                     GroupMeta(
                         groupId = groupId,
@@ -506,7 +526,7 @@ class RelayUiStateTest {
         // 群元数据还没到（或刚被删）时的兜底是 groupId 前缀，**不是** `group:` 那一段：
         // 会话键的前缀是实现细节，不该出现在用户眼前。
         val groupId = "3ae78fe9-b605-4979-80d0-c608877b3cd8"
-        val title = RelayUiState().convTitle(ConvId.group(groupId))
+        val title = RelayUiState(settings = testSettings()).convTitle(ConvId.group(groupId))
 
         assertEquals("3ae78fe9", title)
         assertFalse(title.startsWith("group:"))
@@ -522,6 +542,7 @@ class RelayUiStateTest {
             peers = listOf(peer("talked", "聊过的电脑", lastSeenAt = 1L)),
             messages = mapOf("talked" to listOf(message("m1", "talked", "在吗", at = 1_000L))),
             settings = RelaySettings.firstRun().copy(
+                assistantEnabled = false,
                 groups = listOf(
                     GroupMeta(
                         groupId = groupId,
@@ -574,7 +595,8 @@ class RelayUiStateTest {
                 session("s-sub", origin = "subagent", heard = 200),
                 session("s-shell", blank = true, heard = 100),
             ).associateBy { AgentSessionKey("dev", it.sessionId) },
-        )
+        
+            settings = testSettings(),)
 
         assertEquals(
             listOf("s-real"),
@@ -594,7 +616,8 @@ class RelayUiStateTest {
                 session("s-a", blank = true, heard = 200),
                 session("s-b", blank = true, heard = 100),
             ).associateBy { AgentSessionKey("dev", it.sessionId) },
-        )
+        
+            settings = testSettings(),)
         assertEquals(
             listOf("s-a", "s-b"),
             visibleAgentSessionsOf(onlyShells.toAgentSlice(), "dev").map { it.sessionId },
@@ -608,7 +631,8 @@ class RelayUiStateTest {
                 session("s-old-1"),
                 session("s-old-2", heard = 900),
             ).associateBy { AgentSessionKey("dev", it.sessionId) },
-        )
+        
+            settings = testSettings(),)
         assertEquals(2, visibleAgentSessionsOf(legacy.toAgentSlice(), "dev").size, "老宿主没报两键时不该藏任何会话")
 
         // 归档会话默认隐藏（对齐 DSH 的 hide-archived 默认行为）。
@@ -621,7 +645,8 @@ class RelayUiStateTest {
                     updatedAt = 200L, wsId = "ws-1",
                 ),
             ).associateBy { AgentSessionKey("dev", it.sessionId) },
-        )
+        
+            settings = testSettings(),)
         assertEquals(
             listOf("s-active"),
             visibleAgentSessionsOf(withArchived.toAgentSlice(), "dev").map { it.sessionId },
@@ -646,7 +671,8 @@ class RelayUiStateTest {
                 session("s-newest-work", heard = 5_000L, host = 9_000L),
                 session("s-middle-work", heard = 5_000L, host = 4_000L),
             ).associateBy { AgentSessionKey("dev", it.sessionId) },
-        )
+        
+            settings = testSettings(),)
 
         assertEquals(
             listOf("s-newest-work", "s-middle-work", "s-oldest-work"),
@@ -661,7 +687,8 @@ class RelayUiStateTest {
                 session("s-with-host", heard = 1_000L, host = 2_000L),
                 session("s-legacy", heard = 3_000L, host = null),
             ).associateBy { AgentSessionKey("dev", it.sessionId) },
-        )
+        
+            settings = testSettings(),)
         assertEquals(
             listOf("s-legacy", "s-with-host"),
             agentSessionsOf(mixed.toAgentSlice(), "dev").map { it.sessionId },
@@ -765,7 +792,8 @@ class RelayUiStateTest {
                     startedAt = 1_000L,
                 ),
             ),
-        )
+        
+            settings = testSettings(),)
 
         assertEquals("dsh", withAgentData.convTitle(hostId), "列表行与头部同一口径：agent 名")
     }
@@ -791,7 +819,8 @@ class RelayUiStateTest {
                     startedAt = 1_000L,
                 ),
             ),
-        )
+        
+            settings = testSettings(),)
         assertEquals("dsh", state.convs().single().title, "列表行标题 = agent 名（与头部同口径）")
     }
 

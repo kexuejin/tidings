@@ -65,6 +65,7 @@ import com.kapp.tenon.feature.chat.draftOf
 import com.kapp.tenon.feature.chat.updateDraft
 import com.kapp.tenon.feature.chat.DraftsByConvSaver
 import com.kapp.tenon.feature.chat.ChatScreen
+import com.kapp.tenon.feature.automation.AutomationConsoleScreen
 import com.kapp.tenon.feature.conversations.createWorkspaceGroupForNewDirectory
 import com.kapp.tenon.feature.conversations.createWorkspaceGroupWithDirectory
 import com.kapp.tenon.feature.conversations.systemDirectoryPicker
@@ -86,6 +87,7 @@ import com.kapp.tenon.generated.resources.desktop_overflow_open_downloads
 import com.kapp.tenon.generated.resources.desktop_overflow_theme_dark
 import com.kapp.tenon.generated.resources.desktop_overflow_theme_light
 import com.kapp.tenon.generated.resources.desktop_view_agents
+import com.kapp.tenon.generated.resources.desktop_view_automation
 import com.kapp.tenon.generated.resources.desktop_view_cabinet
 import com.kapp.tenon.generated.resources.desktop_view_conversations
 import com.kapp.tenon.generated.resources.desktop_view_files
@@ -117,6 +119,8 @@ public enum class DesktopView(val label: StringResource) {
     Cabinet(Res.string.desktop_view_cabinet),
     Nodes(Res.string.desktop_view_nodes),
     Agents(Res.string.desktop_view_agents),
+    /** 自动化控制台：桌面端一级入口（产品裁决：任务调度不再藏在设置二级页）。 */
+    Automation(Res.string.desktop_view_automation),
 }
 
 /**
@@ -955,6 +959,15 @@ public fun DesktopShell(
                             onOpenAgentConsole = openAgents,
                         )
 
+                        DesktopView.Automation -> AutomationConsoleScreen(
+                            tasks = settingsSlice.settings.automationTasks,
+                            onSaveTask = controller::saveAutomationTask,
+                            onDeleteTask = controller::deleteAutomationTask,
+                            onToggleTask = controller::toggleAutomationTask,
+                            onRunTaskNow = controller::triggerAutomationTaskNow,
+                            onBack = null,
+                            modifier = Modifier.fillMaxSize(),
+                        )
                         DesktopView.Files -> FilesPane(
                             chatSlice = chatSlice,
                             nodeSlice = nodeSlice,

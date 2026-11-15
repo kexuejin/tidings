@@ -41,7 +41,10 @@ class ConversationSourceTest {
 
     @Test
     fun agentNodeWithNothingIsNotAConversation() {
-        val state = RelayUiState(peers = listOf(agentPeer("agent-a")))
+        val state = RelayUiState(
+            peers = listOf(agentPeer("agent-a")),
+            settings = RelaySettings.firstRun().copy(assistantEnabled = false),
+        )
         assertEquals(emptyList(), conversations(state.toChatSlice(), state.toAgentSlice(), state.toNodeSlice(), state.toSettingsSlice()).map { it.convId })
     }
 
@@ -53,6 +56,7 @@ class ConversationSourceTest {
             agentSessions = mapOf(
                 AgentSessionKey("agent-a", "s-sub") to session("agent-a", "s-sub", origin = "subagent"),
             ),
+            settings = RelaySettings.firstRun().copy(assistantEnabled = false),
         )
         assertEquals(emptyList(), conversations(state.toChatSlice(), state.toAgentSlice(), state.toNodeSlice(), state.toSettingsSlice()).map { it.convId })
     }
@@ -64,6 +68,7 @@ class ConversationSourceTest {
             agentSessions = mapOf(
                 AgentSessionKey("agent-a", "s-1") to session("agent-a", "s-1"),
             ),
+            settings = RelaySettings.firstRun().copy(assistantEnabled = false),
         )
         assertEquals(listOf("agent-a"), conversations(state.toChatSlice(), state.toAgentSlice(), state.toNodeSlice(), state.toSettingsSlice()).map { it.convId })
     }
@@ -73,6 +78,7 @@ class ConversationSourceTest {
         val state = RelayUiState(
             peers = listOf(agentPeer("agent-a")),
             messages = mapOf("agent-a" to listOf(text("agent-a", "m-1"))),
+            settings = RelaySettings.firstRun().copy(assistantEnabled = false),
         )
         assertEquals(listOf("agent-a"), conversations(state.toChatSlice(), state.toAgentSlice(), state.toNodeSlice(), state.toSettingsSlice()).map { it.convId })
     }
@@ -80,7 +86,10 @@ class ConversationSourceTest {
     @Test
     fun humanPeerWithNothingStillAppears() {
         // 回归护栏：这条收紧**只针对 agent**，不能把「刚配对完的电脑」一起藏掉。
-        val state = RelayUiState(peers = listOf(humanPeer("peer-h")))
+        val state = RelayUiState(
+            peers = listOf(humanPeer("peer-h")),
+            settings = RelaySettings.firstRun().copy(assistantEnabled = false),
+        )
         assertEquals(listOf("peer-h"), conversations(state.toChatSlice(), state.toAgentSlice(), state.toNodeSlice(), state.toSettingsSlice()).map { it.convId })
     }
 }

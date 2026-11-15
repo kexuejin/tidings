@@ -44,6 +44,7 @@ import com.kapp.tenon.ui.theme.accents
 import com.kapp.tenon.domain.model.FileCardUi
 import com.kapp.tenon.domain.model.TransferState
 import com.kapp.tenon.generated.resources.Res
+import com.kapp.tenon.generated.resources.ic_list
 import com.kapp.tenon.generated.resources.ic_chat_bubble
 import com.kapp.tenon.generated.resources.ic_folder
 import com.kapp.tenon.generated.resources.ic_hdd
@@ -275,6 +276,7 @@ public fun desktopViewIcon(view: DesktopView): androidx.compose.ui.graphics.pain
     DesktopView.Cabinet -> painterResource(Res.drawable.ic_hdd)
     DesktopView.Nodes -> painterResource(Res.drawable.ic_lan_search)
     DesktopView.Agents -> painterResource(Res.drawable.ic_terminal)
+    DesktopView.Automation -> painterResource(Res.drawable.ic_list)
 }
 
 @Composable

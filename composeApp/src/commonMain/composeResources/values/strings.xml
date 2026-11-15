@@ -1108,6 +1108,7 @@
     <!-- 视图名（工作区）：与导航条、View 菜单共用。屏内标题另有 agent_title（也是「工作区」），
          两者词一样但是两个 key —— 改文案时要想清楚是改入口名还是改屏内标题。 -->
     <string name="desktop_view_agents">智能体</string>
+    <string name="desktop_view_automation">自动化</string>
 
     <!-- 菜单栏、工具栏 -->
     <string name="desktop_menu_new_conversation">新建会话</string>

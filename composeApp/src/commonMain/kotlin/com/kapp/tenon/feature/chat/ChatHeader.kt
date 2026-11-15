@@ -26,6 +26,7 @@ import com.kapp.tenon.domain.resolveNodeIdentity
 import com.kapp.tenon.core.protocol.ConvId
 import com.kapp.tenon.core.protocol.GroupMeta
 import com.kapp.tenon.generated.resources.Res
+import com.kapp.tenon.generated.resources.set_automation_entry_title
 import com.kapp.tenon.generated.resources.assistant_default_title
 import com.kapp.tenon.ui.components.AppIconButton
 import androidx.compose.material.icons.Icons
@@ -59,6 +60,7 @@ import com.kapp.tenon.generated.resources.chat_clear_local_action
 import com.kapp.tenon.generated.resources.chat_close_and_clear_action
 import com.kapp.tenon.generated.resources.chat_more_actions
 import com.kapp.tenon.generated.resources.conv_info_title
+import com.kapp.tenon.generated.resources.ic_list
 import com.kapp.tenon.generated.resources.ic_close
 import com.kapp.tenon.generated.resources.ic_folder
 import com.kapp.tenon.generated.resources.chat_nudge
@@ -111,6 +113,8 @@ internal fun ChatHeader(
     memberOnlineCount: Int = 0,
     onOpenGroupInfo: (() -> Unit)? = null,
     onOpenConversationInfo: (() -> Unit)? = null,
+    /** 助理会话专属：自动化控制台直达（桌面有独立页签，可不接）。 */
+    onOpenAutomationConsole: (() -> Unit)? = null,
     onSearchHistory: (() -> Unit)? = null,
     /**
      * 「清空本会话聊天记录」。null = 不画这个入口。
@@ -323,6 +327,13 @@ internal fun ChatHeader(
                     modifier = Modifier.size(size),
                 )
             }
+        }
+        if (group == null && ConvId.isAssistant(peer.nodeId) && onOpenAutomationConsole != null) {
+            AppIconButton(
+                icon = Res.drawable.ic_list,
+                contentDescription = stringResource(Res.string.set_automation_entry_title),
+                onClick = onOpenAutomationConsole,
+            )
         }
         if (group == null && onOpenConversationInfo != null) {
             actions += ChatHeaderAction(

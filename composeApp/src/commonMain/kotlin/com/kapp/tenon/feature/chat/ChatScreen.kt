@@ -859,6 +859,13 @@ fun ChatScreen(
                 memberOnlineCount = memberOnlineCount,
                 onOpenGroupInfo = if (group != null) ({ showGroupInfo = true }) else null,
                 onOpenConversationInfo = if (group == null) ({ showConversationInfo = true }) else null,
+                // 助理会话专属：直达自动化控制台（桌面有独立页签的壳可不接——这里
+                // actions.onOpenAutomationConsole 手机壳必接，桌面壳是同一份 actions）。
+                onOpenAutomationConsole = if (com.kapp.tenon.core.protocol.ConvId.isAssistant(peerId.orEmpty())) {
+                    actions.onOpenAutomationConsole
+                } else {
+                    null
+                },
                 onSearchHistory = null,
                 // 「清空本会话记录」：只在壳真的接了这条动作时画（null = 不画），
                 // 点了先开确认框，确认后才真的清（见 ClearConversationDialog）。

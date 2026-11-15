@@ -954,6 +954,7 @@
     <!-- View name (Workspaces): shared by the navigation rail and the View menu. The in-screen
          heading is a separate key (agent_title) and happens to read the same. -->
     <string name="desktop_view_agents">Agents</string>
+    <string name="desktop_view_automation">Automation</string>
 
     <!-- 菜单栏、工具栏 -->
     <string name="desktop_menu_new_conversation">New Conversation</string>

@@ -60,7 +60,9 @@ class AutomationTaskSettingsTest {
         val legacyJson = """{"nodeId": "old-node", "nick": "old-nick"}"""
         val decoded = SettingsStore.json.decodeFromString(RelaySettings.serializer(), legacyJson)
 
-        assertFalse(decoded.assistantEnabled)
+        // assistantEnabled 的默认已翻为 true（产品裁决：默认可见，opt-out 关闭）——
+        // 旧 JSON 缺字段即取新默认，这里断言的就是「缺省即默认」这条链。
+        assertTrue(decoded.assistantEnabled)
         assertFalse(decoded.allowExternalPrivateChat)
         assertNull(decoded.assistantCustomName)
         assertNull(decoded.assistantRoleKey)
