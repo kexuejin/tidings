@@ -889,7 +889,14 @@ class DesktopExtension(
                 controller.onAssistantQuestDispatch = { prompt, token, replyTo ->
                     // 便签派发：工作区用宿主解析的默认仓（机主白名单内，D10/D15 判据）；
                     // 没有可写仓 = 如实返回 false，便签留在会话里（Phase 2 跨端同步接手）。
+                    // 便签派发的工作区解析：resolveWorkspacePath(null) 在多工作区宿主上
+                    // 无法自动选（歧义退单是群派单的正确行为）。助理派单场景机主就是在
+                    // 这台机器上打字，兜底选**第一个可用的本机工作区**——选错了可以在
+                    // 卡面上叫停，但不兜底则功能死在 >1 工作区的宿主上。
                     val ws = workerOrchestrator?.resolveWorkspacePath(null)
+                        ?: controller.state.value.agentWorkspaces.values
+                            .filter { it.peerId == controller.state.value.selfNodeId && !it.wsPath.isNullOrBlank() }
+                            .firstOrNull()?.wsPath
                     if (ws == null) {
                         RelayLog.info("RELAY-QUEST", "assistant quest dispatch rejected: no writable workspace bound")
                         false
