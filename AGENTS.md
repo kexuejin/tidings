@@ -262,6 +262,28 @@ python3 tools/check-design-palette.py --css-vars
   （覆盖 `.sandbox-home` 之外的人造链接）。
 - 严禁任何递归删除操作的物理目标覆盖 `$HOME` 真实根。
 
+### 2.9 环境隔离：Debug 与 Release 双轨互斥（端口、信道与数据沙箱）
+
+**规则**：同一台设备（无论手机还是电脑）上，Debug 与 Release 版本**必须绝对隔离、互不干扰、互不通信**。开发调试与频繁迭代在 Debug 上进行，稳定常驻与自动化治理（SuperAgent、定时任务）在 Release 上运行。
+
+| 维度 | Release（正式/稳定版） | Debug（开发/调试版） |
+|---|---|---|
+| **UDP 发现与打洞** | `17878` | `27878` |
+| **TCP 传输通道** | `17879` | `27879` |
+| **本地控制面 HTTP** | `8788` | `18788` |
+| **mDNS 服务类型** | `_relay._udp` | `_relay-debug._udp` |
+| **配对 / 唤醒 Scheme** | `relay://` | `relay-debug://` |
+| **桌面数据目录** | `~/Library/Application Support/榫卯 Tenon` | `~/Library/Application Support/榫卯 Tenon Debug` |
+| **桌面单实例锁** | 各自持有独立的数据目录与进程锁 | 同左，两版本可同机同时常驻 |
+| **Android 包名与应用名** | `com.kapp.tenon`（榫卯） | `com.kapp.tenon.debug`（榫卯 Dev） |
+
+- **fail-closed 跨版本隔离**：Debug 节点**绝不连接** Release 节点，反之亦然。mDNS 服务名与配对 Scheme 带有 `-debug` 后缀；即使在同一个物理局域网或收到广播，异轨消息与配对码因信道/端口/前缀不匹配在入口直接丢弃，严禁做「自动降级兼容」。
+- **默认保护正式环境数据**：
+  - 桌面端 `./gradlew :desktopApp:run` **默认以 Debug 模式运行**（注入 `-Dtenon.flavor=debug`），防止日常开发直接污染真机或宿主的 Release 生产数据库。
+  - 需要桌面 Release 模式运行需显式传参：`./gradlew :desktopApp:run -Ptenon.flavor=release`。
+  - 移动端通过构建变体（`debug` vs `release`）天然区分，`applicationIdSuffix = ".debug"` 确保同机安装双包。
+- **所有协议与端口配置必须收敛于 `AppFlavor`**：禁止在业务代码中硬编码 `17878`、`8788` 或 `_relay._udp`。跨平台统一通过 `AppPlatform.flavor` 或 `AppFlavor` 派生，确保未来扩展或维护时单点收敛。
+
 ---
 
 ## 3. 「静默丢失」清单 —— 本仓最贵的一类缺陷
@@ -289,6 +311,7 @@ python3 tools/check-design-palette.py --css-vars
 | 6 | 合成名没被真名顶掉 | 用户看到一台陌生设备 |
 | 7 | **取值域白名单漏了一个在用值**（键在、值不在） | 整帧 bad-payload 拒收（现场：`agent-ack.kind = allow_session` / `revoke_session`） |
 | 8 | **沙箱清理用标准库 `deleteRecursively()` 跟随符号链接** | 宿主机真实 HOME 凭据目录被洗劫掏空（现场：58ms 内 298 次 unlink + 189 次 rmdir） |
+| 9 | **跨 Flavor 误连或配对异轨节点** | 端口/mDNS 隔离，异轨广播与扫码配对在入口整帧丢弃 |
 
 第 7 种与第 1 种长得像、成因不同：#1 是**多了一个键**，#7 是**键对、值不在白名单里**。
 它比 #1 更难发现，因为发送侧那条构造器是「合法」的 —— `Codec.agentAckPayload(...)` 照拼，

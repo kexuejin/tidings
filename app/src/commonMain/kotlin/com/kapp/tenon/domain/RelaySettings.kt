@@ -2,6 +2,7 @@
 
 package com.kapp.tenon.domain
 
+import com.kapp.tenon.core.protocol.AppFlavor
 import com.kapp.tenon.core.protocol.GroupMeta
 import com.kapp.tenon.core.protocol.MsgTypes
 import com.kapp.tenon.core.protocol.Profile
@@ -669,8 +670,13 @@ data class RelaySettings(
          *
          * @param defaultNick 该宿主的默认显示名；空串则由调用方之后再定。
          */
-        fun firstRun(defaultNick: String = ""): RelaySettings =
-            RelaySettings(nodeId = newId(), nick = defaultNick)
+        fun firstRun(defaultNick: String = "", flavor: AppFlavor = AppFlavor.Release): RelaySettings =
+            RelaySettings(
+                nodeId = newId(),
+                nick = defaultNick,
+                udpPort = flavor.udpPort,
+                tcpPort = flavor.tcpPort,
+            )
     }
 
     /**

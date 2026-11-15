@@ -21,6 +21,7 @@ import kotlinx.coroutines.withTimeoutOrNull
  */
 class AndroidMdnsAdvertiser(
     context: Context,
+    private val serviceType: String = SERVICE_TYPE,
 ) : MdnsAdvertiser {
 
     private val nsdManager = context.getSystemService(Context.NSD_SERVICE) as? NsdManager
@@ -38,7 +39,7 @@ class AndroidMdnsAdvertiser(
         return try {
             val serviceInfo = NsdServiceInfo().apply {
                 this.serviceName = serviceName
-                this.serviceType = SERVICE_TYPE
+                this.serviceType = this@AndroidMdnsAdvertiser.serviceType
                 this.port = port
             }
 

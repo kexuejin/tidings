@@ -2,6 +2,8 @@
 
 package com.kapp.tenon.platform
 
+import com.kapp.tenon.core.protocol.AppFlavor
+
 
 /**
  * 平台契约：commonMain 只声明"要什么"，平台壳决定"怎么给"。
@@ -311,6 +313,12 @@ interface AppPlatform {
     val dataDirectory: DataDirectoryProvider
     val networkMonitor: NetworkMonitor
     val deviceInfo: DeviceInfo
+
+    /**
+     * Application & network runtime flavor (Release or Debug).
+     */
+    val flavor: AppFlavor
+        get() = AppFlavor.Release
 
     /**
      * 实验:luciola 传输宿主。**默认 null = 本壳没接,一切走 legacy**

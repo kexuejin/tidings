@@ -47,12 +47,17 @@ fun main(args: Array<String>) {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     var hostRefLocal: DesktopHost? = null
 
+    val flavor = resolveDesktopFlavor()
+
     // 改名迁移必须先于一切：单实例锁、库、身份全在数据目录里，锁在旧目录上
     // 等于新旧版本互相看不见（见 migrateLegacyDesktopDirs 的说明）。
-    migrateLegacyDesktopDirs()
-    DesktopLoginItem.migrateLegacyRegistration()
-    val defaultDataDir = defaultDataDirectory()
-    val defaultCacheDir = defaultCacheDirectory()
+    // 仅在 Release 模式迁移存量老版本目录；Debug 模式使用独立的全新沙箱目录。
+    if (flavor.isRelease) {
+        migrateLegacyDesktopDirs()
+        DesktopLoginItem.migrateLegacyRegistration()
+    }
+    val defaultDataDir = defaultDataDirectory(flavor)
+    val defaultCacheDir = defaultCacheDirectory(flavor)
 
     // **单实例**：数据目录只许一个进程独占。
     //
@@ -84,7 +89,11 @@ fun main(args: Array<String>) {
             if (visible) hostRefLocal?.requestShowMain() else hostRefLocal?.hideMain()
         },
     )
-    val platform = DesktopAppPlatform(screenCapture = screenCaptureService)
+    val platform = DesktopAppPlatform(
+        flavor = flavor,
+        dataDirectory = DesktopDataDirectory(defaultDataDir, defaultCacheDir),
+        screenCapture = screenCaptureService,
+    )
 
     // 省电档必须在**构造控制器之前**读出来：Timings 是 NodeRuntime 的构造参数，
     // 起点档位决定了这次启动的心跳频率。界面上的开关只是后续切档的入口。
@@ -116,7 +125,7 @@ fun main(args: Array<String>) {
     val extension = DesktopExtension(
         controller = controller,
         scope = scope,
-        httpPort = ControlPlane.DEFAULT_HTTP_PORT,
+        httpPort = flavor.controlPlanePort,
         // 诊断端口由壳注入：编排层不依赖 composeApp，实时缓冲的所有权留在 UI 层。
         liveEventSink = { sessionId, line -> AgentLiveLog.append(sessionId, line) },
         // 调度中枢的持久化台账（与消息/Agent 库共用同一条驱动）——触发式编排

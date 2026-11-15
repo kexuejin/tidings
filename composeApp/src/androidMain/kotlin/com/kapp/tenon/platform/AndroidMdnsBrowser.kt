@@ -34,6 +34,7 @@ import java.util.concurrent.ConcurrentLinkedQueue
  */
 class AndroidMdnsBrowser(
     private val context: Context,
+    private val serviceType: String = SERVICE_TYPE,
 ) : MdnsBrowser {
 
     private val nsdManager: NsdManager by lazy {
@@ -99,7 +100,7 @@ class AndroidMdnsBrowser(
         discoveryListener = listener
 
         try {
-            nsdManager.discoverServices(SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, listener)
+            nsdManager.discoverServices(serviceType.removeSuffix("."), NsdManager.PROTOCOL_DNS_SD, listener)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start mDNS discovery", e)
         }

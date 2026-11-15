@@ -3,6 +3,7 @@
 package com.kapp.tenon.desktop
 
 import com.kapp.tenon.core.fs.pathJoin
+import com.kapp.tenon.core.protocol.AppFlavor
 import com.kapp.tenon.core.protocol.IpAddressUtils
 import com.kapp.tenon.core.protocol.Ipv6Scope
 import java.awt.FileDialog
@@ -26,7 +27,11 @@ import java.util.concurrent.CopyOnWriteArrayList
  *    绝不用「假成功」把扫码入口糊弄过去。
  */
 class DesktopAppPlatform(
-    override val dataDirectory: DesktopDataDirectory = DesktopDataDirectory(),
+    override val flavor: AppFlavor = resolveDesktopFlavor(),
+    override val dataDirectory: DesktopDataDirectory = DesktopDataDirectory(
+        dataPath = defaultDataDirectory(flavor),
+        cachePath = defaultCacheDirectory(flavor),
+    ),
     override val networkMonitor: DesktopNetworkMonitor = DesktopNetworkMonitor(),
     override val deviceInfo: DesktopDeviceInfo = DesktopDeviceInfo(),
     /**
@@ -45,8 +50,8 @@ class DesktopAppPlatform(
     override val saveDirectoryPicker: DesktopSaveDirectoryPicker = DesktopSaveDirectoryPicker(),
     override val qrScanner: DesktopQrScanner = DesktopQrScanner(),
     override val cameraGate: DesktopCameraGate = DesktopCameraGate(),
-    override val mdnsAdvertiser: DesktopMdnsAdvertiser = DesktopMdnsAdvertiser(),
-    override val mdnsBrowser: DesktopMdnsBrowser = DesktopMdnsBrowser(),
+    override val mdnsAdvertiser: DesktopMdnsAdvertiser = DesktopMdnsAdvertiser(serviceType = flavor.mdnsServiceType),
+    override val mdnsBrowser: DesktopMdnsBrowser = DesktopMdnsBrowser(serviceType = flavor.mdnsServiceType),
     override val pushNotificationHandler: DesktopNotificationHandler = DesktopNotificationHandler(),
     override val receivedFileActions: com.kapp.tenon.platform.ReceivedFileActions = DesktopReceivedFileActions(),
     /**
@@ -130,7 +135,13 @@ class DesktopDataDirectory(
     override fun cacheDirectory(): String = cachePath
 }
 
-internal fun defaultDataDirectory(): String {
+internal fun resolveDesktopFlavor(): AppFlavor {
+    val prop = System.getProperty("tenon.flavor")
+        ?: System.getenv("TENON_FLAVOR")
+    return AppFlavor.fromEnvironment(prop)
+}
+
+internal fun defaultDataDirectory(flavor: AppFlavor = resolveDesktopFlavor()): String {
     val home = System.getProperty("user.home") ?: "."
     val os = System.getProperty("os.name").orEmpty()
     val base = if (os.contains("Mac")) {
@@ -138,10 +149,10 @@ internal fun defaultDataDirectory(): String {
     } else {
         System.getenv("XDG_DATA_HOME") ?: "$home/.local/share"
     }
-    return "$base/${DESKTOP_APP_DIR}"
+    return "$base/${DESKTOP_APP_DIR}${flavor.desktopDataDirSuffix}"
 }
 
-internal fun defaultCacheDirectory(): String {
+internal fun defaultCacheDirectory(flavor: AppFlavor = resolveDesktopFlavor()): String {
     val home = System.getProperty("user.home") ?: "."
     val os = System.getProperty("os.name").orEmpty()
     val base = if (os.contains("Mac")) {
@@ -149,7 +160,7 @@ internal fun defaultCacheDirectory(): String {
     } else {
         System.getenv("XDG_CACHE_HOME") ?: "$home/.cache"
     }
-    return "$base/${DESKTOP_APP_DIR}"
+    return "$base/${DESKTOP_APP_DIR}${flavor.desktopDataDirSuffix}"
 }
 
 /**
@@ -529,6 +540,7 @@ class DesktopNotificationHandler : com.kapp.tenon.platform.PushNotificationHandl
  * 会把「系统拒绝发布」变成界面上一句永远不变的「广播中」。
  */
 class DesktopMdnsAdvertiser(
+    private val serviceType: String = AppFlavor.DEFAULT_MDNS_SERVICE_TYPE,
     private val runner: DnsSdRunner = DesktopDnsSd,
     private val settleMs: Long = 1_500L,
 ) : com.kapp.tenon.platform.MdnsAdvertiser {
@@ -537,7 +549,7 @@ class DesktopMdnsAdvertiser(
     override suspend fun start(serviceName: String, port: Int): Boolean {
         stop()
         if (!runner.available()) return false
-        val proc = runner.register(serviceName, port) ?: return false
+        val proc = runner.register(serviceName, port, serviceType) ?: return false
         process = proc
         Thread.sleep(settleMs)
         // 进程还在 = 没被系统当场拒绝。等待是为了避免把拒绝藏在「广播中」后面。
@@ -550,8 +562,9 @@ class DesktopMdnsAdvertiser(
     }
 }
 
-/** 浏览 `_relay._udp`：局域网内开启了 mDNS 自动发现的榫卯设备会出现在这里。 */
+/** 浏览 `_relay._udp` 或 `_relay-debug._udp`：局域网内开启了 mDNS 自动发现的榫卯设备会出现在这里。 */
 class DesktopMdnsBrowser(
+    private val serviceType: String = AppFlavor.DEFAULT_MDNS_SERVICE_TYPE,
     private val runner: DnsSdRunner = DesktopDnsSd,
     private val onFound: (String, String, Int) -> Unit = { _, _, _ -> },
     private val onLost: (String) -> Unit = { },
@@ -567,12 +580,12 @@ class DesktopMdnsBrowser(
         stopBrowsing()
         found = onServiceFound
         lost = onServiceLost
-        val proc = runner.browse() ?: return
+        val proc = runner.browse(serviceType) ?: return
         runnerProcess = proc
         val reader = Thread({
             runCatching {
                 proc.inputStream.bufferedReader().forEachLine { line ->
-                    parseBrowseLine(line, { a, b, c -> found(a, b, c) }, { lost(it) })
+                    parseBrowseLine(line, { a, b, c -> found(a, b, c) }, { lost(it) }, serviceType)
                 }
             }
         }, "relay-mdns-browse").apply { isDaemon = true; start() }
@@ -594,13 +607,14 @@ internal fun parseBrowseLine(
     line: String,
     onServiceFound: (String, String, Int) -> Unit,
     onServiceLost: (String) -> Unit,
+    expectedServiceType: String = AppFlavor.DEFAULT_MDNS_SERVICE_TYPE,
 ) {
     if (!line.contains("Add") && !line.contains("Rmv")) return
     val parts = line.trim().split(Regex("\\s+"))
     val removing = line.contains("Rmv")
     // dns-sd -B 格式：Timestamp [Rmv|Add] ServiceType ServiceName [Instance]
     if (parts.size < 4) return
-    if (!parts[1].contains("_relay._udp")) return
+    if (!parts[1].contains(expectedServiceType)) return
     val instance = parts.getOrNull(3) ?: return
     val port = parts.getOrNull(4)?.toIntOrNull() ?: 0
     if (removing) {
@@ -613,8 +627,10 @@ internal fun parseBrowseLine(
 /** 抽出 `dns-sd` 调用，测试可以塞假实现，不必真的起进程。 */
 interface DnsSdRunner {
     fun available(): Boolean
-    fun register(serviceName: String, port: Int): Process?
-    fun browse(): Process?
+    fun register(serviceName: String, port: Int): Process? = register(serviceName, port, AppFlavor.DEFAULT_MDNS_SERVICE_TYPE)
+    fun register(serviceName: String, port: Int, serviceType: String): Process?
+    fun browse(): Process? = browse(AppFlavor.DEFAULT_MDNS_SERVICE_TYPE)
+    fun browse(serviceType: String): Process?
 }
 
 object SystemDnsSdRunner : DnsSdRunner {
@@ -625,10 +641,10 @@ object SystemDnsSdRunner : DnsSdRunner {
     override fun available(): Boolean =
         runCatching { ProcessBuilder("dns-sd", "-h").start().waitFor() >= 0 }.getOrDefault(false)
 
-    override fun register(serviceName: String, port: Int): Process? =
-        launch("dns-sd", "-R", "_relay._udp", serviceName, port.toString())
+    override fun register(serviceName: String, port: Int, serviceType: String): Process? =
+        launch("dns-sd", "-R", serviceType, serviceName, port.toString())
 
-    override fun browse(): Process? = launch("dns-sd", "-B", "_relay._udp")
+    override fun browse(serviceType: String): Process? = launch("dns-sd", "-B", serviceType)
 }
 
 /**
@@ -646,14 +662,15 @@ object DesktopDnsSd : DnsSdRunner {
         }
 
     override fun available(): Boolean = delegate.available()
-    override fun register(serviceName: String, port: Int): Process? = delegate.register(serviceName, port)
-    override fun browse(): Process? = delegate.browse()
+    override fun register(serviceName: String, port: Int, serviceType: String): Process? =
+        delegate.register(serviceName, port, serviceType)
+    override fun browse(serviceType: String): Process? = delegate.browse(serviceType)
 }
 
 object NoopDnsSdRunner : DnsSdRunner {
     override fun available(): Boolean = false
-    override fun register(serviceName: String, port: Int): Process? = null
-    override fun browse(): Process? = null
+    override fun register(serviceName: String, port: Int, serviceType: String): Process? = null
+    override fun browse(serviceType: String): Process? = null
 }
 
 /**

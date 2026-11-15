@@ -290,7 +290,7 @@ class RelayController(
                         RecoveryPendingPeers.save(dataDirectory, pendingRecoveryPeers.value)
                     }
                 }
-                (existing ?: store.load() ?: RelaySettings.firstRun()).let { raw ->
+                (existing ?: store.load() ?: RelaySettings.firstRun(flavor = platform.flavor)).let { raw ->
                 // 一次性迁移（真机反馈 #2）：老库没有 persistMessagesDecided 这一位，
                 // 而旧文件里"从没设过"与"显式关掉"是同一串字节 —— 按"从没设过"补成开启。
                 // 只认这一位，所以跑过一次就再也不会重来（详见 migrateRelaySettings 的 KDoc）。

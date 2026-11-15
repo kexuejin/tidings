@@ -140,10 +140,7 @@ dependencies {
 
     // 纯 JVM 单测（不需要设备/Robolectric）：目前钉的是「测试注入口只在可调试构建里注册」
     // 这类**纯判定**。宿主 APK 里能单测的东西不多，但这类安全闸门值得一条。
-    //
-    // 用 kotlin-test-junit 而不是目录里的 libs.kotlin.test：后者是 KMP 工件
-    // （org.jetbrains.kotlin:kotlin-test），在纯 Android 模块里解析不到 jvm 变体，
-    // 症状是 kotlin.test.Test 在单测源集里 "Unresolved reference"（实测）。
+    testImplementation(project(":core"))
     testImplementation("org.jetbrains.kotlin:kotlin-test-junit:" + libs.versions.kotlin.get())
 }
 

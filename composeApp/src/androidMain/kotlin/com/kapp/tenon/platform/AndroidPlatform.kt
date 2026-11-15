@@ -4,6 +4,8 @@ package com.kapp.tenon.platform
 
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ApplicationInfo
+import com.kapp.tenon.core.protocol.AppFlavor
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
@@ -74,6 +76,13 @@ class AndroidAppPlatform(
      */
     private val defaultNick: String = "",
 ) : AppPlatform, QrPreviewProvider, AndroidDatabaseHost {
+
+    override val flavor: AppFlavor =
+        if ((context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
+            AppFlavor.Debug
+        } else {
+            AppFlavor.Release
+        }
 
     /**
      * 开 SQLite 库用的 Context（见 [AndroidDatabaseHost]）。
@@ -296,8 +305,8 @@ class AndroidAppPlatform(
         androidQrScanner.QrScannerPreview(modifier)
     }
     override val cameraGate: CameraGate = AndroidCameraGate(context, permissionBridge)
-    override val mdnsAdvertiser: MdnsAdvertiser = AndroidMdnsAdvertiser(context)
-    override val mdnsBrowser: MdnsBrowser = AndroidMdnsBrowser(context)
+    override val mdnsAdvertiser: MdnsAdvertiser = AndroidMdnsAdvertiser(context, flavor.mdnsServiceType)
+    override val mdnsBrowser: MdnsBrowser = AndroidMdnsBrowser(context, flavor.mdnsServiceType)
     override val pushNotificationHandler: PushNotificationHandler =
         AndroidPushNotificationHandler(context, permissionBridge)
 

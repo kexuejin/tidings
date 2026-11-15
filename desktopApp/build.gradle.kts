@@ -82,6 +82,12 @@ val MESSAGE_EXTENSION = "relaymsg"
 /** 与 `DesktopDeepLink.SCHEME` 对应的私有 MIME 类型。 */
 val RELAY_MIME = "application/x-relay-message"
 
+val isDesktopDebug = (findProperty("tenon.flavor") as? String)?.equals("debug", ignoreCase = true) == true
+val desktopPackageName = if (isDesktopDebug) "Tenon-Debug" else "Tenon"
+val desktopBundleId = if (isDesktopDebug) "com.kapp.tenon.desktop.debug" else "com.kapp.tenon.desktop"
+val desktopDockName = if (isDesktopDebug) "榫卯 Tenon Debug" else "榫卯 Tenon"
+val desktopScheme = if (isDesktopDebug) "relay-debug" else "relay"
+
 /**
  * macOS 的 URL scheme 声明。
  *
@@ -89,17 +95,17 @@ val RELAY_MIME = "application/x-relay-message"
  */
 val RELAY_URL_TYPES_XML = """
     <key>CFBundleDisplayName</key>
-    <string>榫卯 Tenon</string>
+    <string>$desktopDockName</string>
     <key>CFBundleURLTypes</key>
     <array>
         <dict>
             <key>CFBundleURLName</key>
-            <string>com.kapp.tenon.desktop</string>
+            <string>$desktopBundleId</string>
             <key>CFBundleTypeRole</key>
             <string>Viewer</string>
             <key>CFBundleURLSchemes</key>
             <array>
-                <string>relay</string>
+                <string>$desktopScheme</string>
             </array>
         </dict>
     </array>
@@ -174,7 +180,7 @@ compose.desktop {
             appResourcesRootDir.set(project.layout.projectDirectory.dir("resources"))
             // 先产出可分发目录/DMG；签名与公证交给 DSL，不手工跑 xcrun。
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
-            packageName = "Tenon"
+            packageName = desktopPackageName
             packageVersion = "1.0.0"
             description = "Local-first peer-to-peer messaging and agent collaboration"
             vendor = "Tenon"
@@ -206,14 +212,14 @@ compose.desktop {
             modules("java.sql", "jdk.httpserver", "jdk.management")
 
             macOS {
-                bundleID = "com.kapp.tenon.desktop"
+                bundleID = desktopBundleId
                 // `dockName` **只管运行时的 Dock 名称**，它不会写进 Info.plist ——
                 // 实测打包产物里 `CFBundleName` 仍是 packageName（`Tenon`），
                 // 而 `CFBundleDisplayName` **一个都没有**（0 处）。后果：程序坞 / 菜单栏 /
                 // 活动监视器显示的是 `Tenon`，不是产品名「榫卯 Tenon」。
                 // 所以真正的 bundle 元数据在下面 `infoPlist` 的 `RELAY_URL_TYPES_XML` 里
                 // 显式补了 `CFBundleDisplayName`。两处都留着：一个管运行时、一个管元数据。
-                dockName = "榫卯 Tenon"
+                dockName = desktopDockName
                 packageBuildVersion = "1"
                 signing { sign.set(false) }
                 notarization { appleID.set("") }
@@ -297,6 +303,10 @@ tasks.withType<Test>().configureEach {
 // 开发验收用:真实进程(./gradlew :desktopApp:run)也能加载 luciola 原生库。
 // 正式发行把库复制进 resources/native(见 copyLuciolaNative),运行时自动找到。
 tasks.withType<JavaExec>().configureEach {
+    val flavorProp = (project.findProperty("tenon.flavor") as? String)
+        ?: System.getenv("TENON_FLAVOR")
+        ?: "debug"
+    systemProperty("tenon.flavor", flavorProp)
     System.getenv("TENON_LUCIOLA_NATIVE")?.takeIf { it.isNotBlank() }?.let { raw ->
         // 同一条基准：相对路径按仓库根解析。这一支是 `./gradlew :desktopApp:run` 走的，
         // 漏了它就变成"测试能加载引擎、开发进程加载不到"，症状是 run 一启动就
