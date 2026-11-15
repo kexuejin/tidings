@@ -412,9 +412,18 @@ A 的 Leader 要把子任务派到 B 的插件上执行、拿回结果 —— �
 **旧节点行为**：不认识这两帧 ⇒ 静默丢弃（未知类型）。派单照发、租约照走：旧端会
 ACK 后丢弃，租约到期给出如实的超时卡 —— 比发送侧静默猜强。
 
+**仲裁反馈与审计（Phase 3 增补，零新帧）**：并发输家收到
+`agent-invoke-result(status=denied, error="action … rejected: … (currentRev=N)")`
+—— First-Wins 台账拒绝不再沉默。群主覆决（`override-quest` 动作）的资格判定
+在宿主 `mayDriveCard` 的覆决分支（ownerId / creatorId），**先于**执行策略：
+授权设备但非群主照样拒。判定广播的卡片载荷原子附着 `decidedAt` 与
+`auditTrail[]`（`{actor, action, at}`，上限 10 条），由宿主单锁串行（同卡
+跨动作并发不再竞争 rev）。
+
 测试：`core/src/commonTest/.../AgentInvokeCodecTest.kt`（键表、op 互斥、结果自洽、
 卡片只在 done、预算）；`app/src/jvmTest/.../TwoNodeAgentInvokeTest.kt`（双节点全回路：
-到达 / 零刷屏 / 断连超时 / 审批防重）。
+到达 / 零刷屏 / 断连超时 / 审批防重）；`app/src/jvmTest/.../HostArbitrationConcurrencyTest.kt`
+（并发意图恰好一次落地 / 输家显式拒绝 / 覆决资格门 / 审计原子附着）。
 
 ### 6.14 `agent-channel` / `agent-channel-result` — 跨宿主任务委派（cap: `agc1`，M7-T2）
 
@@ -475,6 +484,76 @@ GoldenVectorTest 的 channel 向量（键序 / op 互斥负例）；
 诚信回执）；`agentNode/src/test/.../AgentChannelGateTest.kt`（HTTP 409 门）；
 `app/src/jvmTest/.../ChannelHonestRejectionTest.kt`（手机误指名回 no-executor）。
 
+### 6.15 `stream-sub` / `stream-chunk` / `stream-cancel` — 支线日志流（Phase 1，无 cap）
+
+设备订阅 quest 宿主上正在运行的支线任务的 stdout/stderr 合批日志（「作战室看滚动
+日志」）。**不占用 caps 广播位**（caps 已 16/16 满额，fch1/scr1 曾把广播撑到 18 项
+整份拒收）—— 与 `recovery-req` 同一先例：老节点对未知类型解码通过、known=false、
+静默忽略，发送侧以「sub 的发送结果」作探测窗，调用方如实落「日志流不可用」。
+
+**通道纪律（三条硬约束）**：
+
+1. **只走加密通道**：出站口唯一（`NodeRuntime.sendStreamFrame`），按持有连接实况
+   择路 —— 接听侧下行走 `LinkServer.send`（等 msg-ack，作探测窗）；拨号侧上行走
+   `LinkClient.sendEnvelope`（逐帧写出）；两者皆无时走 luciola 信道
+   （`SecureChannelTransport.send`，未配对返回 false，无明文回退）。三路都摸不到 =
+   不发。**严禁 UDP datagram 与 17879 逐帧回退** —— 32 KiB 的合批块 1200B 单包
+   装不下，小帧也不许从明文路径漏出去。
+2. **绝不入离线队列**：过期的订阅/积压块被 TTL 重放出去是垃圾流量，还会挤占
+   200 条/对端的队列额度（与 `recovery-data` 的 Q5 裁决同族）。
+3. **丢失容忍是设计语义**：与 `AgentEventKinds.EPHEMERAL` 同一条 T-G3 纪律 ——
+   实时 stdout 是增量不是事实，终局走通知帧；日志块不入库（NodeRuntime 的
+   messageStore 跳过清单按 `stream-` 前缀豁免）。
+
+| 帧 | 方向 | 键 | 约束 |
+|---|---|---|---|
+| `stream-sub` | 订阅端 → 宿主 | `questId` / `sinceSeq?` | `questId` ≤64；`sinceSeq` ≥0 缺省 0（从宿主环形缓冲最早一批补）。注意：dial 侧 `sendEnvelope` 不等 ACK——sent=true ≠ 宿主已收到；宿主旧版静默丢帧时订阅端如实显示不可用 |
+| `stream-chunk` | 宿主 → 订阅端 | `questId` / `seq` / `text` | `seq` 从 1 起单调（兼去重与续传游标）；`text` 非空、UTF-8 ≤ 32 KiB（`Limits.STREAM_CHUNK_BODY`） |
+| `stream-cancel` | 订阅端 → 宿主 | `questId` | 仅摘除发送方这一路；最后一个订阅者退订宿主才停泵 |
+
+**发送侧双刀钳制**（`NodeOutbound.clampStreamChunkText`）：第一刀无条件按 32 KiB 卡
+body（接收侧同一份数值，超限整帧 bad-payload）；第二刀按编码后帧长收敛（终端输出
+引号/控制符密集，JSON 转义逐字符翻倍，「字节数达标」的 body 照样可能编出超帧 ——
+ARP-17 同一形状）。截点落在码点边界，绝不产出 U+FFFD（`clampUtf8` 与
+`AssistantNoticeClamper.safeSubstring` 同一条纪律）。
+
+**两端必须同版本**：stream 帧发进旧版本对端等于发进黑洞（无 cap 门控、无队列重试），
+后果是 UI 的探测窗落空显示「日志流不可用」—— 降级如实、无害、不更糟。
+
+测试：`core/src/commonTest/.../StreamFrameBudgetGuardTest.kt`（双刀钳制 / 预算 /
+无 U+FFFD / 发送侧 require）；`core/src/jvmTest/.../QuestStreamLinkE2ETest.kt`
+（双运行时长连接：sub/cancel 上行 + chunk 下行 + 无通道 fail-closed 零 UDP 泄漏）；
+`app/src/commonTest/.../QuestStreamHubTest.kt`（枢纽双角色：合批 / 补档 / 多订阅者 /
+seq 去重 / 环形缓冲封顶 / 对账落账）；GoldenVectorTest 的 stream 向量（键序 + 负例）。
+
+### 6.16 `quest-sync-req` / `quest-sync-resp` — 多端状态增量对账（Phase 2，无 cap）
+
+多台设备长时间离线交替使用后，quest 卡片的 rev 落后于宿主现役档位（脑裂）。对账
+不拉聊天历史：设备亮屏时**报本地已知档位**，宿主仅下发更新的快照，收端经
+`updateCardContent` 的 rev 乐观锁（SQL `quest_rev < :rev`）原位推进 —— 重复/迟到
+快照幂等丢弃，FTS 不动。
+
+**投递语义**：可靠但**不入队**（`sendReliableNoQueue`，`recovery-req` /
+`group{op:"need"}` 同族）—— 过期对账被 TTL 重放毫无意义；ACK 不到 = 对端旧版或
+离线，等下一次亮屏。**无 cap**（与 stream 三帧同一裁决）。
+
+| 帧 | 方向 | 键 | 约束 |
+|---|---|---|---|
+| `quest-sync-req` | 设备 → 宿主 | `quests[]` / `cursor?` | 清单 ≤10 对（发送端分页）；单帧 ≤ 1 KiB（`QUEST_SYNC_REQ_BUDGET`）；rev ≥ 0；cursor = 上一页页尾 `"questId@rev"`（per-quest，同 rev 的 quest 不会被全局游标吞掉——review #7） |
+| `quest-sync-resp` | 宿主 → 设备 | `snapshots[]` / `hasMore?` / `cursor?` | 快照 = `{questId, rev, cardPayload, agentState}`（载荷整包 ≤ 24 KiB）；按 (rev, questId) 升序装箱，总载荷 ≤ 32 KiB（`QUEST_SYNC_RESP_BUDGET`）；`hasMore=true` 必带游标（= 页尾 `"questId@rev"`） |
+
+**分页装箱**（`CodecQuestSync.packSnapshots`）：判据 = **逐张实测编码长**（JSON
+转义膨胀照算），不是字符数估算；单张快照自己超预算时构造期响亮失败（不产出
+「永远装不下」的页）。
+
+**对账不发现新单**：请求只报已知档位，宿主只回清单内的更新 —— 新 quest 的发现走
+在线期的 agent 状态/卡片帧（对账解决的是「见过但落后」，不是「没见过」）。
+
+测试：`core/src/commonTest/.../QuestSyncBudgetGuardTest.kt`（条数/预算/分页装箱/
+游标续拉语义）；`app/src/jvmTest/.../QuestSyncMultiDeviceTest.kt`（双节点真实
+UDP 回环：落后设备一次 pull 推进到宿主现役 rev，且**不追加聊天行**）；
+GoldenVectorTest 的 quest-sync 向量（键序 + 负例）。
+
 ---
 
 ## 7. 传输预算与批量上限
@@ -486,6 +565,9 @@ GoldenVectorTest 的 channel 向量（键序 / op 互斥负例）；
 | UDP 单包硬上限 | **800 字节** | `TEXT_UDP_LIMIT` |
 | TCP 文本上限（单聊 `kind:"text"`） | 4096 字节 | `TEXT_TCP_LIMIT`；核心层 `clampDirectText` 是唯一执行点（旧口径只在 app 输入框里卡，见 ARP-18⑤） |
 | TCP 文本上限（**群文本** `kind:"group-text"`） | **32 KiB** | `Limits.GROUP_TEXT_TCP_LIMIT`，见 **§7.1** |
+| `stream-chunk` 帧体（`text` 键） | **32 KiB** | `Limits.STREAM_CHUNK_BODY`，见 **§6.15**；发送侧双刀钳制（body + 编码帧长） |
+| `quest-sync-req` 清单 | ≤10 对 / **1 KiB** | `Limits.QUEST_SYNC_MAX_QUESTS` / `QUEST_SYNC_REQ_BUDGET`，见 **§6.16**；发送端分页 |
+| `quest-sync-resp` 快照 | **32 KiB** | `Limits.QUEST_SYNC_RESP_BUDGET`，见 **§6.16**；宿主按 rev 升序装箱（`packSnapshots`） |
 | 上限判定单位 | **UTF-8 字节数**，不是字符数 | 已对上游源码核实 |
 | 超限行为 | 自动由 UDP 回退 TCP（4 字节大端长度前缀）。**legacy 下这条 TCP 就是 17879；加密数据面下走加密信道，17879 已退役**（§15.5） | 本项目实测 |
 
@@ -748,6 +830,11 @@ budget 类断言（最坏样本落在 UDP 800 / TCP 4096 内）在
 | `avatar` | `av1` | ~100 B~32 KB | 静默丢弃 | ✅ | ✅ | ✅ |
 | `recovery-req` | —（pin 认证） | ~80 B | 静默丢弃 | ✅ | ✅ | ✅ |
 | `recovery-data` | —（pin 认证） | ≤24 KiB/批 | 静默丢弃 | ✅ | ✅ | ✅ |
+| `stream-sub` | —（探测窗） | ~120 B | 静默丢弃 | ✅ | ✅ | ✅ |
+| `stream-chunk` | —（探测窗） | ≤32 KiB/批 | 静默丢弃 | ✅ | ✅ | ✅ |
+| `stream-cancel` | —（探测窗） | ~110 B | 静默丢弃 | ✅ | ✅ | ✅ |
+| `quest-sync-req` | —（探测窗） | ≤1 KiB | 静默丢弃 | ✅ | ✅ | ✅ |
+| `quest-sync-resp` | —（探测窗） | ≤32 KiB/页 | 静默丢弃 | ✅ | ✅ | ✅ |
 
 ---
 
@@ -908,7 +995,7 @@ TLPAIR1{"ok":true|false,"reason":"…"}                                        �
 
 | 帧 | 类型 | 键（白名单） | 预算 | 语义 |
 |---|---|---|---|---|
-| 便签派发 | `quest-dispatch` | `clientToken`(≤ID) / `prompt`(≤通道预算) | 随通道（TCP 4096） | 机主助理便签 → 执行端；幂等键 = clientToken |
+| 便签派发 | `quest-dispatch` | `clientToken`(≤ID) / `prompt`(≤通道预算) | 随通道（TCP 4096） | 机主助理便签 → 执行端；幂等键 = clientToken。**投递语义 = fail-closed-no-queue**（离线便签如实留存，不走离线队列重试） |
 | 轻量通知 | `quest-notice` | questId/title/status/summary/convId/rev 必填；clientToken/questionText/questionKind/diffStats/patchSha256 可选 | ≤650 B（clamper 保证） | 执行端 → 派单端，便签按 clientToken 原地翻面 |
 
 **能力协商不进广播 caps**（桌面档 16/16 满额，D-018 同款）：两端以

@@ -7,6 +7,8 @@ import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.putJsonObject
@@ -49,6 +51,25 @@ class SandboxedCliDriver(
     private val argSpec: (prompt: String, model: String?) -> List<String>,
     private val sandbox: WorktreeSandboxExecutor,
     private val envOverrides: Map<String, String> = emptyMap(),
+    /**
+     * 该驱动是否用**宿主真实 HOME** 跑（不落 `.sandbox-home`）。
+     *
+     * agy 需要：其登录态走系统 keyring（cli.log 实证 `keyringAuth: loaded token`
+     * / `ChainedAuth: authenticated via keyring`），而 keyring 的可达性对 HOME
+     * 有 CLI 内部未知之门——假 HOME/符号链接/全拷贝三种形态实测全部读不到
+     * （同机真 HOME 直跑 2.4s SUCCESS）。竞品同模型：Multica 明说「CLI 需已安装
+     * 并登录——Multica 只驱动，不代管」，daemon 用宿主真实环境跑 CLI；凭据隔离
+     * 由各家 CLI 自己的沙箱旗标承担（agy 有 `--sandbox`）。
+     *
+     * 隔离边界的交代：网络仍走 seatbelt 白名单（真正的边界）；文件暴露 = 与机主
+     * 在终端里自己跑 agy 完全一致（agy 是机主自己的工具、用自己的凭据）。
+     */
+    private val useRealHome: Boolean = false,
+    /**
+     * 该驱动的网络策略（三档见 [OsSandboxGuard.NetworkPolicy]）：quest 内置
+     * 驱动全集 = OPEN（模型 API 必须出网，air-gapped 下必死）。
+     */
+    private val networkPolicy: OsSandboxGuard.NetworkPolicy = OsSandboxGuard.NetworkPolicy.AIR_GAPPED,
     private val newSessionId: () -> String = { java.util.UUID.randomUUID().toString() },
     /** 瞬时失败判别与重试档位：与 [CliSubprocessDriver] 同一默认（provider 断流/5xx 白名单）。 */
     private val transientOf: (exitCode: Int, output: String) -> Boolean =
@@ -177,6 +198,8 @@ class SandboxedCliDriver(
         argSpec = argSpec,
         sandbox = sandbox,
         envOverrides = envOverrides,
+        useRealHome = useRealHome,
+        networkPolicy = networkPolicy,
         newSessionId = newSessionId,
         transientOf = transientOf,
         maxExtraAttempts = maxExtraAttempts,
@@ -190,6 +213,21 @@ class SandboxedCliDriver(
         sessionId: String,
         prompt: String,
         onEvent: suspend (DriverEvent) -> Unit,
+    ) = executeTask(sessionId, prompt, onEvent, onRawLine = null)
+
+    /**
+     * 带原始行出口的执行（quest 日志泵专用，Phase 1）：[onRawLine] 在事件映射**之前**
+     * 收到每一行原始 stdout/stderr（stderr 已并入；`CliLineEventMapper` 认不出的行
+     * 也在内 —— 日志流要的正是全量，不是事件映射后的子集）。
+     *
+     * 只有沙箱分支透传：空工作区委托裸路径（[plain]），那条路没有 worktree 也就没有
+     * quest —— 派单链路保证 quest 的 wsPath 永远非空，所以这里不为裸路径开第二份出口。
+     */
+    suspend fun executeTask(
+        sessionId: String,
+        prompt: String,
+        onEvent: suspend (DriverEvent) -> Unit,
+        onRawLine: (suspend (String) -> Unit)?,
     ) {
         val wsPath = sessions[sessionId]
         if (wsPath == null) {
@@ -225,16 +263,29 @@ class SandboxedCliDriver(
             } else {
                 argSpec(prompt, model)
             }
+            val env = envOverrides +
+                mapOf(DriverKeys.ENV_HOOK_SESSION_ID to sessionId) +
+                if (useRealHome) {
+                    // 显式 HOME ⇒ WorktreeSandbox 的 `.sandbox-home` 覆盖被跳过（它只
+                    // 在 env["HOME"] 缺席时生效）。
+                    mapOf("HOME" to (System.getProperty("user.home") ?: ""))
+                } else {
+                    emptyMap()
+                }
             val outcome = sandbox.run(
                 taskId = taskId,
                 hostRepo = wsPath,
                 command = listOf(cliPath) + attemptArgs,
-                env = envOverrides + mapOf(DriverKeys.ENV_HOOK_SESSION_ID to sessionId),
+                env = env,
+                networkPolicy = networkPolicy,
                 onLine = { line ->
                     outputTail.append(line).append('\n')
                     if (resumedCliSessionId == null) {
                         resumeSpec?.sessionIdFromLine?.invoke(line)?.let { resumedCliSessionId = it }
                     }
+                    // 原始行先于事件映射出去（日志泵的全量出口）；映射器认不出的行
+                    // 只有这一条路能活。
+                    onRawLine?.invoke(line)
                     CliLineEventMapper.map(line)?.let { onEvent(it) }
                 },
             )

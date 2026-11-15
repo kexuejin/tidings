@@ -39,6 +39,13 @@ object AssistantQuestCardPayload {
         const val RETRY_QUEST: String = "retry-quest"
         const val CANCEL_QUEST: String = "cancel-quest"
         val MERGE_PATCH: String = Limits.SYSTEM_ACTION_MERGE_PATCH
+
+        /**
+         * 群主覆决（Phase 3）：对终态（CONFLICT / FAILED / INTERRUPTED）支线**强制重试**。
+         * 资格判定在宿主 `mayDriveCard` 的覆决分支 —— 普通成员点它会被如实拒绝
+         * （invoke-result `denied` + 群内 denied 横幅），不是按钮骗人。
+         */
+        const val OVERRIDE: String = "override-quest"
     }
 
     /**
@@ -113,7 +120,10 @@ object AssistantQuestCardPayload {
         QuestStatus.PAUSED -> listOf(OwnerAction(Actions.RESUME_QUEST, "Resume", "card.action.resume"))
         QuestStatus.COMPLETED -> listOf(OwnerAction(Actions.MERGE_PATCH, "Merge to Main", "card.action.merge", approval = true))
         QuestStatus.INTERRUPTED, QuestStatus.FAILED, QuestStatus.CONFLICT ->
-            listOf(OwnerAction(Actions.RETRY_QUEST, "Retry", "card.action.retry", style = "danger"))
+            listOf(
+                OwnerAction(Actions.RETRY_QUEST, "Retry", "card.action.retry", style = "danger"),
+                OwnerAction(Actions.OVERRIDE, "Force Override", "card.action.override", style = "danger"),
+            )
         QuestStatus.RUNNING -> listOf(
             OwnerAction(Actions.OPEN_QUEST, "Enter Quest War Room", "card.action.open_quest"),
             OwnerAction(Actions.CANCEL_QUEST, "Cancel Task", "card.action.cancel_task", style = "danger"),

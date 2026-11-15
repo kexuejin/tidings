@@ -164,6 +164,125 @@ class SchemaSelfHealTest {
     }
 
     /**
+     * **quest 三列的自愈**（Phase 1-3 落地后第一次真机验收现场）：
+     * `card_payload` 哨兵把这台机器宿主老库的迁移起点抬到 `schemaVersion`，
+     * 22/23 两段被判"早就跑过"——`user_version = 24` 而 MessageEntity 没有三列、
+     * QuestSuspendedState / QuestLedger 两张表不在。造法：手建一个**老形状**的
+     * MessageEntity（无 quest 列）+ 跑自愈，断言列、索引、表全部到位且幂等。
+     */
+    @Test
+    fun questColumnsAndTablesAreHealedOnAnOldShapedDatabase() {
+        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
+        try {
+            // 老形状 MessageEntity：card_payload 在（哨兵触发器），quest 三列不在。
+            driver.execute(
+                null,
+                "CREATE TABLE MessageEntity (" +
+                    "id TEXT NOT NULL PRIMARY KEY, conv_id TEXT NOT NULL, card_payload TEXT)",
+                0,
+            ).value
+            val columnsBefore = pragmaColumns(driver, "MessageEntity")
+            assertTrue(!columnsBefore.contains("quest_id"), "前提：老库确实没有 quest 列")
+
+            SchemaSelfHeal.run(driver)
+
+            val columns = pragmaColumns(driver, "MessageEntity")
+            for (c in listOf("quest_id", "quest_rev", "client_token")) {
+                assertTrue(columns.contains(c), "补列缺 $c")
+            }
+            assertTrue(names(driver).contains("QuestSuspendedState"), "挂起状态表必须补建")
+            assertTrue(names(driver).contains("QuestLedger"), "执行台账必须补建")
+            // 索引在列之后补齐。
+            val indexes = mutableListOf<String>()
+            driver.executeQuery(
+                identifier = null,
+                sql = "SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'index_message_%'",
+                mapper = { cursor ->
+                    while (cursor.next().value) indexes += cursor.getString(0).orEmpty()
+                    QueryResult.Value(Unit)
+                },
+                parameters = 0,
+            ).value
+            assertTrue(indexes.contains("index_message_quest_id"), "quest_id 索引必须补建")
+
+            // 幂等：再跑一遍不炸、不重复（守卫拦住 ALTER）。
+            SchemaSelfHeal.run(driver)
+            assertEquals(columns, pragmaColumns(driver, "MessageEntity"))
+
+            // 补出来的形状要能被 quest 路径用上（列名/类型都对）。
+            driver.execute(
+                null,
+                "INSERT INTO MessageEntity(id, conv_id, quest_id, quest_rev) VALUES ('m1', 'assistant', 'q-1', 3)",
+                0,
+            ).value
+        } finally {
+            driver.close()
+        }
+    }
+
+    /** 24.sqm 同款：QuestLedger 的重试列 heal（旧库由 23.sqm 建、无此列）。 */
+    @Test
+    fun questLedgerRetryColumnsAreHealedOnAnOldShapedDatabase() {
+        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
+        try {
+            FtsTolerantSchema(fts5Available = { false }).create(driver)
+            // 模拟 23.sqm 后的旧形状：直接重建无 24.sqm 两列的 QuestLedger。
+            driver.execute(null, "DROP TABLE QuestLedger", 0).value
+            driver.execute(null, "CREATE TABLE QuestLedger (quest_id TEXT NOT NULL PRIMARY KEY, branch TEXT NOT NULL, worktree_path TEXT NOT NULL, main_workspace TEXT NOT NULL, conv_id TEXT NOT NULL, title TEXT NOT NULL, status TEXT NOT NULL, prompt TEXT NOT NULL DEFAULT '', agent_key TEXT NOT NULL DEFAULT '', updated_at INTEGER NOT NULL)", 0).value
+
+            SchemaSelfHeal.run(driver)
+            val columns = pragmaColumns(driver, "QuestLedger")
+            assertTrue(columns.contains("client_token"), "client_token 必须被 heal 补上")
+            assertTrue(columns.contains("auto_merge"), "auto_merge 必须被 heal 补上")
+        } finally {
+            driver.close()
+        }
+    }
+
+    private fun pragmaColumns(driver: SqlDriver, table: String): List<String> {
+        val columns = mutableListOf<String>()
+        driver.executeQuery(
+            identifier = null,
+            sql = "PRAGMA table_info($table)",
+            mapper = { cursor ->
+                while (cursor.next().value) columns += cursor.getString(1).orEmpty()
+                QueryResult.Value(Unit)
+            },
+            parameters = 0,
+        ).value
+        return columns
+    }
+
+    /**
+     * **防漂移（22/23.sqm）**：quest 自愈的 DDL 必须与迁移脚本同形 ——
+     * 逐条出现在归一化后的对应迁移脚本里（列的 ALTER 与两条 CREATE 都比）。
+     */
+    @Test
+    fun theQuestHealingDdlMatchesMigrations22And23() {
+        val migration22 = repoFile("app/src/commonMain/sqldelight/com/kapp/tenon/db/migrations/22.sqm")
+        val migration23 = repoFile("app/src/commonMain/sqldelight/com/kapp/tenon/db/migrations/23.sqm")
+        assertTrue(migration22.isFile && migration23.isFile, "读不到 22/23.sqm")
+        val whole22 = normalize(migration22.readText())
+        val whole23 = normalize(migration23.readText())
+        // QuestLedger 列的 heal 对应 24.sqm（不在 22/23 的锚定范围内）。
+        val migration24 = repoFile("app/src/commonMain/sqldelight/com/kapp/tenon/db/migrations/24.sqm")
+        assertTrue(migration24.isFile, "读不到 24.sqm")
+        val whole24 = normalize(migration24.readText())
+        SchemaSelfHeal.questColumnStatements.forEach { c ->
+            val inMigration22or24 = whole22.contains(normalize(c.ddl)) || whole24.contains(normalize(c.ddl))
+            assertTrue(
+                inMigration22or24,
+                "补列 DDL 与 22/24.sqm 都漂移了：${c.ddl}",
+            )
+        }
+        SchemaSelfHeal.questIndexStatements.forEach { sql ->
+            assertTrue(whole22.contains(normalize(sql)), "quest 索引 DDL 与 22.sqm 漂移了：$sql")
+        }
+        assertTrue(whole22.contains(normalize(SchemaSelfHeal.QUEST_SUSPENDED_STATE)), "QuestSuspendedState 与 22.sqm 漂移")
+        assertTrue(whole23.contains(normalize(SchemaSelfHeal.QUEST_LEDGER)), "QuestLedger 与 23.sqm 漂移")
+    }
+
+    /**
      * 从工作目录往上找仓库根。
      *
      * Gradle 跑 `:app:jvmTest` 时 cwd 是**模块目录**（`…/teahouse-mobile/app`），

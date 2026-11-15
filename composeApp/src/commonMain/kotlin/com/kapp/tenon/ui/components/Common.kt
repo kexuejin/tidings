@@ -80,6 +80,8 @@ import com.kapp.tenon.generated.resources.banner_group_name_too_long
 import com.kapp.tenon.generated.resources.banner_group_needs_member
 import com.kapp.tenon.generated.resources.banner_group_unknown
 import com.kapp.tenon.generated.resources.banner_invalid_qr
+import com.kapp.tenon.generated.resources.banner_luciola_unavailable_native
+import com.kapp.tenon.generated.resources.banner_luciola_unavailable_platform
 import com.kapp.tenon.generated.resources.banner_no_qr_in_image
 import com.kapp.tenon.generated.resources.banner_peer_forgotten
 import com.kapp.tenon.generated.resources.banner_notification_denied
@@ -88,7 +90,6 @@ import com.kapp.tenon.generated.resources.chat_forward_success
 import com.kapp.tenon.generated.resources.banner_remote_relay_cleared
 import com.kapp.tenon.generated.resources.banner_remote_relay_configured
 import com.kapp.tenon.generated.resources.banner_agent_ack_not_confirmed
-import com.kapp.tenon.generated.resources.banner_luciola_unavailable
 import com.kapp.tenon.generated.resources.banner_agent_ack_send_failed
 import com.kapp.tenon.generated.resources.banner_scan_failed
 import com.kapp.tenon.generated.resources.banner_scan_range_added
@@ -532,7 +533,13 @@ fun bannerText(message: BannerMessage): String = when (message) {
     BannerMessage.AgentAckUnconfirmed ->
         stringResource(Res.string.banner_agent_ack_not_confirmed)
     is BannerMessage.LuciolaUnavailable ->
-        stringResource(Res.string.banner_luciola_unavailable)
+        // 原因如实细分（真机验收反馈）：platform = 壳没接线；native = 原生库缺失/
+        // 加载失败（安装不完整或版本不符）。笼统一句会让机主在两个完全不同的
+        // 修法之间猜。
+        when (message.reason) {
+            "platform" -> stringResource(Res.string.banner_luciola_unavailable_platform)
+            else -> stringResource(Res.string.banner_luciola_unavailable_native)
+        }
 }
 
 /**

@@ -762,9 +762,9 @@ private fun CardTypeTag(type: String) {
     }
 }
 
-/** 任务状态胶囊（待合并/进行中/已完成/受阻/已取消）。 */
+/** 任务状态胶囊（待合并/进行中/已完成/受阻/已取消）。作战室状态行（WarRoomView）与卡体共用同一份。 */
 @Composable
-private fun CardStateTag(card: AgentCardUi) {
+internal fun CardStateTag(card: AgentCardUi) {
     val sp = LocalAppSpacing.current
     // 发出方声明的 state 优先。反推那套（下面）留着给不带 state 的老卡：
     // 它认不出「已中止」，会把一张停掉的卡继续标成「待合并」。

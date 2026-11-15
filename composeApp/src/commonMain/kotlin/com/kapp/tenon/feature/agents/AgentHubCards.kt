@@ -30,12 +30,14 @@ import com.kapp.tenon.domain.AgentWorkstationUi
 import com.kapp.tenon.domain.agentActivityFreshness
 import com.kapp.tenon.generated.resources.Res
 import com.kapp.tenon.generated.resources.agent_count_items
+import com.kapp.tenon.generated.resources.agent_profile_edit
 import com.kapp.tenon.generated.resources.agent_subtitle_pending
 import com.kapp.tenon.generated.resources.conv_inbox_ws_badge_unknown_kind
 import com.kapp.tenon.generated.resources.conv_inbox_ws_open_chat
 import com.kapp.tenon.generated.resources.hub_activity_last_format
 import com.kapp.tenon.generated.resources.hub_activity_offline_format
 import com.kapp.tenon.generated.resources.hub_agent_meta_format
+import com.kapp.tenon.generated.resources.ic_settings
 import com.kapp.tenon.generated.resources.hub_agent_role_team
 import com.kapp.tenon.generated.resources.hub_agent_section_title
 import com.kapp.tenon.generated.resources.hub_artifact_latest_tag
@@ -119,6 +121,12 @@ internal fun AgentHubSection(
      * 「不知道用什么工具」与「这台机器」是两件事，前者不该在行上留一个空格子。
      */
     workstationPort: AgentWorkstationPort? = null,
+    /**
+     * 行上的档案编辑入口（编辑入口收进卡）：已登记（`card.employeeId != null`）的
+     * 员工行给一颗编辑键，其余行不画。null = 这个壳没有档案写通路 ⇒ 整列不画
+     * （不画点了没反应的按钮）。
+     */
+    onEditEmployee: ((AgentHubUi) -> Unit)? = null,
 ) {
     if (cards.isEmpty()) return
     Column(
@@ -150,6 +158,7 @@ internal fun AgentHubSection(
                 onOpen = { onOpenEntity(card) },
                 onOpenChat = onOpenChat?.let { open -> { open(card) } },
                 onOpenRowSession = onOpenRowSession,
+                onEditEmployee = onEditEmployee?.let { edit -> { edit(card) } },
             )
         }
     }
@@ -212,6 +221,8 @@ private fun AgentHubRow(
     onOpen: () -> Unit,
     onOpenChat: (() -> Unit)?,
     onOpenRowSession: ((hostNodeId: String, sessionId: String) -> Unit)?,
+    /** 档案编辑键（已登记的员工行才有）；null = 壳没有写通路 ⇒ 不画。 */
+    onEditEmployee: (() -> Unit)? = null,
 ) {
     val sp = LocalAppSpacing.current
     Row(
@@ -312,8 +323,19 @@ private fun AgentHubRow(
                 HubActivityLine(at = card.lastActivityAt, online = card.online, now = now)
             }
         }
+        // 行尾动作：档案编辑（已登记才有）+ 对话。行本身已可点（进详情），
+        // 这里只放不经过详情页就该直达的次要动作。
+        if (onEditEmployee != null) {
+            // 编辑入口收进卡（员工/档案对齐）：档案不再是平级的一档，编辑落到
+            // 员工行上 —— gate 是投影解析好的 employeeId，UI 不自己判「登记没登记」。
+            AppIconButton(
+                icon = Res.drawable.ic_settings,
+                contentDescription = stringResource(Res.string.agent_profile_edit),
+                onClick = onEditEmployee,
+                modifier = Modifier.size(sp.xxl),
+            )
+        }
         if (onOpenChat != null) {
-            // 行尾只放一颗图标按钮：行本身已可点（进详情），「对话」是唯一的次要动作。
             AppIconButton(
                 icon = Res.drawable.ic_chat_bubble,
                 contentDescription = stringResource(Res.string.conv_inbox_ws_open_chat),

@@ -5,7 +5,9 @@ package com.kapp.tenon.agent.drivers
 import java.io.File
 import java.nio.file.Files
 import kotlin.test.Test
+import org.junit.Assume
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
@@ -690,8 +692,11 @@ class WorktreeSandboxExecutorTest {
         val entries = WorktreeSandboxExecutor.SANDBOX_CREDENTIAL_ENTRIES
         // 内置五驱动（`DriverKeys` / `AgentProfiles`，不是插件）：claude / codex / agy / dsh / opencode。
         // claude 的登录态在 ~/.claude（+ ~/.claude.json），codex 在 ~/.codex，
-        // agy 在 ~/.agy，dsh 的 profiles 在 ~/.dsh；opencode 走 provider env（OPENCODE_API_KEY），
-        // 不依赖 $HOME 凭据目录 —— 这一条要跟 BuiltinPluginSeeder 的种子清单对齐。
+        // dsh 的 profiles 在 ~/.dsh；opencode 走 provider env（OPENCODE_API_KEY），
+        // 不依赖 $HOME 凭据目录。agy 的登录态走系统 keyring 且对 HOME 有 CLI 内部
+        // 之门（挂 .agy/.gemini 均不解——2026-11-15 实测），沙箱内跑不通，改走
+        // useRealHome 真实 HOME（agy 驱动专用）；.agy 挂载保留作旧版兼容。
+        // 这一条要跟 BuiltinPluginSeeder 的种子清单对齐。
         for (required in listOf(".codex", ".claude", ".claude.json", ".agy", ".dsh")) {
             assertTrue(
                 entries.contains(required),
@@ -723,6 +728,135 @@ class WorktreeSandboxExecutorTest {
             """{"model":"custom-test"}""",
             File(mounted, "opencode.json").readText(),
             "沙箱内读取的配置内容必须与宿主完全一致",
+        )
+    }
+
+    /**
+     * useRealHome 契约（agy 适配）：调用方显式传 HOME ⇒ `.sandbox-home` 覆盖被跳过，
+     * 真实 HOME 原样透传给 CLI —— agy 的 keyring 登录态对 HOME 有 CLI 内部之门
+     * （假 HOME/符号链接/全拷贝三种形态实测都读不到 token，同机真 HOME 直跑 2.4s
+     * SUCCESS），这条是它在沙箱里能静默跑的唯一通路。
+     *
+     * **反向验证**：不传 HOME（旧行为）⇒ CLI 看到的是 `.sandbox-home`，
+     * `explicitHomeSkipsSandboxHome` 立刻红。
+     */
+    /**
+     * 网络开放契约（真机实测缺陷）：networkOpen=true 的 run，其 seatbelt profile
+     * 不得含 `deny network*`——云后端类 CLI（agy）要么全开要么必死（本机
+     * seatbelt 无法按 IP/端口过滤出网，实测裁决）。判据落在**生成的 profile
+     * 文件内容**上（wrap 写的策略随产物目录落盘，可断言）。
+     */
+    @Test
+    fun openPolicyRunProducesAnOpenProfile(): Unit = runBlocking {
+        val probe = OsSandboxGuard.probe()
+        Assume.assumeTrue(
+            "本测试断言 seatbelt profile 落盘——非 seatbelt 环境（Linux unshare）跳过",
+            probe is OsSandboxGuard.ProbeResult.Available && probe.kind == OsSandboxGuard.Kind.SEATBELT,
+        )
+        val root = tempDir()
+        val host = root.resolve("host").apply { mkdirs() }
+        gitRepo(host)
+        val cli = script(root, "cli", "exit 0")
+        val exe = executor(root)
+        val outcome = exe.run(
+            taskId = "t-outbound",
+            hostRepo = host.absolutePath,
+            command = listOf(cli),
+            env = mapOf("TENON_OS_SANDBOX" to "strict"),
+            onLine = {},
+            networkPolicy = OsSandboxGuard.NetworkPolicy.OPEN,
+        )
+        assertTrue(outcome is WorktreeSandboxExecutor.Outcome.Finished, "实际 $outcome")
+        val profile = root.resolve("artifacts").resolve("t-outbound")
+            .walk().firstOrNull { it.extension == "sb" }
+        assertNotNull(profile, "strict 沙箱的策略文件必须落盘")
+        val text = profile.readText()
+        assertTrue(!text.contains("(deny network*)"), text)
+        assertTrue(text.contains("(allow network*)"), text)
+    }
+
+    /** 反向（默认行为）：air-gapped profile 含 deny network* + 仅 loopback 放行。 */
+    @Test
+    fun defaultRunStaysAirGapped(): Unit = runBlocking {
+        // 本机 seatbelt 才有 .sb 落盘（Linux unshare 不写 profile 文件）——
+        // 结论依赖探针所在机器的部分用 Assume 门控（AGENTS §2.7）。
+        val probe = OsSandboxGuard.probe()
+        Assume.assumeTrue(
+            "本测试断言 seatbelt profile 落盘——非 seatbelt 环境（Linux unshare）跳过",
+            probe is OsSandboxGuard.ProbeResult.Available && probe.kind == OsSandboxGuard.Kind.SEATBELT,
+        )
+        val root = tempDir()
+        val host = root.resolve("host").apply { mkdirs() }
+        gitRepo(host)
+        val cli = script(root, "cli", "exit 0")
+        val exe = executor(root)
+        val outcome = exe.run(
+            taskId = "t-airgap",
+            hostRepo = host.absolutePath,
+            command = listOf(cli),
+            env = mapOf("TENON_OS_SANDBOX" to "strict"),
+            onLine = {},
+        )
+        assertTrue(outcome is WorktreeSandboxExecutor.Outcome.Finished, "实际 $outcome")
+        val profile = root.resolve("artifacts").resolve("t-airgap")
+            .walk().firstOrNull { it.extension == "sb" }
+        assertNotNull(profile)
+        val text = profile.readText()
+        // AIR_GAPPED = 纯 deny（loopback 三行已收窄——控制面在回环上，放行它是
+        // 安全回归；loopback 需求的驱动走 LOOPBACK/OPEN 档）。
+        assertTrue(text.contains("(deny network*)"), text)
+        assertTrue(!text.contains("localhost"), "air-gapped 档不得放行任何 loopback（控制面在回环上）", )
+    }
+
+    @Test
+    fun explicitHomeEnvSkipsSandboxHomeAndIsPassedThrough(): Unit = runBlocking {
+        val root = tempDir()
+        val host = root.resolve("host").apply { mkdirs() }
+        gitRepo(host)
+        val cli = script(root, "agy", "echo \"HOME=${'$'}HOME\"; exit 0")
+        val exe = executor(root)
+        val realHome = System.getProperty("user.home") ?: "/Users/x"
+        val lines = java.util.concurrent.CopyOnWriteArrayList<String>()
+        val outcome = exe.run(
+            taskId = "t-realhome",
+            hostRepo = host.absolutePath,
+            command = listOf(cli),
+            env = mapOf("HOME" to realHome),
+            onLine = { lines.add(it) },
+        )
+        assertTrue(outcome is WorktreeSandboxExecutor.Outcome.Finished, "实际 $outcome")
+        assertTrue(
+            lines.any { it.trim() == "HOME=$realHome" },
+            "真实 HOME 必须原样透传给 CLI，收到的是：${lines.filter { it.contains("HOME=") }}",
+        )
+        assertFalse(
+            root.resolve("artifacts").resolve("t-realhome").resolve(".sandbox-home").exists(),
+            "显式 HOME 时不得落 .sandbox-home（它的存在 = 真实 HOME 被覆盖了）",
+        )
+    }
+
+    /** 反向：不传 HOME 时 `.sandbox-home` 照常落位（其余驱动的隔离行为不变）。 */
+    @Test
+    fun defaultHomeBehaviorStillAppliesSandboxHome(): Unit = runBlocking {
+        val root = tempDir()
+        val host = root.resolve("host").apply { mkdirs() }
+        gitRepo(host)
+        val cli = script(root, "cli", "echo \"HOME=${'$'}HOME\"; exit 0")
+        val exe = executor(root)
+        val lines = java.util.concurrent.CopyOnWriteArrayList<String>()
+        val outcome = exe.run(
+            taskId = "t-sbxhome",
+            hostRepo = host.absolutePath,
+            command = listOf(cli),
+            env = emptyMap(),
+            onLine = { lines.add(it) },
+        )
+        assertTrue(outcome is WorktreeSandboxExecutor.Outcome.Finished, "实际 $outcome")
+        val sandboxHome = root.resolve("artifacts").resolve("t-sbxhome").resolve(".sandbox-home")
+        assertTrue(sandboxHome.isDirectory, "默认行为必须落 .sandbox-home（其余驱动的隔离不变）")
+        assertTrue(
+            lines.any { it.trim().startsWith("HOME=$sandboxHome") },
+            "CLI 看到的 HOME 必须是 .sandbox-home（隔离行为未变）",
         )
     }
 

@@ -7,6 +7,7 @@ import com.kapp.tenon.core.nowMillis
 import com.kapp.tenon.core.protocol.AgentEventAttachment
 import com.kapp.tenon.core.protocol.AgentToolRuleRowPayload
 import com.kapp.tenon.core.protocol.Codec
+import com.kapp.tenon.core.protocol.TcpFrames
 import com.kapp.tenon.core.protocol.DEFAULT_TIMINGS
 import com.kapp.tenon.core.protocol.Envelope
 import kotlinx.serialization.json.JsonArray
@@ -15,6 +16,8 @@ import kotlinx.serialization.json.JsonObject
 import com.kapp.tenon.core.protocol.IpAddressUtils
 import com.kapp.tenon.core.protocol.GroupMeta
 import com.kapp.tenon.core.protocol.MsgTypes
+import com.kapp.tenon.core.protocol.QuestRevPair
+import com.kapp.tenon.core.protocol.QuestSnapshotPayload
 import kotlin.concurrent.Volatile
 import kotlinx.atomicfu.atomic
 import com.kapp.tenon.core.protocol.Profile
@@ -33,6 +36,7 @@ import com.kapp.tenon.core.transport.FileChannelNegotiation
 import com.kapp.tenon.core.transport.ChunkFileTarget
 import com.kapp.tenon.core.transport.DiscoveryEngine
 import com.kapp.tenon.core.transport.PresenceIngest
+import com.kapp.tenon.core.transport.SecureChannelTransport
 import com.kapp.tenon.core.transport.SYNTHETIC_NICK_PREFIX
 import com.kapp.tenon.core.transport.InMemoryDedupStore
 import com.kapp.tenon.core.transport.InMemoryMessageStore
@@ -1487,7 +1491,14 @@ class NodeRuntime(
                     // 身份恢复 L2 是控制帧：合并入库走应用层的消息实体路径，
                     // 写进 envelope 日志只会给 /v1/inbox 添噪声。
                     envelope.type != MsgTypes.RECOVERY_REQ &&
-                    envelope.type != MsgTypes.RECOVERY_DATA
+                    envelope.type != MsgTypes.RECOVERY_DATA &&
+                    // 支线日志流三帧（Phase 1）是瞬态控制/流帧：日志块有专属的内存
+                    // 环形缓冲（QuestStreamHub），落 envelope 日志只会堆积「只写不读」的
+                    // 行（与 token.delta/thought.delta 不落库同一条 T-G3 纪律）。
+                    !envelope.type.startsWith("stream-") &&
+                    // 多端状态增量对账两帧（Phase 2）是控制事实帧：合并走应用层的
+                    // updateCardContent 路径，写进 envelope 日志只会给 /v1/inbox 添噪声。
+                    !envelope.type.startsWith("quest-sync-")
                 ) {
                     messageStore.append(
                         peerId = envelope.from,
@@ -1817,6 +1828,89 @@ class NodeRuntime(
     suspend fun sendRecoveryData(peerId: String, batch: Int, more: Boolean, messages: List<JsonElement>): Boolean =
         outbound.sendRecoveryData(peerId, batch, more, JsonArray(messages))
 
+    // 支线日志流三帧（Phase 1）：只走加密通道，不入队 —— 投递语义见 [sendStreamFrame]。
+
+    /** 订阅 quest 日志流；发送成功与否 = 宿主可达且为本端实现（探测窗）。 */
+    suspend fun sendStreamSub(peerId: String, questId: String, sinceSeq: Long?): Boolean =
+        sendControlFrame(peerId) {
+            makeEnvelope(MsgTypes.STREAM_SUB, profile.nodeId, Codec.streamSubPayload(questId, sinceSeq))
+        }
+
+    /** 下发一段合批日志（发送侧双刀钳制：body 预算 + 编码帧长收敛）。 */
+    suspend fun sendStreamChunk(peerId: String, questId: String, seq: Long, rawText: String): Boolean =
+        sendControlFrame(peerId) {
+            // 夹刀探针必须是**线框实测**（TcpFrames.msgFrameWireBytes）：msg 帧比信封
+            // 多 26 字节包装，量裸信封会在 (MAX-26, MAX] 窗口放行超帧——接收侧整链
+            // 判死（code review #2 的假绿夹刀）。
+            val text = clampStreamChunkText(rawText) { body ->
+                TcpFrames.msgFrameWireBytes(
+                    makeEnvelope(MsgTypes.STREAM_CHUNK, profile.nodeId, Codec.streamChunkPayload(questId, seq, body)),
+                )
+            }
+            makeEnvelope(MsgTypes.STREAM_CHUNK, profile.nodeId, Codec.streamChunkPayload(questId, seq, text))
+        }
+
+    /** 退订 quest 日志流（仅摘除本端这一路）。 */
+    suspend fun sendStreamCancel(peerId: String, questId: String): Boolean =
+        sendControlFrame(peerId) {
+            makeEnvelope(MsgTypes.STREAM_CANCEL, profile.nodeId, Codec.streamCancelPayload(questId))
+        }
+
+    /**
+     * 多端状态增量对账（Phase 2）：报本地档位给 quest 宿主。**可靠但不入队**
+     * （`sendReliableNoQueue`，recovery-req / group{op:"need"} 同族）：ACK 不到 =
+     * 对端旧版或离线，等下一次亮屏对账；分页由调用方按 [Limits.QUEST_SYNC_MAX_QUESTS] 做。
+     */
+    suspend fun sendQuestSyncReq(peerId: String, quests: List<QuestRevPair>, cursor: String?): Boolean =
+        outbound.sendReliableNoQueue(
+            peerId,
+            makeEnvelope(MsgTypes.QUEST_SYNC_REQ, profile.nodeId, Codec.questSyncReqPayload(quests, cursor)),
+        )
+
+    /** 应答一页对账快照（调用方先用 `CodecQuestSync.packSnapshots` 分页）。 */
+    suspend fun sendQuestSyncResp(
+        peerId: String,
+        snapshots: List<QuestSnapshotPayload>,
+        hasMore: Boolean,
+        cursor: String?,
+    ): Boolean = outbound.sendReliableNoQueue(
+        peerId,
+        makeEnvelope(MsgTypes.QUEST_SYNC_RESP, profile.nodeId, Codec.questSyncRespPayload(snapshots, hasMore, cursor)),
+    )
+
+    /**
+     * 支线日志流三帧与 quest 便签帧的**唯一出站口**（Phase 1/2）。按持有连接的实况择路，全部
+     * fail-closed —— 摸不到加密通道就是 `false`，**绝不回退 UDP 明文**：
+     *
+     * 1. **接听侧下行**（[Messenger.linkDownlink] = [LinkServer]）：宿主持有的那条
+     *    长连接，等 msg-ack（订阅探测窗的判据就来自这里）。
+     * 2. **拨号侧上行**（[linkClient] = [LinkClient]）：手机拨出的那条连接 ——
+     *    手机的 LinkServer 不持有它，必须走拨号侧（逐帧写出，不等 ACK）。
+     * 3. **luciola 加密信道**（[SecureChannelTransport.send]）：两台机之间没有长连接、
+     *    但有配对会话时的路。它自己就 fail-closed（未配对返回 false），**没有明文回退**。
+     *
+     * `transport` 不是加密信道的装配（纯 UDP 测试/老路径）= 不发。三路都摸不到 =
+     * `false`，调用方如实落「日志流不可用」，绝不入离线队列（过期的订阅/积压块被
+     * TTL 重放出去只会挤占真实待发的额度）。
+     */
+    private suspend fun sendControlFrame(peerId: String, build: () -> Envelope): Boolean {
+        messenger.linkDownlink?.let { link ->
+            if (link.isConnected(peerId)) {
+                return runCatching { link.send(peerId, build()) }.getOrDefault(false)
+            }
+        }
+        linkClient?.let { client ->
+            if (client.isConnected(peerId)) {
+                return runCatching { client.sendEnvelope(peerId, build()) }.getOrDefault(false)
+            }
+        }
+        val channel = transport as? SecureChannelTransport ?: return false
+        val record = registry.get(peerId) ?: return false
+        return runCatching {
+            channel.send(Codec.encodeToBytes(build()), record.ip, record.udpPort)
+        }.getOrDefault(false)
+    }
+
     suspend fun sendTextWithEnvelope(peerId: String, text: String) = outbound.sendTextWithEnvelope(peerId, text)
 
     /**
@@ -1960,13 +2054,27 @@ class NodeRuntime(
         cardRev, decidedBy, sessionId, groupId, groupRev, wsId, convId = convId, at = at,
     )
 
-    /** 主支线：便签跨设备派发（Phase 2）。 */
-    suspend fun sendQuestDispatch(peerId: String, clientToken: String, prompt: String) =
-        outbound.sendQuestDispatch(peerId, clientToken, prompt)
+    /**
+     * 主支线：便签跨设备派发（Phase 2）。走 [sendControlFrame] 三路通道层级，
+     * **不入离线队列** —— 派单帧丢失的语义是「便签如实留存」（设计裁决），入队
+     * 反而会变成 3 天 TTL 的重放源。
+     */
+    suspend fun sendQuestDispatch(peerId: String, clientToken: String, prompt: String): Boolean =
+        sendControlFrame(peerId) {
+            makeEnvelope(
+                MsgTypes.QUEST_DISPATCH, profile.nodeId,
+                com.kapp.tenon.core.protocol.CodecQuest.encodeQuestDispatch(clientToken, prompt),
+            )
+        }
 
-    /** 主支线：轻量通知回执（执行端 → 派单端）。 */
-    suspend fun sendQuestNotice(peerId: String, notice: com.kapp.tenon.core.protocol.AssistantQuestNotice) =
-        outbound.sendQuestNotice(peerId, notice)
+    /** 主支线：轻量通知回执（执行端 → 派单端）。同走控制帧出口，不入队。 */
+    suspend fun sendQuestNotice(peerId: String, notice: com.kapp.tenon.core.protocol.AssistantQuestNotice): Boolean =
+        sendControlFrame(peerId) {
+            makeEnvelope(
+                MsgTypes.QUEST_NOTICE, profile.nodeId,
+                com.kapp.tenon.core.protocol.CodecQuest.encodeQuestNotice(notice),
+            )
+        }
 
     /** `agent-invoke` 的应答帧（cap `agi1`）。 */
     suspend fun sendAgentInvokeResult(peerId: String,

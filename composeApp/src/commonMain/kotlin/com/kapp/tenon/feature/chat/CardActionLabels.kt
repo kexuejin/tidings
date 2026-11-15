@@ -10,6 +10,7 @@ import com.kapp.tenon.generated.resources.card_action_open_prototype
 import com.kapp.tenon.generated.resources.card_action_open_quest
 import com.kapp.tenon.generated.resources.card_action_reply
 import com.kapp.tenon.generated.resources.card_action_resume
+import com.kapp.tenon.generated.resources.card_action_override
 import com.kapp.tenon.generated.resources.card_action_retry
 import com.kapp.tenon.generated.resources.card_action_send_as_adjustment
 import com.kapp.tenon.generated.resources.card_action_send_as_new_task
@@ -54,6 +55,7 @@ internal object CardActionLabelKeys {
         "card.action.merge_patch" to Res.string.card_action_merge,
         "card.action.merge-patch" to Res.string.card_action_merge,
         "card.action.retry" to Res.string.card_action_retry,
+        "card.action.override" to Res.string.card_action_override,
         "card.action.retry_quest" to Res.string.card_action_retry,
         "card.action.retry-quest" to Res.string.card_action_retry,
         "card.action.open_quest" to Res.string.card_action_open_quest,

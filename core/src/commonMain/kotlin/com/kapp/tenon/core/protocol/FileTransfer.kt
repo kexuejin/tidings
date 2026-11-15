@@ -329,6 +329,14 @@ object TcpFrames {
         """{"type":"${TcpFrameTypes.MSG}","envelope":${Codec.encode(envelope)}}"""
 
     /**
+     * 接收侧实际校验的帧长（= `encodeMsgFrame` 的字节数，长度前缀不计）。
+     * 发送侧的帧长夹刀必须用**这个**量，不能用裸信封字节数——msg 帧比信封多
+     * 26 字节包装（`{"type":"msg","envelope":` + `}`），量错会在
+     * (MAX-26, MAX] 的信封窗口放行超帧，接收侧整链判死（code review #2）。
+     */
+    fun msgFrameWireBytes(envelope: Envelope): Int = encodeMsgFrame(envelope).encodeToByteArray().size
+
+    /**
      * 解一个已经取好长度前缀的帧体。
      *
      * @param text 帧体的 UTF-8 文本。

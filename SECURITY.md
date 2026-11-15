@@ -46,6 +46,7 @@ not inherited. Three of them are worth stating explicitly:
 | :--- | :--- | :--- |
 | `msg` / `group-text` text | UDP 800 B, **TCP 32 KiB** | 4096 B was a UDP-era number; agent replies routinely exceed it, and a rejected frame is silently lost. 32 KiB leaves room for the 24 KiB `card` field (`CARD_BYTES`) inside one 64 KiB frame. |
 | `agent-event` body | TCP 64 KiB | code blocks, diffs, deep reasoning |
+| `stream-chunk` text | TCP 32 KiB (`STREAM_CHUNK_BODY`) | batched quest terminal log; send side clamps twice (body cap + encoded frame length) because terminal output is quote/control-char dense — JSON escaping can double every byte (`NodeOutbound.clampStreamChunkText`). These frames ride the encrypted channel only and never enter the offline queue. |
 | one-to-one `kind:"text"` | 4096 B (unchanged) | hand-typed text; no reason to widen the surface |
 
 A sender that does not check the receiver's budget does not get an error — the receiver drops the

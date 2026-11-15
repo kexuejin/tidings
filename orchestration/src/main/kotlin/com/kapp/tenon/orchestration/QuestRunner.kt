@@ -107,6 +107,12 @@ class QuestRunner(
         val prompt: String = "",
         val agentKey: String = "",
         val autoMerge: Boolean = true,
+        /**
+         * 派单端的便签回执键（wire 派单才有）。合流问卡之后的**批准**走
+         * [confirmMerge] —— 那条路的 COMPLETED 通知也从这里拿 token，
+         * 不然派单端看不到合并结果（真机实测缺陷）。
+         */
+        val clientToken: String? = null,
     )
 
     private val active = ConcurrentHashMap<String, QuestHandle>()
@@ -136,10 +142,25 @@ class QuestRunner(
                     status = status,
                     prompt = handle.prompt,
                     agent_key = handle.agentKey,
+                    client_token = handle.clientToken,
+                    auto_merge = if (handle.autoMerge) 1L else 0L,
                     updated_at = com.kapp.tenon.core.nowMillis(),
                 )
             }.onFailure {
                 RelayLog.info("RELAY-QUEST", "quest ledger save failed for " + handle.questId + ": " + (it.message ?: "unknown"))
+            }
+        }
+    }
+
+    private suspend fun ledgerUpdateStatusRaw(questId: String, status: String) {
+        database ?: return
+        withContext(Dispatchers.IO) {
+            runCatching {
+                database.relayDatabaseQueries.updateQuestLedgerStatus(
+                    status = status,
+                    updated_at = com.kapp.tenon.core.nowMillis(),
+                    quest_id = questId,
+                )
             }
         }
     }
@@ -154,13 +175,6 @@ class QuestRunner(
                     quest_id = handle.questId,
                 )
             }
-        }
-    }
-
-    private suspend fun ledgerDelete(questId: String) {
-        database ?: return
-        withContext(Dispatchers.IO) {
-            runCatching { database.relayDatabaseQueries.deleteQuestLedgerById(quest_id = questId) }
         }
     }
 
@@ -193,6 +207,7 @@ class QuestRunner(
                 title = row.title,
                 mainWorkspace = File(row.main_workspace),
                 runGateChecks = runGateChecks,
+                clientToken = row.client_token,
             )
             recovered++
             when (row.status) {
@@ -259,17 +274,35 @@ class QuestRunner(
 
         val branch = "quest/" + questId
         val worktree = File(worktreeRoot, questId)
-        val created = git(ws, "worktree", "add", "-b", branch, worktree.absolutePath, "HEAD")
-        if (created.exitCode != 0) {
-            notify(questId, title, QuestStatus.FAILED, "worktree create failed: " + created.stderr.takeLast(300).trim(), rev = 1L, noticeClientToken = noticeToken)
-            return DispatchResult.Rejected("worktree create failed: " + created.stderr.takeLast(200).trim())
-        }
-
         val effectiveGates: suspend (File) -> Boolean = if (gateCommand.isNullOrBlank()) {
             runGateChecks
         } else {
             { dir -> executeGateCommand(dir, gateCommand) }
         }
+        val created = git(ws, "worktree", "add", "-b", branch, worktree.absolutePath, "HEAD")
+        if (created.exitCode != 0) {
+            // 台账行先落（FAILED + 原 prompt/agentKey/clientToken）：没有行，重试
+            // 按钮就是静默 no-op（resumeQuest 查无此行）。此前这条路径连行都没写。
+            ledgerSave(
+                QuestHandle(
+                    questId = questId,
+                    branch = branch,
+                    worktreeDir = worktree,
+                    convId = convId,
+                    title = title,
+                    mainWorkspace = ws,
+                    runGateChecks = effectiveGates,
+                    prompt = prompt,
+                    agentKey = agentKey,
+                    autoMerge = autoMerge,
+                    clientToken = noticeToken,
+                ),
+                QuestStatus.FAILED.name,
+            )
+            notify(questId, title, QuestStatus.FAILED, "worktree create failed: " + created.stderr.takeLast(300).trim(), rev = 1L, noticeClientToken = noticeToken)
+            return DispatchResult.Rejected("worktree create failed: " + created.stderr.takeLast(200).trim())
+        }
+
         val handle = QuestHandle(
             questId = questId,
             branch = branch,
@@ -281,6 +314,7 @@ class QuestRunner(
             prompt = prompt,
             agentKey = agentKey,
             autoMerge = autoMerge,
+            clientToken = noticeToken,
         )
         active[questId] = handle
         ledgerSave(handle, QuestStatus.RUNNING.name)
@@ -288,21 +322,35 @@ class QuestRunner(
         try {
             inFlightJobs[questId] = coroutineContext.job
             try {
-                val terminal = executeQuestLifecycle(handle, prompt, agentKey, autoMerge)
+                // clientToken 必须跟到执行半边：RUNNING 之后的所有终态通知
+                // （FAILED / 无产出 / 合流问卡 / COMPLETED）都在 executeQuestLifecycle
+                // 里发 —— 不带 token，onNotice 的回执查找就落空，派单端的便签永远
+                // 停在 RUNNING（真机实测：桌面卡翻了 failed，手机卡纹丝不动）。
+                val terminal = executeQuestLifecycle(handle, prompt, agentKey, autoMerge, noticeToken)
                 return DispatchResult.Started(questId, terminalStatus = terminal)
             } finally {
                 inFlightJobs.remove(questId)
             }
         } catch (e: CancellationException) {
             withContext(NonCancellable) {
-                notify(questId, title, QuestStatus.CANCELLED, "Quest cancelled.", rev = 1L)
+                notify(questId, title, QuestStatus.CANCELLED, "Quest cancelled.", rev = 1L, noticeClientToken = noticeToken)
                 cleanupTerminal(handle, removeBranch = false)
             }
             throw e
         } catch (t: Throwable) {
-            notify(questId, title, QuestStatus.FAILED, (t.message ?: t::class.simpleName ?: "unknown").take(200), rev = 1L)
-            cleanupTerminal(handle, removeBranch = false)
+            notify(questId, title, QuestStatus.FAILED, (t.message ?: t::class.simpleName ?: "unknown").take(200), rev = 1L, noticeClientToken = noticeToken)
+            ledgerUpdateStatus(handle, QuestStatus.FAILED.name)
+            cleanupTerminal(handle, removeBranch = false, keepLedgerForRetry = true)
             return DispatchResult.Started(questId, terminalStatus = "FAILED")
+        }
+    }
+
+    /** 测试专用：读一条台账行（FAILED 留存/重试链路的断言面）。 */
+    suspend fun ledgerRowForTest(questId: String): com.kapp.tenon.db.QuestLedger? {
+        val db = database ?: return null
+        return withContext(Dispatchers.IO) {
+            runCatching { db.relayDatabaseQueries.selectQuestLedgerById(quest_id = questId).executeAsOneOrNull() }
+                .getOrNull()
         }
     }
 
@@ -337,7 +385,8 @@ class QuestRunner(
                 run.error ?: "cli task failed"
             }
             notify(questId, title, QuestStatus.FAILED, reason, rev = 1L, noticeClientToken = noticeClientToken)
-            cleanupTerminal(handle, removeBranch = false)
+            ledgerUpdateStatus(handle, QuestStatus.FAILED.name)
+            cleanupTerminal(handle, removeBranch = false, keepLedgerForRetry = true)
             return "FAILED"
         }
         if (committed == null) {
@@ -349,12 +398,13 @@ class QuestRunner(
                 rev = 1L,
                 noticeClientToken = noticeClientToken,
             )
-            cleanupTerminal(handle, removeBranch = false)
+            ledgerUpdateStatus(handle, QuestStatus.FAILED.name)
+            cleanupTerminal(handle, removeBranch = false, keepLedgerForRetry = true)
             return "FAILED"
         }
 
         val terminal = mergeMutex.withLock {
-            completeQuest(handle, worktree, autoMerge, run.summary ?: "")
+            completeQuest(handle, worktree, autoMerge, run.summary ?: "", noticeClientToken)
         }
         return terminal
     }
@@ -391,7 +441,7 @@ class QuestRunner(
         val handle = active[questId] ?: return false
         ledgerUpdateStatus(handle, QuestStatus.RUNNING.name)
         val terminal = mergeMutex.withLock {
-            completeQuest(handle, handle.worktreeDir, autoMerge = true, summary = "")
+            completeQuest(handle, handle.worktreeDir, autoMerge = true, summary = "", handle.clientToken)
         }
         return terminal == "COMPLETED"
     }
@@ -408,7 +458,7 @@ class QuestRunner(
             return true
         }
         val handle = active.remove(questId) ?: return false
-        notify(questId, handle.title, QuestStatus.CANCELLED, reason, rev = 1L)
+        notify(questId, handle.title, QuestStatus.CANCELLED, reason, rev = 1L, noticeClientToken = handle.clientToken)
         cleanupTerminal(handle, removeBranch = false)
         return true
     }
@@ -449,6 +499,7 @@ class QuestRunner(
         val created = git(ws, "worktree", "add", "-b", row.branch, worktree.absolutePath, "HEAD")
         if (created.exitCode != 0) {
             notify(questId, row.title, QuestStatus.FAILED, "worktree recreate failed: " + created.stderr.takeLast(300).trim(), rev = 1L)
+            ledgerUpdateStatusRaw(questId, QuestStatus.FAILED.name)
             return false
         }
         val handle = QuestHandle(
@@ -462,6 +513,7 @@ class QuestRunner(
             prompt = row.prompt,
             agentKey = row.agent_key,
             autoMerge = autoMerge,
+            clientToken = row.client_token,
         )
         active[questId] = handle
         ledgerSave(handle, QuestStatus.RUNNING.name)
@@ -481,7 +533,8 @@ class QuestRunner(
             throw e
         } catch (t: Throwable) {
             notify(questId, row.title, QuestStatus.FAILED, (t.message ?: "unknown").take(200), rev = 1L)
-            cleanupTerminal(handle, removeBranch = false)
+            ledgerUpdateStatus(handle, QuestStatus.FAILED.name)
+            cleanupTerminal(handle, removeBranch = false, keepLedgerForRetry = true)
             return false
         }
     }
@@ -495,6 +548,7 @@ class QuestRunner(
         worktree: File,
         autoMerge: Boolean,
         summary: String,
+        noticeClientToken: String? = null,
     ): String? {
         val automation = QuestAutomationExecutor(
             mergeLock = QuestSerialMergeLock(
@@ -503,6 +557,7 @@ class QuestRunner(
                 gitTimeoutMs = gitTimeoutMs,
             ),
             onNotice = onNotice,
+            clientToken = noticeClientToken,
         )
         val outcome = automation.handleQuestCompletion(
             questId = handle.questId,
@@ -518,7 +573,10 @@ class QuestRunner(
                 "COMPLETED"
             }
             is QuestAutomationExecutor.AutomationOutcome.Failed -> {
-                cleanupTerminal(handle, removeBranch = false)
+                // 合流阶段失败也是 FAILED 家族：台账留存（重跑数据源）+ 状态与通知
+                // 一致——与 dispatch 级 FAILED 路径同规（review #4 的完整补齐）。
+                ledgerUpdateStatus(handle, QuestStatus.FAILED.name)
+                cleanupTerminal(handle, removeBranch = false, keepLedgerForRetry = true)
                 "FAILED"
             }
             is QuestAutomationExecutor.AutomationOutcome.AwaitingConfirmation -> {
@@ -571,9 +629,19 @@ class QuestRunner(
      * `deleteRecursively` —— §2.8 的铁律在这里同样成立）。分支：合流成功后删除
      * （已并入 main，留着是误导）；失败/叫停保留（取证与重试的现场）。
      */
-    private suspend fun cleanupTerminal(handle: QuestHandle, removeBranch: Boolean) = withContext(NonCancellable + Dispatchers.IO) {
+    private suspend fun cleanupTerminal(
+        handle: QuestHandle,
+        removeBranch: Boolean,
+        keepLedgerForRetry: Boolean = false,
+    ) = withContext(NonCancellable + Dispatchers.IO) {
         active.remove(handle.questId)
-        runCatching { database?.relayDatabaseQueries?.deleteQuestLedgerById(quest_id = handle.questId) }
+        // FAILED 支线**保留台账行**（prompt/agentKey 都在）：FAILED 卡的「重新运行」
+        // 按钮走台账原 questId 重跑，行删了按钮就变成静默 no-op（真机实测：点重试
+        // 后卡停在「已提交等待宿主确认」，桌面端 resumeQuest 查无此行直接返回）。
+        // COMPLETED/CANCELLED 没有重试语义，照旧删行。
+        if (!keepLedgerForRetry) {
+            runCatching { database?.relayDatabaseQueries?.deleteQuestLedgerById(quest_id = handle.questId) }
+        }
         git(handle.mainWorkspace, "worktree", "remove", "--force", handle.worktreeDir.absolutePath)
         git(handle.mainWorkspace, "worktree", "prune")
         if (removeBranch) {

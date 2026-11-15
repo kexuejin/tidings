@@ -117,6 +117,12 @@ class WorktreeSandboxExecutor(
         env: Map<String, String> = emptyMap(),
         onLine: suspend (String) -> Unit,
         timeoutMs: Long = timeoutMsOf(env),
+        /**
+         * 网络策略（三档语义见 [OsSandboxGuard.NetworkPolicy]）：AIR_GAPPED =
+         * 纯断网（旧行为）；LOOPBACK = 仅宿主回环子服务；OPEN = 云后端 CLI 必需
+         * （agy/claude/codex/dsh 的模型 API 都要出网，air-gapped 下必死）。
+         */
+        networkPolicy: OsSandboxGuard.NetworkPolicy = OsSandboxGuard.NetworkPolicy.AIR_GAPPED,
     ): Outcome {
         require(TASK_ID.matches(taskId)) {
             "taskId \"$taskId\" must match ${TASK_ID.pattern} — it becomes a path segment and a branch name"
@@ -191,7 +197,12 @@ class WorktreeSandboxExecutor(
                     is OsSandboxGuard.ProbeResult.Available -> {
                         // profileDir 传产物目录，**不传 worktree**：策略文件落在 worktree 里
                         // 会被 harvest 的 `git add -A` 当成用户改动收进 patch.diff。
-                        effectiveCommand = OsSandboxGuard.wrap(command, probe.kind, profileDir = artifactsDir)
+                        effectiveCommand = OsSandboxGuard.wrap(
+                            command,
+                            probe.kind,
+                            policy = networkPolicy,
+                            profileDir = artifactsDir,
+                        )
                     }
 
                     is OsSandboxGuard.ProbeResult.Unavailable -> {

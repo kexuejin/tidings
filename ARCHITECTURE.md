@@ -332,6 +332,15 @@ A 宿主把子任务派到 B 宿主的插件上执行、结果回传，由发起
   负责授权与分流：未授权回 `denied` 并记 grant 申请，`targetTag` 寻址（T4）如实答
   `no-plugin`。发起入口 `POST /v1/agent/channel` 在 caps 门处拒发未声明 `agc1` 的对端
   （键表与语义见 `PROTOCOL-EXTENSION.md` §6.14）。
+- **支线日志流（Phase 1，`stream-sub` / `stream-chunk` / `stream-cancel`）**：作战室
+  的实时终端输出。三段分工：行源头在 `:agentNode`（`executeCliTask` 的 `onLogLine`
+  原始行出口，stderr 已并入、事件映射器认不出的行也在内）；枢纽在 `:app`
+  （`QuestStreamHub` 一类双角色 —— 宿主侧 100ms 合批 + 每任务 2000 行环形缓冲 +
+  多订阅者注册表，订阅侧「期望集 vs 已订阅集」对账与 seq 去重）；出口在 `:core`
+  （`NodeRuntime.sendStreamFrame` 唯一出站口：LinkServer 下行 / LinkClient 上行 /
+  luciola 信道，三路全 fail-closed，**绝不入离线队列**、绝不走 UDP）。日志帧不入
+  messageStore（`stream-` 前缀豁免，与 token.delta 同一条 T-G3 纪律）。
+  键表与投递语义见 `PROTOCOL-EXTENSION.md` §6.15。
 
 ### 7.5 审批面与免批表（M5 起）
 

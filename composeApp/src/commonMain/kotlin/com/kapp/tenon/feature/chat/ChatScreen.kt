@@ -21,7 +21,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.runtime.Composable
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -225,7 +229,18 @@ fun ChatScreen(
     // 对端记录还没出现、但本机确实存着历史（见 [RelayUiState.chatPeer]）：
     // 过去这里直接画"选一个会话"，用户看着像消息全丢了。群不走这一支：它的头部
     // 本来就不显示 IP/能力，那句"本机存下来的历史"对群是句废话。
-    val restored = realPeer == null && peer != null && group == null
+    // **assistant 伪会话也不走这一支**：它的 peerId（ConvId.ASSISTANT）永远不命中
+    // 节点表 ⇒ restored 恒真 ⇒ 头部同时出现「● 在线」（宿主可达的事实）与
+    // 「离线 · 下面是本机存下来的历史」（伪 peer 判据的误报）—— 两个矛盾状态同屏。
+    // 助理会话是活会话（派单/quest 卡/回执实时流动），其可达性 = questPairNodes
+    // 内执行体宿主的在线态。
+    val assistantHostOnline = peerId?.takeIf { ConvId.isAssistant(it) }?.let { id ->
+        settingsSlice.settings.questPairNodes.any { pair ->
+            nodeSlice.peers.any { it.nodeId == pair && it.online }
+        }
+    } ?: false
+    val restored = realPeer == null && peer != null && group == null &&
+        !ConvId.isAssistant(peerId.orEmpty()) && !assistantHostOnline
     if (peerId == null || peer == null) {
         EmptyState(
             title = stringResource(Res.string.chat_no_selection_title),
@@ -598,6 +613,21 @@ fun ChatScreen(
     var interventionCard by remember { mutableStateOf<AgentCardUi?>(null) }
     var activeQuestId by remember(data.questId) { mutableStateOf(data.questId) }
     var activeSubagentId by remember(data.subagentId) { mutableStateOf(data.subagentId) }
+
+    // 支线日志流（Phase 1）：作战室开着 = 想看。进入组合订阅、离开组合退订；
+    // 切后台的全量退订由 onAppBackgrounded（平台壳层）负责，切回前台对账续订
+    // 在 onAppForegrounded —— 这里只管「这一屏开着」这一半。
+    DisposableEffect(activeQuestId) {
+        val questId = activeQuestId
+        if (questId != null) {
+            actions.onQuestStreamDesired?.invoke(questId, true)
+        }
+        onDispose {
+            if (questId != null) {
+                actions.onQuestStreamDesired?.invoke(questId, false)
+            }
+        }
+    }
     // 「清空本会话记录」的确认框开合。动作来自头部（⋮），确认框画在这一层 —— 桌面壳的
     // 头部不进 ChatScreen，它自己那份确认框在 DesktopChatPane 里。
     val showClearConfirmState = remember(peerId) { mutableStateOf(false) }
@@ -875,6 +905,10 @@ fun ChatScreen(
         if (activeQuestId != null) {
             FractalBreadcrumbBar(
                 questId = activeQuestId,
+                questTitle = activeQuestId?.let { qid ->
+                    messages.lastOrNull { it.questId == qid }?.renderCard
+                        ?.get("title")?.let { (it as? JsonPrimitive)?.contentOrNull }
+                },
                 subagentId = activeSubagentId,
                 onNavigateBackToMain = {
                     activeQuestId = null
@@ -987,97 +1021,150 @@ fun ChatScreen(
             }
         }
 
-        if (activeSubagentId != null && activeQuestId != null) {
-            SubagentWhiteboxView(
-                questId = activeQuestId!!,
-                subagentId = activeSubagentId!!,
-                prompt = "",
-                thoughtChain = "",
-                executionLog = "",
-                onIntervene = { qId, subId, text ->
-                    actions.onInterveneSubagent?.invoke(qId, subId, text)
+        // 支线卡动作的唯一路由表：消息列表的劫持守卫与作战室状态行共用这一份 ——
+        // 两个入口各抄一张 when 表，迟早分家。
+        val effectiveActions = remember(actions, activeQuestId) {
+                actions.copy(
+                    onCardAction = { convId, card, actionId ->
+                        // 劫持守卫：quest 动作分支只认**支线卡**（type 标或助理会话）。
+                        // 群工单卡的 merge-patch 是既有动作（BoardCardFlip 发出），语义走
+                        // HostCardActions 的补丁合并 —— 不加这道守卫，它会被本分支吃掉，
+                        // 而 applyQuestPatch 按 assistant 会话查卡查不到 ⇒ 群卡合并静默丢失。
+                        val isQuestCard = card.type == AssistantQuestCardPayload.TYPE_ASSISTANT_QUEST ||
+                            com.kapp.tenon.core.protocol.ConvId.isAssistant(convId)
+                        if (!isQuestCard) {
+                            actions.onCardAction?.invoke(convId, card, actionId)
+                            return@copy
+                        }
+                        when (actionId) {
+                            AssistantQuestCardPayload.Actions.OPEN_QUEST, "open_quest" -> {
+                                activeQuestId = card.cardId
+                                activeSubagentId = null
+                                actions.onNavigateQuest?.invoke(card.cardId)
+                            }
+                            AssistantQuestCardPayload.Actions.REPLY_TUNE, "reply",
+                            AssistantQuestCardPayload.Actions.RESUME_QUEST, "resume",
+                            -> {
+                                interventionCard = card
+                            }
+                            AssistantQuestCardPayload.Actions.MERGE_PATCH, "merge" -> {
+                                actions.onApplyQuestPatch?.invoke(card.cardId)
+                                    ?: actions.onCardAction?.invoke(convId, card, actionId)
+                            }
+                            AssistantQuestCardPayload.Actions.CANCEL_QUEST -> {
+                                actions.onCancelQuest?.invoke(card.cardId)
+                            }
+                            AssistantQuestCardPayload.Actions.RETRY_QUEST -> {
+                                actions.onRetryQuest?.invoke(card.cardId)
+                            }
+                            else -> {
+                                actions.onCardAction?.invoke(convId, card, actionId)
+                            }
+                        }
+                    }
+                )
+            }
+
+        // 支线分支（整页化）：quest 分支主体 = 作战室整页（状态行 + 全高终端 + 补丁审查），
+        // 白盒分支保持「内嵌终端 + 白盒主体」（现状）；非支线 = 消息列表。
+        // 任务卡时间线没有丢：面包屑回退就是会话，卡片都在那里 —— 三层导航：会话 → 作战室 → 白盒。
+        if (activeQuestId != null && activeSubagentId == null) {
+            // 最新一张 quest 卡（状态行数据源）：进入作战室但首条通知未到时为 null，
+            // 状态行整行不画（宁可少一行，不画编造的「未知状态」）。
+            val warRoomCard = remember(messages, activeQuestId) {
+                activeQuestId?.let { qid ->
+                    messages.lastOrNull { it.questId == qid }?.renderCard?.let { parseAgentCard(it) }
+                }
+            }
+            WarRoomView(
+                card = warRoomCard,
+                state = data.questStreamState,
+                unavailableReason = data.questStreamUnavailableReason,
+                lines = data.questStreamLines,
+                patchText = data.questPatchText,
+                onCardAction = { actionId ->
+                    // 与消息列表同一条路由表：quest 卡动作都按 cardId 兑现，convId 只是
+                    // 兜底分支的信封（quest 卡都在助理会话）。
+                    warRoomCard?.let {
+                        effectiveActions.onCardAction?.invoke(
+                            com.kapp.tenon.core.protocol.ConvId.ASSISTANT,
+                            it,
+                            actionId,
+                        )
+                    }
                 },
                 modifier = Modifier.weight(1f).fillMaxWidth(),
             )
         } else {
-            Box(Modifier.weight(1f).fillMaxWidth()) {
-                val effectiveActions = remember(actions, activeQuestId) {
-                    actions.copy(
-                        onCardAction = { convId, card, actionId ->
-                            // 劫持守卫：quest 动作分支只认**支线卡**（type 标或助理会话）。
-                            // 群工单卡的 merge-patch 是既有动作（BoardCardFlip 发出），语义走
-                            // HostCardActions 的补丁合并 —— 不加这道守卫，它会被本分支吃掉，
-                            // 而 applyQuestPatch 按 assistant 会话查卡查不到 ⇒ 群卡合并静默丢失。
-                            val isQuestCard = card.type == AssistantQuestCardPayload.TYPE_ASSISTANT_QUEST ||
-                                com.kapp.tenon.core.protocol.ConvId.isAssistant(convId)
-                            if (!isQuestCard) {
-                                actions.onCardAction?.invoke(convId, card, actionId)
-                                return@copy
-                            }
-                            when (actionId) {
-                                AssistantQuestCardPayload.Actions.OPEN_QUEST, "open_quest" -> {
-                                    activeQuestId = card.cardId
-                                    activeSubagentId = null
-                                    actions.onNavigateQuest?.invoke(card.cardId)
-                                }
-                                AssistantQuestCardPayload.Actions.REPLY_TUNE, "reply",
-                                AssistantQuestCardPayload.Actions.RESUME_QUEST, "resume",
-                                -> {
-                                    interventionCard = card
-                                }
-                                AssistantQuestCardPayload.Actions.MERGE_PATCH, "merge" -> {
-                                    actions.onApplyQuestPatch?.invoke(card.cardId)
-                                        ?: actions.onCardAction?.invoke(convId, card, actionId)
-                                }
-                                AssistantQuestCardPayload.Actions.CANCEL_QUEST -> {
-                                    actions.onCancelQuest?.invoke(card.cardId)
-                                }
-                                AssistantQuestCardPayload.Actions.RETRY_QUEST -> {
-                                    actions.onRetryQuest?.invoke(card.cardId)
-                                }
-                                else -> {
-                                    actions.onCardAction?.invoke(convId, card, actionId)
-                                }
-                            }
-                        }
+            // 白盒分支的内嵌终端（现状保留）：第 2 层也要能看滚动日志。null 槽 = 壳未接线，面板空态。
+            if (activeQuestId != null) {
+                QuestTerminalLogPanel(
+                    questId = activeQuestId!!,
+                    state = data.questStreamState,
+                    unavailableReason = data.questStreamUnavailableReason,
+                    lines = data.questStreamLines,
+                    modifier = Modifier.padding(horizontal = sp.lg, vertical = sp.xs),
+                )
+            }
+            // 移动端 Diff 审查（Phase 4）：补丁落到本机才有得审 —— null 时面板整个
+            // 不画（接收入口在会话流的文件卡上）。
+            if (data.questPatchText != null) {
+                QuestDiffReviewPanel(
+                    patchText = data.questPatchText!!,
+                    modifier = Modifier.padding(horizontal = sp.lg, vertical = sp.xs),
+                )
+            }
+            if (activeSubagentId != null && activeQuestId != null) {
+                SubagentWhiteboxView(
+                    questId = activeQuestId!!,
+                    subagentId = activeSubagentId!!,
+                    prompt = "",
+                    thoughtChain = "",
+                    executionLog = "",
+                    onIntervene = { qId, subId, text ->
+                        actions.onInterveneSubagent?.invoke(qId, subId, text)
+                    },
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                )
+            } else {
+                Box(Modifier.weight(1f).fillMaxWidth()) {
+
+                    // 消息列表主体：空态 / LazyColumn / 回到最新胶囊整块（ARP-14 后半）。
+                    // 五个回写状态以 MutableState 下传（本侧 var 委托与宿主内 var 委托同源）。
+                    ChatMessageList(
+                        messages = messages,
+                        group = group,
+                        peer = peer,
+                        peerId = peerId,
+                        now = now,
+                        agentSlice = agentSlice,
+                        listState = listState,
+                        isNearBottom = isNearBottom,
+                        historyAtBeginning = historyAtBeginning,
+                        highlightedMessageId = highlightedMessageId,
+                        historyLoading = historyLoading,
+                        scrollFollow = scrollFollow,
+                        bubbleCtx = bubbleCtx,
+                        bubbleFraction = bubbleFraction,
+                        messageAvatarSize = messageAvatarSize,
+                        composerSlot = composerSlot,
+                        composerFocus = composerFocus,
+                        requestComposerFocus = ::requestComposerFocus,
+                        scrollToMessage = ::scrollToMessage,
+                        quotedSenderNameOf = ::quotedSenderNameOf,
+                        mentionSender = mentionSender,
+                        coroutineScope = coroutineScope,
+                        actions = effectiveActions,
+                        receivedFileActions = receivedFileActions,
+                        onDraftChangeExternal = onDraftChangeExternal,
+                        forwardingMessageState = forwardingMessageState,
+                        previewingImagePathState = previewingImagePathState,
+                        replyingToMessageState = replyingToMessageState,
+                        lastRecalledTextState = lastRecalledTextState,
+                        pendingCardActionsState = pendingCardActionsState,
+                        draftState = draftState,
                     )
                 }
-
-                // 消息列表主体：空态 / LazyColumn / 回到最新胶囊整块（ARP-14 后半）。
-                // 五个回写状态以 MutableState 下传（本侧 var 委托与宿主内 var 委托同源）。
-                ChatMessageList(
-                    messages = messages,
-                    group = group,
-                    peer = peer,
-                    peerId = peerId,
-                    now = now,
-                    agentSlice = agentSlice,
-                    listState = listState,
-                    isNearBottom = isNearBottom,
-                    historyAtBeginning = historyAtBeginning,
-                    highlightedMessageId = highlightedMessageId,
-                    historyLoading = historyLoading,
-                    scrollFollow = scrollFollow,
-                    bubbleCtx = bubbleCtx,
-                    bubbleFraction = bubbleFraction,
-                    messageAvatarSize = messageAvatarSize,
-                    composerSlot = composerSlot,
-                    composerFocus = composerFocus,
-                    requestComposerFocus = ::requestComposerFocus,
-                    scrollToMessage = ::scrollToMessage,
-                    quotedSenderNameOf = ::quotedSenderNameOf,
-                    mentionSender = mentionSender,
-                    coroutineScope = coroutineScope,
-                    actions = effectiveActions,
-                    receivedFileActions = receivedFileActions,
-                    onDraftChangeExternal = onDraftChangeExternal,
-                    forwardingMessageState = forwardingMessageState,
-                    previewingImagePathState = previewingImagePathState,
-                    replyingToMessageState = replyingToMessageState,
-                    lastRecalledTextState = lastRecalledTextState,
-                    pendingCardActionsState = pendingCardActionsState,
-                    draftState = draftState,
-                )
             }
         }
 

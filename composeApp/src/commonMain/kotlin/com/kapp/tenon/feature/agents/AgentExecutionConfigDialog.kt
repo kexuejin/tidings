@@ -12,6 +12,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -26,6 +28,11 @@ import com.kapp.tenon.generated.resources.Res
 import com.kapp.tenon.generated.resources.exec_config_driver_unassigned
 import com.kapp.tenon.generated.resources.exec_config_edit_hint
 import com.kapp.tenon.generated.resources.exec_config_empty
+import com.kapp.tenon.generated.resources.exec_config_agy_login_hint
+import com.kapp.tenon.generated.resources.exec_config_agy_login_label
+import com.kapp.tenon.generated.resources.exec_config_agy_login_missing
+import com.kapp.tenon.generated.resources.exec_config_agy_login_ok
+import com.kapp.tenon.generated.resources.exec_config_agy_login_probing
 import com.kapp.tenon.generated.resources.exec_config_installed
 import com.kapp.tenon.generated.resources.exec_config_model_format
 import com.kapp.tenon.generated.resources.exec_config_model_inherit
@@ -38,6 +45,7 @@ import com.kapp.tenon.generated.resources.exec_config_member_unnamed
 import com.kapp.tenon.ui.components.MutedTag
 import com.kapp.tenon.ui.components.RelayDialog
 import com.kapp.tenon.ui.theme.LocalAppSpacing
+import com.kapp.tenon.ui.theme.accents
 import org.jetbrains.compose.resources.stringResource
 
 /**
@@ -85,6 +93,48 @@ internal fun AgentExecutionConfigDialog(
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                // agy 登录状态行（预检探针）：未登录 = 每条 quest 都会在预检处快败，
+                // 这里给机主一个不出对话框的判读。首次探测起一次子进程（≈6s），
+                // produceState 异步取；本机没有 agy 时端口返回 null，整行不画
+                // （null 在这里既是「检测中」也是「本机没有」——后者取数一次后行消失）。
+                val agyLogin by produceState<Boolean?>(null, port) {
+                    value = port.agyLoginState()
+                }
+                if (agyLogin != null) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(sp.sm6),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = stringResource(Res.string.exec_config_agy_login_label),
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(1f),
+                        )
+                        val stateText = when (agyLogin) {
+                            true -> stringResource(Res.string.exec_config_agy_login_ok)
+                            false -> stringResource(Res.string.exec_config_agy_login_missing)
+                            null -> stringResource(Res.string.exec_config_agy_login_probing)
+                        }
+                        Text(
+                            text = stateText,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = if (agyLogin == false) {
+                                MaterialTheme.accents.warn
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                        )
+                    }
+                    Text(
+                        text = stringResource(Res.string.exec_config_agy_login_hint),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 if (rows.isEmpty()) {
                     Text(
                         text = stringResource(Res.string.exec_config_empty),

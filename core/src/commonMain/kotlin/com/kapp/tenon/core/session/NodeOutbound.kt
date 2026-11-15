@@ -5,6 +5,7 @@ package com.kapp.tenon.core.session
 import com.kapp.tenon.core.protocol.AgentEventAttachment
 import com.kapp.tenon.core.protocol.AgentToolRuleRowPayload
 import com.kapp.tenon.core.protocol.Codec
+import com.kapp.tenon.core.protocol.TcpFrames
 import com.kapp.tenon.core.protocol.Limits
 import com.kapp.tenon.core.protocol.Protocol
 import com.kapp.tenon.core.protocol.MsgTypes
@@ -797,6 +798,10 @@ internal class NodeOutbound(
             ),
         )
 
+    // 支线日志流三帧（Phase 1）的出站口在 [NodeRuntime.sendStreamSub/Chunk/Cancel] —— 它要同时
+    // 摸 LinkServer / LinkClient / SecureChannelTransport 三条加密通道，只有运行时
+    // 手里有全部零件。这里只保留发送侧的双刀钳制（[clampStreamChunkText]）。
+
     /**
      * 戳一碰（私聊窗口震动）：发 `msg(kind:"nudge")`。
      *
@@ -893,8 +898,10 @@ internal class NodeOutbound(
             selfId(),
             Codec.agentEventPayload(sessionId, cursor, eventType, summary, b, ref, attachment),
         )
+        // 同 sendStreamChunk：夹刀探针必须是线框实测（msg 帧比信封多 26 字节包装，
+        // 量裸信封会在 (MAX-26, MAX] 窗口放行超帧——接收侧整链判死）。
         val clamped = clampAgentEventBody(body, frameBytes = { candidate ->
-            Codec.encode(envelopeOf(candidate)).encodeToByteArray().size
+            TcpFrames.msgFrameWireBytes(envelopeOf(candidate))
         })
         return messenger.sendUserMessage(peerId, envelopeOf(clamped))
     }
@@ -919,33 +926,6 @@ internal class NodeOutbound(
      * M4 跨端派单网道的请求帧（cap `agi1`）。**不经群聊** —— 这是规格 §6.2 的
      * 「地下铁」：派单与交接只走点对点，主群聊一条跨设备中间文本都不产生。
      */
-    /** 主支线：便签跨设备派发（机主助理便签 → 执行端）。 */
-    suspend fun sendQuestDispatch(
-        peerId: String,
-        clientToken: String,
-        prompt: String,
-    ): SendOutcome = messenger.sendUserMessage(
-        peerId,
-        makeEnvelope(
-            MsgTypes.QUEST_DISPATCH,
-            selfId(),
-            com.kapp.tenon.core.protocol.CodecQuest.encodeQuestDispatch(clientToken, prompt),
-        ),
-    )
-
-    /** 主支线：轻量通知回执（执行端 → 派单端，便签原位翻面键 = clientToken）。 */
-    suspend fun sendQuestNotice(
-        peerId: String,
-        notice: com.kapp.tenon.core.protocol.AssistantQuestNotice,
-    ): SendOutcome = messenger.sendUserMessage(
-        peerId,
-        makeEnvelope(
-            MsgTypes.QUEST_NOTICE,
-            selfId(),
-            com.kapp.tenon.core.protocol.CodecQuest.encodeQuestNotice(notice),
-        ),
-    )
-
     suspend fun sendAgentInvoke(
         peerId: String,
         invokeId: String,
@@ -1447,6 +1427,36 @@ internal fun clampAgentEventBody(
         // 按「帧长超了多少」等比收缩原始字节预算。转义越密，第一轮的比值越小，
         // 下一轮已经在预算内 —— 循环的作用是兜住极端分布，不是主路径。
         val nextBudget = maxOf(raw.toLong() * budget / encoded - 32L, 0L).toInt()
+        if (nextBudget >= raw) return cut
+        cut = clampUtf8(cut, nextBudget) ?: ""
+    }
+    return cut
+}
+
+/**
+ * `stream-chunk` 的发送侧**双刀**钳制（与 [clampAgentEventBody] 同一条纪律：
+ * 不产出注定被拒的帧，判据是编码后的帧长而不是 body 的字节数）。
+ *
+ * 第一刀无条件按 [Limits.STREAM_CHUNK_BODY]（32 KiB）卡 body —— 这是接收侧校验的
+ * 同一份数值，接收侧超限整帧 `bad-payload`；第二刀按编码后帧长收敛 —— 终端输出
+ * 引号/控制符密集，JSON 转义逐字符翻倍，「字节数达标的 body」照样可能编出超帧。
+ * 截点落在码点边界（[clampUtf8] 自带，与 `AssistantNoticeClamper.safeSubstring`
+ * 同一条「绝不产出 U+FFFD」的纪律），绝不产出乱码毒帧。
+ *
+ * @param frameBytes 给定 body 产出这一帧的编码字节数（注入真编码器，不复刻转义规则）。
+ */
+internal fun clampStreamChunkText(
+    text: String,
+    frameBytes: (String) -> Int,
+): String {
+    var cut = clampUtf8(text, Limits.STREAM_CHUNK_BODY) ?: text
+    if (frameBytes(cut) <= Limits.MAX_FRAME_BYTES) return cut
+    var round = 0
+    while (round++ < 4) {
+        val encoded = frameBytes(cut)
+        if (encoded <= Limits.MAX_FRAME_BYTES) return cut
+        val raw = Codec.utf8ByteLength(cut)
+        val nextBudget = maxOf(raw.toLong() * Limits.MAX_FRAME_BYTES / encoded - 32L, 0L).toInt()
         if (nextBudget >= raw) return cut
         cut = clampUtf8(cut, nextBudget) ?: ""
     }

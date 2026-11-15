@@ -1,0 +1,6 @@
+-- QuestLedger 的重试列：client_token（wire 派单的回执键——重启后恢复扫描发的
+-- 通知没有它就到不了派单端）与 auto_merge（原派单的合流策略——重跑不再翻转
+-- 成宿主默认）。老库（无此列）按 DEFAULT NULL/1 收口，与 23.sqm 的
+-- IF NOT EXISTS 同一条兼容纪律。
+ALTER TABLE QuestLedger ADD COLUMN client_token TEXT DEFAULT NULL;
+ALTER TABLE QuestLedger ADD COLUMN auto_merge INTEGER NOT NULL DEFAULT 1;

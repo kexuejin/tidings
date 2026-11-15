@@ -365,3 +365,15 @@ if __name__ == "__main__":
 L2 两张帧（`recovery-req`/`recovery-data`）对旧节点是未知类型 ⇒ 静默丢弃（Q5 设计）。
 `e2e` 脚本如需覆盖：恢复方发 req 后 5 秒窗口内应收到分批 `recovery-data`
 （批间 100 ms），旧端场景断言「无响应且离线队列为空」。
+
+
+---
+
+## 支线日志流（2026-11-15，Phase 1）
+
+三张帧（`stream-sub` / `stream-chunk` / `stream-cancel`）**只在加密通道上收发**
+（长连接双角色 / luciola 信道），发送侧 fail-closed：摸不到通道就 `false`，
+**绝不回退 UDP、绝不入离线队列** —— 所以旧夹具（`relay_e2e.py` 的 UDP/TCP 帧层）
+不需要也无法覆盖它们。如需覆盖：两端起真实 NodeRuntime + `linkEnabled = true`
+（参照 `core/src/jvmTest/.../QuestStreamLinkE2ETest.kt`），断言 sub/chunk/cancel
+双向到达与「无通道时零 UDP 泄漏」。老节点场景断言「无响应且离线队列为空」。

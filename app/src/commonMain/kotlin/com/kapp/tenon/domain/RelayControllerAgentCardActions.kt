@@ -5,7 +5,9 @@ package com.kapp.tenon.domain
 import com.kapp.tenon.core.nowMillis
 import com.kapp.tenon.core.protocol.AgentExecAuthorizer
 import com.kapp.tenon.core.protocol.AgentSenderId
+import com.kapp.tenon.core.protocol.CodecInvoke
 import com.kapp.tenon.core.protocol.ConvId
+import com.kapp.tenon.domain.AssistantQuestCardPayload
 import com.kapp.tenon.core.protocol.Envelope
 import com.kapp.tenon.core.protocol.VirtualAgentMember
 import com.kapp.tenon.core.protocol.newId
@@ -14,6 +16,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 
@@ -385,17 +390,33 @@ internal class RelayControllerAgentCardActions(
         val rawGroupId = p.strField("groupId") ?: return
         // 冒名判定：说「X 批了」的帧必须由 X 自己的节点发出 —— 否则任何人都能替全群批准。
         if (decidedBy != envelope.from) return
+        // Phase 3：拒绝必须**有回执**（先取现役 rev，拒绝理由里带上）—— 并发输家
+        // 收到 `agent-invoke-result(denied)` 而不是沉默（方案 v3 §Phase 3.1）。
+        fun currentRevOf(): Int? =
+            cardRowOf(cardId, groupIdOf(rawGroupId, envelope))?.renderCard
+                ?.get("rev")?.let { (it as? JsonPrimitive)?.contentOrNull?.toIntOrNull() }
+        fun reject(reason: String) {
+            val rev = currentRevOf()
+            host.scope.launch {
+                runCatching {
+                    host.runtime?.sendAgentInvokeResult(
+                        peerId = envelope.from,
+                        invokeId = invokeId,
+                        ok = false,
+                        status = CodecInvoke.InvokeResultStates.DENIED,
+                        summary = null,
+                        error = reason + (rev?.let { " (currentRev=$it)" } ?: ""),
+                    )
+                }
+            }
+        }
         // **帧里的 groupId 是发起方视角的会话 id**：1:1 时它就是**本机 nodeId**。
         // 本机拿它当自己的会话键，卡片行永远查不到（`broadcastDecision` 的 `?: return`），
         // 点击落到「静默丢弃」，而发起方界面上早已是「已提交，等待宿主确认」——
         // 真机 A22 现场：点「合并此补丁」，宿主 dedup 里有这条帧，什么都没发生。
         // 真群照旧；不是本机已知的群 ⇒ 归一成「与发起方的 1:1 会话」。
-        val groupId = if (host.state.value.settings.groups.any { it.groupId == rawGroupId }) {
-            rawGroupId
-        } else {
-            com.kapp.tenon.core.protocol.ConvId.single(envelope.from)
-        }
-        handleHostCardAction(groupId, agentId, cardId, actionId, decidedBy)
+        val groupId = groupIdOf(rawGroupId, envelope)
+        handleHostCardAction(groupId, agentId, cardId, actionId, decidedBy, invokeId = invokeId, from = envelope.from)
         // 动作帧不需要逐帧回执：全群广播的那张 rev+1 卡就是结果（§7.3-2）。
         run { invokeId }
     }
@@ -404,16 +425,40 @@ internal class RelayControllerAgentCardActions(
      * 宿主侧动作处理：**原子**吃下首个判定（§7.3-2），转发插件，rev+1 新帧广播全群。
      * 晚到的并发点击在这里被幂等丢弃 —— 各端按钮的最终一致由广播保证。
      */
-    internal fun handleHostCardAction(groupId: String, agentId: String, cardId: String, actionId: String, decidedBy: String) {
+    private fun groupIdOf(rawGroupId: String, envelope: Envelope): String =
+        if (host.state.value.settings.groups.any { it.groupId == rawGroupId }) {
+            rawGroupId
+        } else {
+            com.kapp.tenon.core.protocol.ConvId.single(envelope.from)
+        }
+
+    internal fun handleHostCardAction(
+        groupId: String,
+        agentId: String,
+        cardId: String,
+        actionId: String,
+        decidedBy: String,
+        /** 跨端 intent 的 invokeId（本机点击为 null —— 没有回执对象）。 */
+        invokeId: String? = null,
+        /** intent 发起节点（回执的目的地；本机点击为 null）。 */
+        from: String? = null,
+    ) {
         // **资格门（§4.8）**：判定在宿主侧 —— 资格台账在宿主手上，客户端算不出远端资格。
         // 此前这里只判「decidedBy 是不是帧的发送者」（防冒名），于是任何群成员都能点
         // 别人卡片上的审批/暂停按钮，宿主照单全收。
-        if (!mayDriveCard(groupId, agentId, decidedBy)) {
+        if (!mayDriveCard(groupId, agentId, decidedBy, actionId)) {
             announceCardActionDenied(groupId, agentId, cardId, actionId, decidedBy)
+            rejectIntent(from, invokeId, cardId, actionId, "not authorized to drive this card")
             return
         }
         val won = actionLedger.firstWin(cardId, actionId, decidedBy)
-        if (!won) return
+        if (!won) {
+            // Phase 3：并发输家不再沉默 —— 资格通过的并发点击被 First-Wins 台账
+            // 拒掉，输家收到显式拒绝（含当前 rev），不再把「已提交」误会成「已生效」。
+            announceCardActionDenied(groupId, agentId, cardId, actionId, decidedBy)
+            rejectIntent(from, invokeId, cardId, actionId, "another decision landed first")
+            return
+        }
         // 看板卡的网格级动作（重试 / 降级）不走插件：它们是 Leader 自己的命令。
         when (actionId) {
             TagBoardActions.RETRY -> {
@@ -489,6 +534,36 @@ internal class RelayControllerAgentCardActions(
                 }
             }
         }
+        // **支线卡动作先走 quest 门**（真机 P1：merge-patch 与链/工单卡共用同一
+        // actionId，quest 卡的「一键合入主分支」此前一路 fall-through 进通用
+        // `DesktopPatchMerge.apply` —— 对支线产物只会 `already exists in working
+        // directory`（分支上已提交），questRunner.confirmMerge 不可达，WAITING_INPUT
+        // → 机主确认 → COMPLETED 的循环整个是死的。真机实证：点合并
+        // 宿主日志只有 `patch merge FAILED (card q…)），rebase+ff 从未执行。
+        // quest 专属 actionId（retry/cancel/resume）无条件进 quest 门；merge-patch
+        // 由 quest 门返回 false（本机没有这条支线 = 不是 quest 卡）落回通用路径，
+        // 链/工单卡行为与从前一字不差。
+        val questIntervention = host.onQuestIntervention
+        val questHandled = when {
+            questIntervention == null -> false
+            actionId == AssistantQuestCardPayload.Actions.MERGE_PATCH ||
+                actionId == AssistantQuestCardPayload.Actions.RETRY_QUEST ||
+                actionId == AssistantQuestCardPayload.Actions.CANCEL_QUEST ||
+                actionId == AssistantQuestCardPayload.Actions.RESUME_QUEST ->
+                questIntervention(cardId, actionId, "")
+            actionId.startsWith(AssistantQuestCardPayload.Actions.RESUME_QUEST + ":") ->
+                questIntervention(
+                    cardId,
+                    AssistantQuestCardPayload.Actions.RESUME_QUEST,
+                    actionId.removePrefix(AssistantQuestCardPayload.Actions.RESUME_QUEST + ":"),
+                )
+            else -> false
+        }
+        if (questHandled) {
+            broadcastDecision(cardId, actionId, groupId, agentId, decidedBy)
+            return
+        }
+
         // **判定帧先于宿主处理**：`broadcastDecision` 发的是「已由 <设备> 处理」那张
         // 同 cardId 的 rev+1 帧，而 `onHostCardAction` 往往会紧接着发一张**终态翻面卡**
         // （合并成功 / 受阻 / 滞留失效）。两者的 rev 由 [cardBroadcastMutex] 串行分配，
@@ -506,7 +581,28 @@ internal class RelayControllerAgentCardActions(
      * 宿主时被调用，而回环帧在运行时就被丢弃（`env.from == selfId` 不回环），
      * 所以「decidedBy == self」只可能是本人点的。
      */
-    private fun mayDriveCard(groupId: String, agentId: String, decidedBy: String): Boolean {
+    /**
+     * 给 intent 发起方回一帧显式拒绝（Phase 3）：`agent-invoke-result(denied)`，
+     * 理由带动作与当前 rev。本机点击（from/invokeId 为 null）没有回执对象，跳过 ——
+     * 本机按钮的乐观置灰由既有横幅路径兜底。
+     */
+    private fun rejectIntent(from: String?, invokeId: String?, cardId: String, actionId: String, reason: String) {
+        if (from == null || invokeId == null) return
+        host.scope.launch {
+            runCatching {
+                host.runtime?.sendAgentInvokeResult(
+                    peerId = from,
+                    invokeId = invokeId,
+                    ok = false,
+                    status = CodecInvoke.InvokeResultStates.DENIED,
+                    summary = null,
+                    error = "action \"$actionId\" on card \"$cardId\" rejected: $reason",
+                )
+            }
+        }
+    }
+
+    private fun mayDriveCard(groupId: String, agentId: String, decidedBy: String, actionId: String? = null): Boolean {
         val st = host.state.value
         if (decidedBy == st.selfNodeId) return true
         val meta = st.settings.groups.firstOrNull { it.groupId == groupId }
@@ -528,6 +624,15 @@ internal class RelayControllerAgentCardActions(
         // 所以在**这一侧**兜 —— 认不出的 agentId 按本机托管给这个群的 agent 判资格
         // （卡本身是这个群工作区的产物，谁能驱动工作区 agent 谁就能操作它的卡）。
         // 认得出（真实席位）⇒ 行为一字不变。
+        // **群主覆决（Phase 3）**：覆决对象是宿主的**终态判定**（CONFLICT/FAILED/
+        // INTERRUPTED 支线的 override-quest），而非进行中的 CAS —— 群主可强制重试，
+        // 普通成员只能重新发起意向。覆决动作本身走同一台账（firstWin）落审计。
+        // 判据 = ownerId（缺省回落 creatorId），与 `RelayControllerGroupsComponent`
+        // 的 isOwner 同一表达式形状。
+        if (actionId == AssistantQuestCardPayload.Actions.OVERRIDE) {
+            return meta.ownerId == decidedBy ||
+                (meta.ownerId == null && meta.creatorId == decidedBy)
+        }
         val effectiveAgentId = if (meta.virtualAgents.orEmpty().any { it.agentId == agentId }) {
             agentId
         } else {
@@ -572,6 +677,26 @@ internal class RelayControllerAgentCardActions(
      * 判定结果的广播：**同 cardId、rev+1 的新帧**（原位刷新的存储语义，M1 定死：
      * 追加式新行，不重写旧行）。决定人显示名见 [decidedDisplayName]。
      */
+    /**
+     * 判定结果的广播：**同 cardId、rev+1 的新帧**（原位刷新的存储语义，M1 定死：
+     * 追加式新行，不重写旧行）。决定人显示名见 [decidedDisplayName]。
+     *
+     * ## 为什么读状态必须**同步**、只有发送进 launch（Phase 3 的回退教训）
+     *
+     * 判定帧必须**先于**宿主处理（`port.notifyHostCardAction`）发出 —— 终态翻面
+     * 卡（编排层回调）永远压在「已由…处理」之上。把状态读取 defer 进 launch，
+     * 回调的翻面就会抢跑：它先分配 rev（如 2），判定帧再读到新值分配 3，
+     * 最终用户停在 review_ready 的中间态 —— `BoardCardLocalPersistenceTest`
+     * 的「判定帧与终态翻面永不共享 rev」在稳定性门里当场红。
+     *
+     * rev 分配的跨动作串行**已经在** `broadcastBoardCard` 的 cardBroadcastMutex
+     * 里（maxOf(passed, existing+1, stored+1)），这里不再加第二把锁 —— 两把锁
+     * 的窗口顺序没人守得住。
+     *
+     * 审计轨迹（Phase 3）：(actor, action, timestamp) 原子附着进本次载荷的
+     * 专用不可变数组（上限 10 条，防长寿命卡无限膨胀），随 rev+1 整帧广播 ——
+     * 不是并发 read-modify-write 的散字段。
+     */
     private fun broadcastDecision(cardId: String, actionId: String, groupId: String, agentId: String, decidedBy: String) {
         val st = host.state.value
         // T-2d：最新载荷看 renderCard（cardPayload ?: card）—— 原位刷新后 row.card
@@ -580,11 +705,22 @@ internal class RelayControllerAgentCardActions(
         val currentRev = (latest["rev"] as? JsonPrimitive)?.contentOrNull?.toIntOrNull() ?: return
         val meta = st.settings.groups.firstOrNull { it.groupId == groupId }
         val displayName = decidedDisplayName(decidedBy, meta?.memberNicks, st.selfNodeId, st.settings.nick)
+        val at = com.kapp.tenon.core.nowMillis()
+        val existingTrail = (latest["auditTrail"] as? JsonArray) ?: JsonArray(emptyList())
+        val trail = JsonArray(
+            (existingTrail.toList() + buildJsonObject {
+                put("actor", JsonPrimitive(displayName))
+                put("action", JsonPrimitive(actionId))
+                put("at", JsonPrimitive(at))
+            }).takeLast(10),
+        )
         val next = JsonObject(
             latest.toMap() +
                 ("rev" to JsonPrimitive(currentRev + 1)) +
                 ("decidedBy" to JsonPrimitive(displayName)) +
-                ("decidedActionId" to JsonPrimitive(actionId)),
+                ("decidedActionId" to JsonPrimitive(actionId)) +
+                ("decidedAt" to JsonPrimitive(at)) +
+                ("auditTrail" to trail),
         )
         host.scope.launch { broadcastBoardCard(groupId, agentId, next) }
     }

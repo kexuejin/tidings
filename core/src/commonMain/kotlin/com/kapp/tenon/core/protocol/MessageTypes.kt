@@ -164,6 +164,48 @@ object MsgTypes {
     const val AGENT_CHANNEL_RESULT = "agent-channel-result"
 
     /**
+     * 支线日志流三帧（Phase 1「轻量流式日志信道」）：设备订阅宿主上正在运行的 quest
+     * 的 stdout/stderr 合批日志。**只在加密长连接上跑**（`LinkDownlink.send`，连不上
+     * 即失败），严禁 UDP datagram 与 17879 明文回退 —— 合批块可达 [Limits.STREAM_CHUNK_BODY]
+     * （32 KiB），UDP 的 1200B 单包装不下，明文路径则没有「两端必须同版本」的握手前提。
+     *
+     * **不占用 caps 广播位**（caps 已 16 项满额，fch1/scr1 曾把广播撑到 18 项整份拒收）：
+     * 与 `recovery-req` 同一先例 —— 老节点对未知类型解码通过、known=false、静默忽略，
+     * 发送侧以「sub 的 ACK 窗口」作探测（`NodeRuntime.sendStreamSub` 的返回值），
+     * ACK 不到 = 对端旧版或链路不通，UI 如实显示「日志流不可用」，**绝不入离线队列**
+     * （过期的订阅重放是垃圾流量，还会挤占 200 条/对端的队列额度）。
+     */
+    const val STREAM_SUB = "stream-sub"
+
+    /**
+     * `stream-chunk`：一帧一段合批日志（`questId` + 批序号 `seq`（从 1 起单调）+
+     * `text`）。seq 兼作去重与续传游标：订阅端按 `seq` 丢弃迟到重复，重订阅时带
+     * `sinceSeq` 从宿主环形缓冲补齐缺口。丢失容忍是**设计语义**（与
+     * `AgentEventKinds.EPHEMERAL` 同一条纪律：实时 stdout 是增量不是事实，终局走通知帧）。
+     */
+    const val STREAM_CHUNK = "stream-chunk"
+
+    /** `stream-cancel`：仅摘除**该订阅者**这一路；最后一个订阅者退订时宿主才停泵。 */
+    const val STREAM_CANCEL = "stream-cancel"
+
+    /**
+     * 多端状态增量对账（Phase 2）：设备向 quest 宿主报**本地已知档位**
+     * `[questId, rev]`，宿主仅下发更新的快照（按 `rev` 升序分页，响应超
+     * [Limits.QUEST_SYNC_RESP_BUDGET] 留下一页）。解决多台设备长时间离线
+     * 交替使用后卡片 rev 落后的脑裂 —— 对账走 `updateCardContent` 的 rev 乐观锁
+     * 原位推进，不拉聊天历史、FTS 不动。
+     *
+     * **无 cap**（与 stream 三帧同一裁决：广播位满额 + 探测窗降级如实）。
+     * **可靠但不入队**（`sendReliableNoQueue`，与 `recovery-req` / `group{op:"need"}`
+     * 同族）：过期的对账请求被 TTL 重放出去毫无意义，ACK 不到 = 对端旧版或
+     * 离线，等下一次亮屏对账。
+     */
+    const val QUEST_SYNC_REQ = "quest-sync-req"
+
+    /** `quest-sync-req` 的应答帧：仅含更新档位的快照页（`hasMore` + `cursorRev` 续拉）。 */
+    const val QUEST_SYNC_RESP = "quest-sync-resp"
+
+    /**
      * `agc1` = 跨宿主 Channel 委派（M7-T2）。声明它 = 认识 `agent-channel` /
      * `agent-channel-result` 两帧。宿主声明 = 编排器承接（互斥台账 + 插件执行）；
      * 手机也声明（D-017）：声明的语义是「解得动这族帧」，不是「我执行」——手机被

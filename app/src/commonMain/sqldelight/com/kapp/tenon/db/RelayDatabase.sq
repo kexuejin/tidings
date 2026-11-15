@@ -152,6 +152,22 @@ UPDATE MessageEntity
 SET quest_id = :questId, quest_rev = :rev, card_payload = :cardPayload, agent_state = :status
 WHERE client_token = :clientToken AND (quest_rev IS NULL OR quest_rev < :rev);
 
+-- 按 questId 取 quest 卡片行（quest 日志流的宿主归属解析用，Phase 1）：
+-- 一张卡一行，rev 最高的是现役形态。走 index_message_quest_id 索引。
+selectQuestCardByQuestId:
+SELECT * FROM MessageEntity
+WHERE quest_id = :questId
+ORDER BY quest_rev DESC
+LIMIT 1;
+
+-- 本机全部 quest 档位（对账请求清册，Phase 2）：不 GROUP BY —— 裸列 sender_id 在
+-- GROUP BY 下的取值依赖 SQLite 的 max() 特殊处理（旧版 Android 不保证），改为
+-- 按 rev 降序全取、调用方按 questId 去重取第一行（可移植且同样走 quest_id 索引）。
+selectQuestRows:
+SELECT quest_id, quest_rev, sender_id FROM MessageEntity
+WHERE quest_id IS NOT NULL
+ORDER BY quest_rev DESC;
+
 selectMessagesByConv:
 SELECT * FROM MessageEntity
 WHERE conv_id = :convId
@@ -863,12 +879,15 @@ CREATE TABLE IF NOT EXISTS QuestLedger (
     -- 重新 dispatch，不需要回溯 AutomationTask（任务可能已删）。
     prompt TEXT NOT NULL DEFAULT '',
     agent_key TEXT NOT NULL DEFAULT '',
+    -- wire 派单的回执键 + 原合流策略（重跑不再翻转成宿主默认）。
+    client_token TEXT DEFAULT NULL,
+    auto_merge INTEGER NOT NULL DEFAULT 1,
     updated_at INTEGER NOT NULL
 );
 
 insertOrReplaceQuestLedger:
-INSERT OR REPLACE INTO QuestLedger(quest_id, branch, worktree_path, main_workspace, conv_id, title, status, prompt, agent_key, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+INSERT OR REPLACE INTO QuestLedger(quest_id, branch, worktree_path, main_workspace, conv_id, title, status, prompt, agent_key, client_token, auto_merge, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 updateQuestLedgerStatus:
 UPDATE QuestLedger SET status = ?, updated_at = ? WHERE quest_id = ?;

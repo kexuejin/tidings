@@ -21,6 +21,12 @@ import java.io.File
 class QuestAutomationExecutor(
     private val mergeLock: QuestSerialMergeLock,
     private val onNotice: suspend (notice: AssistantQuestNotice) -> Unit = {},
+    /**
+     * 派单端的便签回执键：随本执行器发出的每一条通知带回。wire 派单的通知投递
+     * 靠它定位派单端（onNotice 的 receipt lookup），不带 = 通知只翻本机卡，
+     * 派单端的便签永远停在 RUNNING（真机实测的缺陷）。
+     */
+    private val clientToken: String? = null,
 ) {
     sealed interface AutomationOutcome {
         data class Merged(val commitSha: String) : AutomationOutcome
@@ -49,6 +55,7 @@ class QuestAutomationExecutor(
                 questionText = "Approve merging changes into main branch?",
                 // 结构化提问种类：卡片据此出 merge-patch 审批按钮（不从自然语言嗅探）。
                 questionKind = AssistantQuestNotice.QUESTION_MERGE_APPROVAL,
+                clientToken = clientToken,
                 rev = 1L,
             )
             onNotice(notice)
@@ -69,6 +76,7 @@ class QuestAutomationExecutor(
                     status = QuestStatus.COMPLETED,
                     title = title,
                     summary = summary.ifBlank { "Fast-forward merged commit ${mergeRes.mergedCommit.take(8)} into main." },
+                    clientToken = clientToken,
                     rev = 2L,
                 )
                 onNotice(notice)
@@ -81,6 +89,7 @@ class QuestAutomationExecutor(
                     status = QuestStatus.PAUSED,
                     title = title,
                     summary = "Auto-merge blocked: uncommitted local changes exist in main workspace.",
+                    clientToken = clientToken,
                     rev = 2L,
                 )
                 onNotice(notice)
@@ -93,6 +102,7 @@ class QuestAutomationExecutor(
                     status = QuestStatus.CONFLICT,
                     title = title,
                     summary = "Auto-merge failed due to conflict: " + mergeRes.reason,
+                    clientToken = clientToken,
                     rev = 2L,
                 )
                 onNotice(notice)
@@ -105,6 +115,7 @@ class QuestAutomationExecutor(
                     status = QuestStatus.FAILED,
                     title = title,
                     summary = "Pre-merge checks failed: " + mergeRes.reason,
+                    clientToken = clientToken,
                     rev = 2L,
                 )
                 onNotice(notice)

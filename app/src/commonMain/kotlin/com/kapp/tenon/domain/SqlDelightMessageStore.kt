@@ -144,6 +144,38 @@ class SqlDelightMessageStore(
         return changed
     }
 
+    /** quest 卡片行读侧（走 index_message_quest_id 索引；rev 最高的现役行）。 */
+    override fun questCardRow(questId: String): QuestCardRow? =
+        queries.selectQuestCardByQuestId(questId).executeAsOneOrNull()?.let { row ->
+            QuestCardRow(
+                convId = row.conv_id,
+                senderId = row.sender_id,
+                questRev = row.quest_rev ?: 0L,
+                agentState = row.agent_state,
+                // schema 注释的既定契约：card_payload NULL（老消息 / 未刷新）时消费方
+                // 回退读 card_json。宿主侧的 quest 卡正是这个形态——派单侧建卡走通用
+                // 持久化（card_json），quest 专属列只有翻面路径才写。不回退 = 对账
+                // 响应把宿主自己的卡全部判成「没有快照」，派单端永远收不到终态
+                // （真机实测：candidates=0 → page 空 → 手机卡停在进行中）。
+                cardPayload = row.card_payload ?: row.card_json,
+            )
+        }
+
+    /** 本机全部 quest 档位（rev 降序全取，调用方按 questId 去重 —— 见 SQL 侧注释）。 */
+    override fun questRows(): List<QuestRowLite> {
+        val best = LinkedHashMap<String, QuestRowLite>()
+        for (row in queries.selectQuestRows().executeAsList()) {
+            val questId = row.quest_id ?: continue
+            if (best.containsKey(questId)) continue
+            best[questId] = QuestRowLite(
+                questId = questId,
+                rev = row.quest_rev ?: 0L,
+                senderId = row.sender_id,
+            )
+        }
+        return best.values.toList()
+    }
+
     /**
      * 按库里的真实状态重算一个会话的摘要。
      *

@@ -60,6 +60,14 @@ class RelayApplication : Application() {
             // L0：身份包写公共 Downloads（KDF(ANDROID_ID) 混淆）。读取失败（A6 属主断裂）
             // 的兜底是设置页的 L1 导入；收养决策在控制器（settings 不存在才收养，Q10）。
             platformRecovery = AndroidMediaRecoveryStore(this),
-        )
+        ).also { controller ->
+            // Phase 4（Diff 审查）：补丁落在本机应用私有目录（传输管理器写盘），
+            // java.io.File 直读 —— 读不了（未接收/路径失效）如实给 null。
+            controller.questPatchReader = { path -> runCatching { java.io.File(path).readText() }.getOrNull() }
+            // 诊断面接线（桌面壳同款）：不接 = 手机侧所有 diagnosticLogSink 读数
+            // （对账拉取、通知投递、帧拒收）整个消失 —— 排障时连「发生了什么」
+            // 都看不见。落 logcat，`adb logcat -s RELAY-QUEST` 即可取。
+            controller.diagnosticLogSink = { tag, message -> android.util.Log.i(tag, message) }
+        }
     }
 }

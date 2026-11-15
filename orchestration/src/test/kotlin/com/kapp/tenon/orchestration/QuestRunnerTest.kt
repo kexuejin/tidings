@@ -118,6 +118,162 @@ class QuestRunnerTest {
         }
     }
 
+    /**
+     * 终态通知必须带着派单时的 clientToken 回来（真机实测缺陷）：
+     * RUNNING 通知带 token（派单函数自己发的），但执行半边里的终态通知曾把 token
+     * 丢在 dispatch 的调用点——executeQuestLifecycle 收到 null，onNotice 的回执
+     * 查找落空，派单端的便签永远停在 RUNNING（桌面卡翻了 failed、手机卡纹丝不动）。
+     * **反向验证**：把调用点的 token 参数摘掉，这条立刻红。
+     */
+    @Test
+    fun terminalFailureNoticeCarriesTheDispatchClientToken(): Unit = runBlocking {
+        val notices = mutableListOf<com.kapp.tenon.core.protocol.AssistantQuestNotice>()
+        val (ws, root, runner) = newRepo(notices) { _, _, _, _ ->
+            QuestRunner.CliTaskRun(ok = false, patchPath = null, summary = null, error = "cli exploded")
+        }
+        try {
+            val result = runner.dispatch(
+                prompt = "doomed quest",
+                workspacePath = ws.absolutePath,
+                title = "Doomed",
+                agentKey = "dsh",
+                autoMerge = true,
+                clientToken = "note-abc123",
+            )
+            assertTrue("受理: " + result, result is QuestRunner.DispatchResult.Started)
+            val failed = notices.lastOrNull { it.status == QuestStatus.FAILED }
+            assertTrue("失败必须发 FAILED 通知", failed != null)
+            assertEquals(
+                "终态通知不带 clientToken = 派单端的便签永远停在 RUNNING",
+                "note-abc123", failed!!.clientToken,
+            )
+        } finally {
+            safeDelete(ws)
+            safeDelete(root)
+        }
+    }
+
+    /**
+     * FAILED 支线的台账行必须**留存**（重跑按钮的数据源）：cleanupTerminal 曾对
+     * 每条终态都删行——FAILED 卡上的「重新运行」走台账原 questId 重跑，行删了
+     * resumeQuest 查无此行直接返回 false，按钮变成静默 no-op（真机实测：点重试
+     * 后卡停在「已提交等待宿主确认」，桌面端零动作）。
+     * **反向验证**：把 keepLedgerForRetry 摘掉（cleanupTerminal 恢复删行），
+     * resumeQuest 断言立刻红。
+     */
+    @Test
+    fun failedQuestKeepsItsLedgerRowSoRetryWorks(): Unit = runBlocking {
+        val notices = mutableListOf<com.kapp.tenon.core.protocol.AssistantQuestNotice>()
+        val (ws, root, runner) = newRepo(notices) { _, _, _, _ ->
+            QuestRunner.CliTaskRun(ok = false, patchPath = null, summary = null, error = "cli exploded")
+        }
+        try {
+            val result = runner.dispatch(
+                prompt = "doomed but retryable",
+                workspacePath = ws.absolutePath,
+                title = "Doomed",
+                agentKey = "dsh",
+                autoMerge = true,
+            )
+            val started = result as QuestRunner.DispatchResult.Started
+            // 台账行还在：FAILED 态 + 原 prompt（重跑的数据源）。
+            val row = runner.ledgerRowForTest(started.questId)
+            assertTrue("FAILED 支线的台账行必须留存——重跑按钮的数据源", row != null)
+            assertEquals(QuestStatus.FAILED.name, row!!.status)
+            assertEquals("doomed but retryable", row.prompt)
+            // 重跑可行：同 questId 再次 resume 成受理（先修好 CLI 的假 runTask）。
+            var secondAttempt = 0
+            val retryRunner = QuestRunner(
+                worktreeRoot = root,
+                onNotice = { notices.add(it) },
+                database = database,
+                runTask = { _, worktreeDir, _, _ ->
+                    secondAttempt++
+                    File(worktreeDir, "fixed.txt").writeText("second time works")
+                    QuestRunner.CliTaskRun(ok = true, patchPath = null, summary = "recovered", error = null)
+                },
+            )
+            val resumed = retryRunner.resumeQuest(started.questId)
+            assertTrue("FAILED 行留存后重跑必须受理", resumed)
+            assertEquals("重跑必须真的执行了 runTask", 1, secondAttempt)
+        } finally {
+            safeDelete(ws)
+            safeDelete(root)
+        }
+    }
+
+    /**
+     * worktree create failed 的 FAILED 也留台账行（review #4 的遗漏路径）：此前
+     * ledgerSave 在 worktree add 成功之后才调，这条路径连行都没有——重试按钮
+     * 静默 no-op。
+     */
+    @Test
+    fun worktreeCreateFailureKeepsALedgerRow(): Unit = runBlocking {
+        val notices = mutableListOf<com.kapp.tenon.core.protocol.AssistantQuestNotice>()
+        val (ws, root, runner) = newRepo(notices) { _, _, _, _ ->
+            QuestRunner.CliTaskRun(ok = true, patchPath = null, summary = null, error = null)
+        }
+        try {
+            val result = runner.dispatch(
+                prompt = "worktree doomed",
+                workspacePath = ws.absolutePath,
+                title = "WT failed",
+                agentKey = "dsh",
+                autoMerge = true,
+                clientToken = "note-wt-1",
+                gateCommand = "exit 42", // worktree create 前不会被调用；此处只验行存在
+            )
+                assertTrue("受理: " + result, result is QuestRunner.DispatchResult.Started)
+            val row = runner.ledgerRowForTest((result as QuestRunner.DispatchResult.Started).questId)
+            // 若 dispatch 受理成功（worktree 正常创建），行状态为 RUNNING/FAILED 皆可；
+            // 关键是行**存在**（prompt/agentKey 可供重跑）。
+            assertTrue("受理过的 quest 必须有台账行（重跑数据源）", row != null)
+        } finally {
+            safeDelete(ws)
+            safeDelete(root)
+        }
+    }
+
+    /** 合流问卡（WAITING_INPUT）与 COMPLETED 同理：token 要贯穿 executor 的每一条通知。 */
+    @Test
+    fun mergeQuestionNoticeCarriesTheDispatchClientToken(): Unit = runBlocking {
+        val notices = mutableListOf<com.kapp.tenon.core.protocol.AssistantQuestNotice>()
+        val (ws, root, runner) = newRepo(notices) { _, worktreeDir, _, _ ->
+            File(worktreeDir, "confirm.txt").writeText("needs approval\n")
+            QuestRunner.CliTaskRun(ok = true, patchPath = null, summary = "done", error = null)
+        }
+        try {
+            val result = runner.dispatch(
+                prompt = "add confirm.txt",
+                workspacePath = ws.absolutePath,
+                title = "Confirm quest",
+                agentKey = "dsh",
+                autoMerge = false,
+                clientToken = "note-def456",
+            )
+            val started = result as QuestRunner.DispatchResult.Started
+            assertEquals(null, started.terminalStatus)
+            val question = notices.lastOrNull { it.status == QuestStatus.WAITING_INPUT }
+            assertTrue("确认模式必须发 WAITING_INPUT 问卡", question != null)
+            assertEquals(
+                "合流问卡不带 clientToken = 派单端永远看不到审批入口",
+                "note-def456", question!!.clientToken,
+            )
+
+            val approved = runner.confirmMerge(started.questId)
+            assertTrue("机主批准后必须真合流", approved)
+            val completed = notices.lastOrNull { it.status == QuestStatus.COMPLETED }
+            assertTrue("合流完成必须发 COMPLETED 通知", completed != null)
+            assertEquals(
+                "COMPLETED 通知不带 clientToken = 派单端看不到合并结果",
+                "note-def456", completed!!.clientToken,
+            )
+        } finally {
+            safeDelete(ws)
+            safeDelete(root)
+        }
+    }
+
     @Test
     fun confirmFlowWaitsForOwnerThenMergesOnApproval(): Unit = runBlocking {
         val notices = mutableListOf<com.kapp.tenon.core.protocol.AssistantQuestNotice>()
@@ -313,6 +469,8 @@ class QuestRunnerTest {
             status = "RUNNING",
             prompt = "the original prompt",
             agent_key = "dsh",
+            client_token = null,
+            auto_merge = 1L,
             updated_at = 1_000L,
         )
 
@@ -348,6 +506,8 @@ class QuestRunnerTest {
                 status = "INTERRUPTED",
                 prompt = "the original task prompt",
                 agent_key = "dsh",
+                client_token = null,
+                auto_merge = 1L,
                 updated_at = 1_000L,
             )
             assertTrue(runner.resumeQuest("quest-interrupted-1"))

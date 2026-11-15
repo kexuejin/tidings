@@ -669,6 +669,19 @@ class LinkClient(
 
     fun connectedPeers(): Set<String> = lock.withLock { links.keys.toSet() }
 
+    /**
+     * 拨号侧的**逐帧写出**（支线日志流的上行出口，Phase 1）：把信封写进本端持有的
+     * 长连接，**不等 ACK** —— 连接活着即视为送达（重传是离线队列的事，日志流不入队）。
+     * `false` = 这条连接不在表里或写失败（链路已死），调用方如实落「不可用」。
+     *
+     * 与 [LinkServer.send]（宿主下行，等 msg-ack 作探测窗）成对：同一个运行时两个
+     * 角色都在 —— 接听侧的下行走前者，拨号侧的上行走这里。
+     */
+    suspend fun sendEnvelope(peerId: String, envelope: Envelope): Boolean {
+        val connection = lock.withLock { links[peerId] } ?: return false
+        return runCatching { connection.send(msgFrameBytes(envelope)) }.isSuccess
+    }
+
     init {
         // 与主机侧同一条不变量：对端地址变成公网之后，本端也不许再挂着一条明文连接（task-32）。
         registry.addListener { event ->

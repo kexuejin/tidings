@@ -29,6 +29,11 @@ import com.kapp.tenon.core.protocol.CodecProfile.validatePresence
 import com.kapp.tenon.core.protocol.CodecProfile.validateProfilePayload
 import com.kapp.tenon.core.protocol.CodecScanRanges.validateScanRanges
 import com.kapp.tenon.core.protocol.CodecShare.validateShare
+import com.kapp.tenon.core.protocol.CodecStream.validateStreamCancel
+import com.kapp.tenon.core.protocol.CodecStream.validateStreamChunk
+import com.kapp.tenon.core.protocol.CodecStream.validateStreamSub
+import com.kapp.tenon.core.protocol.CodecQuestSync.validateQuestSyncReq
+import com.kapp.tenon.core.protocol.CodecQuestSync.validateQuestSyncResp
 
 /**
  * 线格式原语：JSON 配置、字段 guard、信封编解码。
@@ -177,6 +182,11 @@ object CodecWire {
             MsgTypes.AGENT_INVOKE_RESULT -> CodecInvoke.validateInvokeResult(o)
             MsgTypes.AGENT_CHANNEL -> CodecChannel.validateChannel(o)
             MsgTypes.AGENT_CHANNEL_RESULT -> CodecChannel.validateChannelResult(o)
+            MsgTypes.STREAM_SUB -> CodecStream.validateStreamSub(o)
+            MsgTypes.STREAM_CHUNK -> CodecStream.validateStreamChunk(o)
+            MsgTypes.STREAM_CANCEL -> CodecStream.validateStreamCancel(o)
+            MsgTypes.QUEST_SYNC_REQ -> CodecQuestSync.validateQuestSyncReq(o)
+            MsgTypes.QUEST_SYNC_RESP -> CodecQuestSync.validateQuestSyncResp(o)
             MsgTypes.RECOVERY_REQ -> CodecRecovery.validateRecoveryReq(o)
             MsgTypes.RECOVERY_DATA -> CodecRecovery.validateRecoveryData(o)
             MsgTypes.GROUP -> validateGroup(o)

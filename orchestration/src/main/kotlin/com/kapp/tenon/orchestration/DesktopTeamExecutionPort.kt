@@ -22,10 +22,19 @@ class DesktopTeamExecutionPort(
     private val availableDrivers: () -> Set<String>?,
     /** 群 → 项目目录 dirId（D16 主键的一半）；与 HostDirectoryStore 同一实例。 */
     private val pointerDirId: (groupId: String) -> String?,
+    /** agy 登录态探针（DesktopExtension 的同一实例，结果记忆在探针侧）；null = 不接。 */
+    private val agyLoginStateProbe: (suspend () -> Boolean?)? = null,
 ) : TeamExecutionPort {
 
     override fun driverCatalog(): Set<String> =
         (availableDrivers() ?: emptySet()).toSet()
+
+    override suspend fun agyLoginState(): Boolean? {
+        // 本机没有 agy（不在在位驱动目录）→ null：对话框整行不画，
+        // 不给一台没装 agy 的机器画「未登录」（那是在报告不存在的东西）。
+        if (com.kapp.tenon.agent.drivers.DriverKeys.cliDriverId("agy") !in driverCatalog()) return null
+        return agyLoginStateProbe?.invoke()
+    }
 
     override fun profileOf(
         dirId: String,

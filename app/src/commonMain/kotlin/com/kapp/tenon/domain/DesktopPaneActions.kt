@@ -585,5 +585,27 @@ public interface DesktopPaneActions {
     fun retryQuest(questId: String): Unit = Unit
     fun resumePausedQuest(questId: String, text: String): Unit = Unit
     fun applyQuestPatch(questId: String): Unit = Unit
+
+    // ---------------------------------------------------------------- 支线日志流（Phase 1）
+    /**
+     * 支线日志流的订阅意图：作战室开 = true，关弹窗/切后台 = false。
+     * 默认 no-op —— 未接线的壳（测试宿主）不产生订阅，面板画空态。
+     */
+    fun setQuestStreamDesired(questId: String, wanted: Boolean): Unit = Unit
+
+    /** quest 日志流在界面上的状态；默认 IDLE（未接线）。 */
+    fun questStreamStateOf(questId: String): QuestStreamState = QuestStreamState.IDLE
+
+    /** quest 日志流的正文快照（本机任务读宿主缓冲、远端读订阅缓冲）；默认空。 */
+    fun questStreamLines(questId: String): List<String> = emptyList()
+
+    /** UNAVAILABLE 的原因细分；默认 null（未接线）。 */
+    fun questStreamUnavailableReasonOf(questId: String): QuestStreamUnavailableReason? = null
+
+    /**
+     * quest 补丁整包文本（Phase 4 Diff 审查的数据源）：默认 null —— 未接壳
+     * （平台文件 IO 在壳层），界面画「先接收补丁文件」空态而不是假装能审。
+     */
+    fun questPatchText(): String? = null
 }
 

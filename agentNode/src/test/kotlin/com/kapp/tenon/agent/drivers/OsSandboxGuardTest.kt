@@ -25,15 +25,28 @@ class OsSandboxGuardTest {
     }
 
     @Test
-    fun seatbeltProfileDeniesNetworkButKeepsEverythingElse() {
-        val profile = OsSandboxGuard.seatbeltProfile(emptyList())
-        assertTrue(profile.contains("(allow default)"), "最小侵入：其余操作放行（任务要写 worktree、读工具链）")
-        assertTrue(profile.contains("(deny network*)"), "唯一被收紧的是网络")
-        assertTrue(!profile.contains("remote ip"), "无白名单时不该有空放行项")
+    fun seatbeltProfileThreeTiersShapeCorrectly() {
+        // AIR_GAPPED：纯 deny（恢复 main 原状——loopback 三行曾让被提示注入的
+        // 沙箱任务可达免鉴权控制面，安全回归已收窄）。
+        val airGapped = OsSandboxGuard.seatbeltProfile(OsSandboxGuard.NetworkPolicy.AIR_GAPPED)
+        assertTrue(airGapped.contains("(deny network*)"), "air-gapped 必须断网")
+        assertTrue(!airGapped.contains("localhost"), "air-gapped 不得放行任何 loopback（控制面在回环上）")
+        assertTrue(airGapped.contains("(allow system-socket)"), "系统 socket 保留（CLI 基础设施）")
 
-        val withAllow = OsSandboxGuard.seatbeltProfile(listOf("203.0.113.7", "198.51.100.0/24"))
-        assertTrue(withAllow.contains("(allow network-outbound (remote ip \"203.0.113.7\"))"))
-        assertTrue(withAllow.contains("(allow network-outbound (remote ip \"198.51.100.0/24\"))"))
+        // LOOPBACK：宿主回环子服务（claude 的 Tenon MCP 脚本连 127.0.0.1:8788）。
+        val loopback = OsSandboxGuard.seatbeltProfile(OsSandboxGuard.NetworkPolicy.LOOPBACK)
+        assertTrue(loopback.contains("(deny network*)"))
+        assertTrue(loopback.contains("(allow network-outbound (remote ip \"localhost:*\"))"))
+        assertTrue(loopback.contains("(allow network-inbound (local ip \"localhost:*\"))"))
+        // 语法实测裁决（2026-11-15）：本机 seatbelt 无法按 IP/端口过滤出网
+        // （带端口的地址过滤器只认 * 与 localhost；裸 IP 报 "port missing"）——
+        // 逐 IP 白名单在本机不可表达。
+        assertTrue(!loopback.contains("(allow network*)"), "loopback 档不得全开")
+
+        // OPEN：云后端 CLI（agy/claude/codex/dsh 的模型 API 必须出网）。
+        val open = OsSandboxGuard.seatbeltProfile(OsSandboxGuard.NetworkPolicy.OPEN)
+        assertTrue(open.contains("(allow network*)"))
+        assertTrue(!open.contains("(deny network*)"), "OPEN 形态不得再写 deny")
     }
 
     @Test

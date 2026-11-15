@@ -31,6 +31,28 @@ data class ConversationSummaryRow(
 )
 
 /**
+ * quest 卡片行的只读投影（[MessageStore.questCardRow]）。
+ *
+ * 宿主归属解析的唯一事实是 [senderId]（`agent:<hostNodeId>:<agentId>` 完整形态）；
+ * [questRev]/[agentState] 给调用方判断卡片现役形态，[convId] 是卡片所在的会话键。
+ */
+data class QuestCardRow(
+    val convId: String,
+    val senderId: String?,
+    val questRev: Long,
+    val agentState: String?,
+    /** 现役卡片载荷的 JSON 文本（对账响应的快照体）；null = 还没有载荷。 */
+    val cardPayload: String?,
+)
+
+/** 本机全部 quest 档位的只读投影（对账请求的清册来源，Phase 2）。 */
+data class QuestRowLite(
+    val questId: String,
+    val rev: Long,
+    val senderId: String?,
+)
+
+/**
  * 聊天记录的落盘契约。
  *
  * 为什么需要它：控制器里的消息流是纯内存 `mutableMapOf`，所以聊天页顶部那条
@@ -151,6 +173,20 @@ interface MessageStore {
         status: String,
         rev: Long
     ): Boolean = false
+
+    /**
+     * 按 questId 读 quest 卡片行（quest 日志流的**宿主归属解析**用，Phase 1）：
+     * 行的 `senderId` 是 `agent:<hostNodeId>:<agentId>` 完整形态，解析出 hostNodeId
+     * 就是这单 quest 跑在哪台机器上的唯一事实（`AgentSenderId.parse`）。
+     * 返回 rev 最高的现役行；null = 本机没有这张卡。默认 null 同内存存储。
+     */
+    fun questCardRow(questId: String): QuestCardRow? = null
+
+    /**
+     * 本机全部 quest 档位（每 quest 取 rev 最高的现役行；调用方不必再归并）。
+     * 对账请求清册的来源（Phase 2）；默认空实现同内存外实现缺席的场景。
+     */
+    fun questRows(): List<QuestRowLite> = emptyList()
 
     /**
      * 清空全部历史。
@@ -287,6 +323,35 @@ data class MessageSearchResult(
  */
 class InMemoryMessageStore : MessageStore {
     private var current: Map<String, List<MessageUi>> = emptyMap()
+
+    override fun questCardRow(questId: String): QuestCardRow? {
+        var best: MessageUi? = null
+        for (list in current.values) for (msg in list) {
+            if (msg.questId != questId) continue
+            if (best == null || (msg.questRev ?: 0L) > (best?.questRev ?: 0L)) best = msg
+        }
+        return best?.let {
+            QuestCardRow(
+                convId = it.peerId,
+                senderId = it.senderId,
+                questRev = it.questRev ?: 0L,
+                agentState = it.agentState,
+                cardPayload = it.cardPayload?.toString(),
+            )
+        }
+    }
+
+    override fun questRows(): List<QuestRowLite> {
+        val best = LinkedHashMap<String, MessageUi>()
+        for (list in current.values) for (msg in list) {
+            val questId = msg.questId ?: continue
+            val held = best[questId]
+            if (held == null || (msg.questRev ?: 0L) > (held.questRev ?: 0L)) best[questId] = msg
+        }
+        return best.map { (questId, msg) ->
+            QuestRowLite(questId = questId, rev = msg.questRev ?: 0L, senderId = msg.senderId)
+        }
+    }
 
     override fun load(): Map<String, List<MessageUi>> = current.mapValues { (_, list) -> list.toList() }
 

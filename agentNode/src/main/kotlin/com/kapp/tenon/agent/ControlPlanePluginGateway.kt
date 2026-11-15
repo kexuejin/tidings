@@ -542,6 +542,13 @@ suspend fun ControlPlane.executeCliTask(
      * 这里不做「静默跑默认」的兜底 —— 那会让「选了模型」变成一句空话。
      */
     model: String? = null,
+    /**
+     * 支线日志泵（Phase 1）的原始行出口：CLI 子进程的每一行 stdout/stderr（stderr
+     * 已并入）都在这里，**事件映射之前** —— `CliLineEventMapper` 认不出的行也在内，
+     * 日志流要的是全量。仅 CLI 沙箱驱动支持（插件驱动没有子进程 stdout，传了也
+     * 收不到）；null = 与既有调用逐字一致。
+     */
+    onLogLine: (suspend (line: String) -> Unit)? = null,
     onEvent: (eventType: String, cursor: Long, summary: String?, body: String?) -> Unit,
 ): Triple<String?, String, String?> {
     // `withModel` 必须紧跟解析：换模型是换驱动实例（[AgentDriver] 无状态契约），
@@ -589,8 +596,7 @@ suspend fun ControlPlane.executeCliTask(
     if (readOnly != null) readOnlyToolPolicies[sessionId] = readOnly
     val cursor = pluginEventCursors.computeIfAbsent(sessionId) { java.util.concurrent.atomic.AtomicLong(0) }
     var endedInError = false
-    try {
-        driver.executeTask(sessionId, clipped) { event ->
+    val onDriverEvent: suspend (com.kapp.tenon.agent.drivers.DriverEvent) -> Unit = { event ->
             val (eventType, summary, body) = when (event) {
                 is com.kapp.tenon.agent.drivers.DriverEvent.ThoughtDelta -> {
                     liveAgentEvents.tryEmit(LiveAgentEvent(runtime.nodeId, sessionId, "thought.delta", event.delta, System.currentTimeMillis()))
@@ -624,6 +630,15 @@ suspend fun ControlPlane.executeCliTask(
             )
             onEvent(eventType, c, summary, body)
             if (event is com.kapp.tenon.agent.drivers.DriverEvent.Error) endedInError = true
+    }
+    try {
+        // 支线日志泵（Phase 1）：只有 CLI 沙箱驱动有子进程 stdout 可泵；插件驱动
+        // 没有行可透传（接口不为它开第二份出口），按原路径走。
+        val sandboxedCli = driver as? com.kapp.tenon.agent.drivers.SandboxedCliDriver
+        if (sandboxedCli != null && onLogLine != null) {
+            sandboxedCli.executeTask(sessionId, clipped, onDriverEvent, onRawLine = onLogLine)
+        } else {
+            driver.executeTask(sessionId, clipped, onDriverEvent)
         }
     } finally {
         // 只摘**自己那一条**（两参 remove）：同一 sessionId 若被并发派单两次，

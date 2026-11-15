@@ -2,6 +2,7 @@
 
 package com.kapp.tenon.ui.desktop
 
+import com.kapp.tenon.domain.QuestStreamState
 import com.kapp.tenon.domain.DesktopPaneActions
 import com.kapp.tenon.core.transport.LocalFile
 
@@ -167,6 +168,11 @@ public fun ChatPane(
                 cacheDir = null,
                 initialStagedFiles = initialStagedFiles,
                 messageFlow = selectedPeerId?.let { id -> remember(id) { controller.messageFlowOf(id) } },
+                // 支线日志流（Phase 1）：桌面作战室的本机任务走 LOCAL（读宿主缓冲）。
+                questStreamLines = activeQuestId?.let { controller.questStreamLines(it) } ?: emptyList(),
+                questStreamState = activeQuestId?.let { controller.questStreamStateOf(it) } ?: QuestStreamState.IDLE,
+                questStreamUnavailableReason = activeQuestId?.let { controller.questStreamUnavailableReasonOf(it) },
+                questPatchText = controller.questPatchText(),
             ),
             actions = ChatScreenActions(
                 onSend = controller::sendToConversation,
@@ -249,6 +255,8 @@ public fun ChatPane(
                 onCancelQuest = controller::cancelQuest,
                 onRetryQuest = controller::retryQuest,
                 onDispatchQuest = controller::dispatchAssistantQuest,
+                // 支线日志流的订阅意图（Phase 1）：对账在域层 hub 排程。
+                onQuestStreamDesired = controller::setQuestStreamDesired,
             ),
             groupActions = ChatScreenGroupActions(
                 onAddGroupMembers = controller::addGroupMembers,

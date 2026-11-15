@@ -574,7 +574,7 @@ fun cliDriverRegistrations(
                     // 旗标**只在此处安全**：所有写操作落在一次性 worktree（宿主仓
                     // 零接触），人的守门点 = 合并审查（merge-patch）。隔离边界是我们的
                     // worktree + 合流审批，不是 agy 的交互提示层。
-                    argSpec = { prompt ->
+                    argSpec = { prompt, _ ->
                         listOf(
                             "-p", prompt, "--output-format", "stream-json",
                             "--mode", "auto", "--dangerously-skip-permissions",
@@ -582,6 +582,11 @@ fun cliDriverRegistrations(
                     },
                     sandbox = sandbox,
                     envOverrides = providerEnv,
+                    useRealHome = true,
+                    // agy 必须连自家后端（CodeAssist API + 授权端点）。本机 seatbelt
+                    // 无法按 IP/端口过滤出网（实测裁决）——要么全开要么断网，
+                    // 开放网是它能在沙箱里跑的唯一形态。
+                    networkPolicy = OsSandboxGuard.NetworkPolicy.OPEN,
                 )
             } else {
                 CliSubprocessDriver(

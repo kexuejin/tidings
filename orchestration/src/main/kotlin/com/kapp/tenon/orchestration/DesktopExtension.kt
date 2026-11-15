@@ -85,6 +85,9 @@ import kotlinx.coroutines.launch
 class DesktopExtension(
     private val controller: RelayController,
     private val scope: CoroutineScope,
+    /** agy 登录态预检（登录一次后 print 模式静默复用；结果按会话记忆）。 */
+    private val agyAuthProbe: com.kapp.tenon.agent.drivers.AgyAuthProbe =
+        com.kapp.tenon.agent.drivers.AgyAuthProbe(),
     /** 0 = 由系统分配端口；实际端口读 [controlPlanePort]。 */
     private val httpPort: Int = 0,
     /** 空串 = 回环放行（见 [ControlPlane] 的 token 约定）。 */
@@ -537,6 +540,13 @@ class DesktopExtension(
                 store = teamExecution,
                 availableDrivers = { workerOrchestrator.availableAgentKeys() },
                 pointerDirId = { groupId -> hostDirectoryStore?.pointerOf(groupId) },
+                agyLoginStateProbe = {
+                    when (agyAuthProbe.probe()) {
+                        com.kapp.tenon.agent.drivers.AgyAuthProbe.State.AUTHENTICATED -> true
+                        com.kapp.tenon.agent.drivers.AgyAuthProbe.State.NOT_AUTHENTICATED -> false
+                        com.kapp.tenon.agent.drivers.AgyAuthProbe.State.UNKNOWN -> null
+                    }
+                },
             )
             controller.teamExecutionPort = execPort
             // 员工工位端口：名录上那格「用什么工具干活」。与执行档端口**同一实例** ——
@@ -620,23 +630,65 @@ class DesktopExtension(
                 // 助理会话卡片的原位翻面在那一层收口。
                 // 跨端回执映射：questId → 派单端 peer（wire 派发才有）。通知除了本机
                 // 翻面，还要回执给派单端（它的便签靠 clientToken 原地翻面）；终态即摘。
+                // 回执映射键 = **clientToken**（不是 questId）：questId 要等 dispatch
+                // 返回才知道，而首条 RUNNING 通知在 dispatch 内部就发出 —— 按 questId
+                // 登记必然让首条通知竞态落空（真机实测 wireTarget=NONE）。clientToken
+                // 在 dispatch 前就已知，通知全量携带它，零竞态。
                 val wireNoticeTargets = java.util.concurrent.ConcurrentHashMap<String, String>()
                 val questRunner = QuestRunner(
                     worktreeRoot = java.io.File(System.getProperty("java.io.tmpdir"), "tenon-quests"),
                     onNotice = { notice ->
                         controller.handleAssistantQuestNotice(notice)
-                        val target = wireNoticeTargets[notice.questId] ?: return@QuestRunner
+                        val token = notice.clientToken ?: return@QuestRunner
+                        val target = wireNoticeTargets[token]
+                        // 回执投递 trace（真机排障用）：token 命不中 target 时便签只会
+                        // 本机翻面、对端收不到 —— 这一条是唯一能事后看出"漏给了谁"的读数。
+                        // 必须走 RelayLog（诊断包才导得出来；裸 println 过不了守卫）。
+                        RelayLog.info(
+                            "RELAY-QUEST",
+                            "notice receipt lookup token=" + token + " target=" + (target?.take(8) ?: "NONE") +
+                                " map=" + wireNoticeTargets.keys,
+                        )
+                        if (target == null) return@QuestRunner
                         controller.sendQuestNoticeTo(target, notice)
                         if (notice.status == com.kapp.tenon.core.protocol.QuestStatus.COMPLETED ||
                             notice.status == com.kapp.tenon.core.protocol.QuestStatus.FAILED ||
                             notice.status == com.kapp.tenon.core.protocol.QuestStatus.CANCELLED
                         ) {
-                            wireNoticeTargets.remove(notice.questId)
+                            wireNoticeTargets.remove(token)
                         }
                     },
                     database = (store as? com.kapp.tenon.domain.SqlDelightSchedulerStore)?.database,
                     runTask = { questId, worktreeDir, prompt, agentKey ->
+                        // 登录态预检（真机实测缺陷）：agy print 模式的授权窗只有 60s，
+                        // 未登录时每条 quest 白烧 worktree + 一轮等待。models 子命令
+                        // 6s 即可判定；命中未登录 → 快败 + 登录指引，不进沙箱不弹浏览器。
+                        // 只拦「确定未登录」：探针超时/命令缺失一律放行（UNKNOWN）。
+                        if (com.kapp.tenon.agent.drivers.DriverKeys.matchesDriverId(
+                                agentKey,
+                                com.kapp.tenon.agent.drivers.DriverKeys.cliDriverId("agy"),
+                            ) &&
+                            agyAuthProbe.probe() == com.kapp.tenon.agent.drivers.AgyAuthProbe.State.NOT_AUTHENTICATED
+                        ) {
+                            RelayLog.info("RELAY-QUEST", "agy pre-flight: not logged in, failing fast quest=" + questId)
+                            return@QuestRunner QuestRunner.CliTaskRun(
+                                ok = false,
+                                patchPath = null,
+                                summary = null,
+                                error = com.kapp.tenon.agent.drivers.AgyAuthProbe.LOGIN_REMEDIATION,
+                            )
+                        }
                         var patchPath: String? = null
+                        // 失败原因可追溯（A1）：CLI 的 error 事件体（含 stderr 尾部）
+                        // 捕获下来随 CliTaskRun.error 回给 FAILED 通知的 summary ——
+                        // 否则 task.log 随清场丢失，失败原因不可追溯（真机验收实测）。
+                        // 归一逻辑在 [QuestCliErrorTail]（有单测：多事件覆盖与空内容不覆盖；
+                        var lastErrorBody: String? = null
+                        // 登录授权等待（真机验收现场）：quest 挂 60 秒只剩一句
+                        // Authentication required，机主不知道该干什么。日志流出现
+                        // auth 行就记下来；非 finished 结束时把 FAILED 摘要改写成
+                        // 「去宿主本机登录 → 重试」（重试是真实动作，见检测器的说明）。
+                        var authWaitSeen = false
                         val (_, status, error) = createdPlane.executeCliTask(
                             agentKey = agentKey,
                             prompt = prompt,
@@ -645,9 +697,40 @@ class DesktopExtension(
                             sessionTitle = "quest:" + questId,
                             convId = com.kapp.tenon.core.protocol.ConvId.ASSISTANT,
                             onArtifact = { path, name, _, _, _ -> if (name == "patch.diff") patchPath = path },
-                            onEvent = { _, _, _, _ -> },
+                            // 支线日志泵（Phase 1）：原始行进日志流枢纽 —— 宿主侧环形
+                            // 缓冲与 stream-chunk 下发的唯一数据源。
+                            onLogLine = { line ->
+                                controller.acceptQuestStreamLine(questId, line)
+                                if (!authWaitSeen && QuestAuthWaitDetector.isAuthWaitLine(line)) {
+                                    authWaitSeen = true
+                                    agyAuthProbe.invalidate() // 已记忆的「已登录」不可信：token 可能被清
+                                    RelayLog.info(
+                                        "RELAY-QUEST",
+                                        "auth wait detected in quest stream: quest=" + questId +
+                                            " line=" + line.take(120),
+                                    )
+                                }
+                            },
+                            onEvent = { eventType, _, summary, body ->
+                                QuestCliErrorTail.capture(eventType, summary, body)?.let { lastErrorBody = it }
+                            },
                         )
-                        QuestRunner.CliTaskRun(ok = status == "finished", patchPath = patchPath, summary = null, error = error)
+                        // 终局把残留半批冲进缓冲（事后补看靠它）；订阅者各自退订。
+                        controller.questStreamSettled(questId)
+                        val ok = status == "finished"
+                        val errorTail = QuestCliErrorTail.merge(error, lastErrorBody)
+                        QuestRunner.CliTaskRun(
+                            ok = ok,
+                            patchPath = patchPath,
+                            summary = null,
+                            // 改写只认非 finished：成功路径里出现 auth 行（CLI 内部重试后
+                            // 自愈）不该把「去登录」印在成功的任务上。
+                            error = QuestAuthWaitDetector.decorateError(
+                                authWaitSeen = authWaitSeen && !ok,
+                                errorTail = errorTail,
+                                fallback = status,
+                            ),
+                        )
                     },
                 )
 
@@ -866,6 +949,14 @@ class DesktopExtension(
                             scope.launch { questRunner.resumeQuest(qId) }
                             true
                         }
+                        com.kapp.tenon.domain.AssistantQuestCardPayload.Actions.OVERRIDE -> {
+                            // 群主覆决（Phase 3）：对终态支线**强制重试** —— 与 retry 同一
+                            // 执行面（resumeQuest），差别只在资格门（mayDriveCard 的覆决
+                            // 分支只放群主）。资格判定发生在宿主 mayDriveCard，进到这里
+                            // 的都已是群主。
+                            scope.launch { questRunner.resumeQuest(qId) }
+                            true
+                        }
                         com.kapp.tenon.domain.AssistantQuestCardPayload.Actions.CANCEL_QUEST -> {
                             // in-flight：取消 dispatch 协程，取消沿挂起链传播进沙箱看门狗
                             // TERM 掉 CLI 进程树；停靠态：直接清场。
@@ -902,6 +993,11 @@ class DesktopExtension(
                         false
                     } else {
                         scope.launch {
+                            // wire 派发（replyTo 非空）：**先登记回执目标**（键 = clientToken，
+                            // dispatch 前就已知），再 dispatch —— 首条 RUNNING 通知不再竞态
+                            // （登记与 dispatch 同协程顺序执行，通知从 dispatch 内部发出时
+                            // 映射已在场）。
+                            if (replyTo != null) wireNoticeTargets[token] = replyTo
                             val result = questRunner.dispatch(
                                 prompt = prompt,
                                 workspacePath = ws,
@@ -910,9 +1006,9 @@ class DesktopExtension(
                                 autoMerge = false, // 人派的默认变更前确认（机主在场）
                                 clientToken = token,
                             )
-                            // wire 派发（replyTo 非空）：登记回执目标，通知沿 questId 回派单端
-                            if (replyTo != null && result is QuestRunner.DispatchResult.Started) {
-                                wireNoticeTargets[result.questId] = replyTo
+                            // dispatch 未真正开跑（Duplicate / Rejected）：撤掉登记，便签如实留存
+                            if (replyTo != null && result !is QuestRunner.DispatchResult.Started) {
+                                wireNoticeTargets.remove(token)
                             }
                         }
                         true

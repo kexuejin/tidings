@@ -29,7 +29,7 @@
 
 ---
 
-## 一、会处理的（32 种）
+## 一、会处理的（39 种）
 
 > 数量口径 = `MsgTypes.HANDLED` 的元素个数（下面的表按**帧族合并**成行，所以行数少于类型数）。
 > `HANDLED` 与 `UNHANDLED` 必须构成 `KNOWN` 的一个**划分**，由
@@ -59,6 +59,9 @@
 | `avatar` | `RelayController`（cap `av1`） | 自定义头像获取与广播：`op:"get"`、`op:"data"`、`op:"miss"`，SHA-256 缓存 |
 | `agent-invoke` / `agent-invoke-result` | 收：`RelayControllerMessagesComponent.kt` → 域层网道 `RelayControllerAgentInvokeComponent`（cap `agi1`）；发：同组件（发起方派单 / 结果回传） | 跨端派单 RPC：`task` 进执行门禁（core 的 `AgentExecAuthorizer`，可信设备放行）→ 本机插件执行（`executePluginTask` 唯一实现）；`action` 进卡片动作原子台账（首个判定生效、晚到点击幂等丢弃）。结果帧落租约终态、看板卡以**新帧**上群；两帧都在 `RELIABLE` —— 结果丢失会让发起方把「已完成」误判成超时（键表与 op 互斥见 `PROTOCOL-EXTENSION.md` §6.13） |
 | `agent-channel` / `agent-channel-result` | 收：`RelayController.onInbound` → `RelayControllerAgentInvokeComponent.handleOnAgentChannel`（手机回诚实 `no-executor`；桌面壳把编排器接到 `channelOrchestrator` 桥，授权门复用 grants 执行面）；发：agentNode `POST /v1/agent/channel`（cap `agc1` 门，对端未声明 ⇒ 409 帧不构造） | 跨宿主任务委派（M7-T2）：`assign`/`transfer` 两态、`resources` 声明式互斥（执行点 = 接收宿主 `ChannelOrchestrator`：FIFO 串行 + channelId 幂等 + 租约超时出队）、结果帧复用 `InvokeResultStates`。手机声明 `agc1` 只承诺「解得动」；桌面端暂不声明（caps 16/16 满额，D-017 修订）。键表与互斥语义见 `PROTOCOL-EXTENSION.md` §6.14 |
+| `stream-sub` / `stream-chunk` / `stream-cancel` | 收：`RelayController.onInbound` → `QuestStreamHub`（宿主角色：补档 + 实时泵 + 多订阅者注册表；订阅角色：seq 去重 + 环形缓冲）；发：`NodeRuntime.sendStreamFrame`（唯一出口：LinkServer 下行 / LinkClient 上行 / luciola 信道，全部 fail-closed） | 支线日志流（Phase 1）：作战室实时终端日志。**无 cap**（16/16 满额，探测窗降级如实显示「不可用」）；**不入离线队列**、不入 messageStore（`stream-` 前缀豁免）—— 过期订阅/积压块的重放是垃圾流量；丢失容忍是设计语义（终局走通知帧）。键表与双刀钳制见 `PROTOCOL-EXTENSION.md` §6.15 |
+| `quest-dispatch` / `quest-notice` | 收：`RelayControllerQuestWire`（配对清单 fail-closed）；发：`NodeRuntime.sendQuestDispatch/Notice` | 便签派发与通知回执（主支线跨设备，Phase 2）：便签按 clientToken 原地翻面；投递语义 = fail-closed-no-queue |
+| `quest-sync-req` / `quest-sync-resp` | 收：`RelayController.onInbound` → 对账三件套（宿主侧 `handleQuestSyncReqInternal` 只回更新档位、按 rev 升序装箱分页；订阅侧 `handleQuestSyncRespInternal` 经 `updateCardContent` rev 乐观锁原位推进 + `hasMore` 续拉）；发：`RelayController.questSyncPull`（亮屏触发，按宿主分组、10 对/帧分页） | 多端状态增量对账（Phase 2）：离线交替使用后卡片 rev 落后的脑裂收口。**可靠不入队**（recovery-req 同族）、**不拉聊天历史**（FTS 不动）、对账不发现新单（新单走在线期状态帧）。键表与分页语义见 `PROTOCOL-EXTENSION.md` §6.16 |
 | `share` | 传输层 ACK，业务层**只有壳** | 共享文件柜：`share` ∈ `RELIABLE_TYPES` ⇒ 入站帧在传输层被 ACK，业务层不发 `share:list` |
 | `scan-ranges` | `RelayControllerCidr` | CIDR 网段扫描探活与手动网段配置 |
 | `screen` | 投屏与桌面镜像（cap `rv1`/`rvs1`） | 桌面捕获/推流与屏幕会话展示 |

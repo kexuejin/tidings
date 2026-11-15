@@ -135,9 +135,11 @@ class AgyCliDriverTest {
             driverId = "agy-cli",
             displayName = "Antigravity (agy CLI)",
             cliPath = cli.absolutePath,
-            argSpec = { prompt -> listOf("-p", prompt, "--output-format", "stream-json") },
+            argSpec = { prompt, _ -> listOf("-p", prompt, "--output-format", "stream-json") },
             sandbox = sandbox,
-        )
+        ) 
+        // useRealHome 契约的独立验证见 WorktreeSandboxExecutorTest.explicitHomeEnvSkipsSandboxHomeAndIsPassedThrough
+
         val collected = java.util.concurrent.LinkedBlockingQueue<DriverEvent>()
         val done = kotlinx.coroutines.CompletableDeferred<Unit>()
         kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Job() + kotlinx.coroutines.Dispatchers.Default)

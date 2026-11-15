@@ -4,6 +4,8 @@ package com.kapp.tenon.feature.chat
 
 import kotlinx.serialization.json.JsonObject
 import com.kapp.tenon.core.protocol.TeamMemberDraft
+import com.kapp.tenon.domain.QuestStreamState
+import com.kapp.tenon.domain.QuestStreamUnavailableReason
 import com.kapp.tenon.domain.HistorySearchFilter
 import com.kapp.tenon.domain.MessageSearchResult
 import com.kapp.tenon.domain.model.AgentApprovalDecision
@@ -97,6 +99,19 @@ data class ChatScreenState(
     val questId: String? = null,
     /** Subagent ID (非 null 为第 2 层单兵白盒会话)。 */
     val subagentId: String? = null,
+    /**
+     * 支线日志流（Phase 1）的正文与状态：壳收集 `controller.questStreamSnapshot` 后
+     * 按当前 quest 取行。空列表 + IDLE = 壳未接线或未订阅，面板画空态。
+     */
+    val questStreamLines: List<String> = emptyList(),
+    val questStreamState: QuestStreamState = QuestStreamState.IDLE,
+    val questStreamUnavailableReason: QuestStreamUnavailableReason? = null,
+    /**
+     * quest 产物补丁的整包文本（Phase 4 Diff 审查）：壳经 `controller.questPatchText()`
+     * 读取（平台文件 IO 在壳层）。null = 壳未接或补丁未落本机，Diff 面板不画
+     * （接收入口在会话流的文件卡上，那里的空态才诚实）。
+     */
+    val questPatchText: String? = null,
 )
 
 /**
@@ -291,6 +306,11 @@ data class ChatScreenActions(
     val onRetryQuest: ((questId: String) -> Unit)? = null,
     /** 助理会话的派单发送（支线模式 toggle 开启时走它）：盖 clientToken 落便签并交执行体。 */
     val onDispatchQuest: ((prompt: String) -> Unit)? = null,
+    /**
+     * 支线日志流的订阅意图（Phase 1）：作战室开 = true，关弹窗/切后台 = false。
+     * 对账（补 sub / 发 cancel）在域层 hub 里完成；null = 壳未接线，日志面板不画。
+     */
+    val onQuestStreamDesired: ((questId: String, wanted: Boolean) -> Unit)? = null,
 )
 
 /**

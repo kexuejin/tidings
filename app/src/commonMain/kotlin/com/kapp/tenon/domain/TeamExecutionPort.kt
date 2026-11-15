@@ -27,6 +27,12 @@ interface TeamExecutionPort {
     fun driverCatalog(): Set<String>
 
     /**
+     * agy CLI 的登录态（预检探针）：true = 已登录，false = 未登录，null = 本机没有
+     * agy / 探针不可用。suspend：首次探测要起一次子进程（≈6s），结果由探针侧记忆。
+     */
+    suspend fun agyLoginState(): Boolean? = null
+
+    /**
      * 读该支队的执行档；null = 没配过（正常）。主键 = `(目录, 领队)`，**不含群** ——
      * 一支队进几个群都是同一份档（见 `TeamExecutionProfile` 的 KDoc）。
      */

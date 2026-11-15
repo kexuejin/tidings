@@ -227,6 +227,42 @@ object Limits {
     const val GROUP_TEXT_TCP_LIMIT = 32 * 1024
 
     /**
+     * 支线日志流（`stream-chunk`）**帧体**（`text` 键）的 UTF-8 字节上限。
+     *
+     * 取 32 KiB（与 [GROUP_TEXT_TCP_LIMIT] 同档）：TTY 合批后的一帧装得下百行终端输出，
+     * 又给信封留足余量 —— 整帧硬上限 [MAX_FRAME_BYTES] 是 64 KiB，而终端输出引号/控制符
+     * 密集，JSON 转义**逐字符翻倍**是常态，「字节数达标的 body」照样可能编出超帧
+     * （ARP-17 的同一形状）。所以发送侧是**双刀**：第一刀按 [STREAM_CHUNK_BODY] 卡 body，
+     * 第二刀按编码后帧长收敛（`NodeOutbound.clampStreamChunkText`）——
+     * 「发送侧不产出注定被拒的帧」在这里是不变量，不是愿望。
+     */
+    const val STREAM_CHUNK_BODY = 32 * 1024
+
+    /**
+     * `quest-sync-req` 的帧预算：**对账请求**（多端状态增量对账，Phase 2）里
+     * `[questId, rev]` 对的条数上限与单帧 UTF-8 上限。10 × ~90 B ≈ 900 B，
+     * 取 1 KiB —— 超出的由发送端分页（每帧 10 对），接收侧超限整帧拒收，
+     * 「发送侧不产出注定被拒的帧」由分页不变量保证。
+     */
+    const val QUEST_SYNC_MAX_QUESTS = 10
+    const val QUEST_SYNC_REQ_BUDGET = 1024
+
+    /**
+     * `quest-sync-resp` 的帧预算：**对账响应**里快照载荷的 UTF-8 总上限。
+     * 单张卡片载荷本身 ≤ [CARD_BYTES]（24 KiB），多张叠加没有任何分页就会
+     * 顶爆 64 KiB 整帧帽 —— 宿主按 `rev` 升序装箱，装不下的留在下一页
+     * （`CodecQuestSync.packSnapshots`，判据 = 逐张实测编码长）。
+     */
+    const val QUEST_SYNC_RESP_BUDGET = 32 * 1024
+
+    /**
+     * `stream-chunk` 信封包装的发送侧余量：`v/type/id/from/ts` + `questId/seq/text`
+     * 三键与引号 ≈ 数百字节，取 512 B（与 [AGENT_EVENT_ENVELOPE_HEADROOM] 同一口径）。
+     * 只参与发送侧收敛的注释语义，接收侧校验只认 [STREAM_CHUNK_BODY]。
+     */
+    const val ENVELOPE_SHELL_HEADROOM = 512
+
+    /**
      * 群消息可选字段 `card`（声明式卡片负载）的 UTF-8 字节上限（序列化后的对象）。
      *
      * 取 24 KiB：信封数学 = 正文 [GROUP_TEXT_TCP_LIMIT]（32 KiB）+ 卡片 24 KiB +

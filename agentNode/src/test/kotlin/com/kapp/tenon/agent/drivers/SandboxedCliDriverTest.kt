@@ -280,6 +280,58 @@ class SandboxedCliDriverTest {
         assertTrue(rest.none { it is DriverEvent.Finished }, "中止不发 Finished")
     }
 
+    /**
+     * withModel 复制实例时**必须带走 useRealHome / networkPolicy**（真身：漏传两个
+     * 参数，派单链路「解析驱动 → withModel → openSession → executeTask」里一换模型，
+     * agy 就落回假 HOME + AIR_GAPPED——登录态走 keyring 对 HOME 敏感，实测全灭，
+     * quest 全部「Authentication required」）。
+     *
+     * 判据用行为而不是字段窥视：假 CLI 把它**实际拿到**的 $HOME 打回文本行，
+     * 走 withModel 复制后的实例跑沙箱分支，HOME 必须是宿主真值（useRealHome=true
+     * ⇒ 显式 HOME，`.sandbox-home` 覆盖被跳过）。**反向验证**：把 withModel 里的
+     * `useRealHome = useRealHome` 摘掉，本用例立刻红（HOME 落回 .sandbox-home）。
+     * networkPolicy 的传递在 WorktreeSandboxExecutorTest/OsSandboxGuardTest 有档位
+     * 形状覆盖；此处守的是「复制构造不许丢字段」这一纪律的 HOME 面。
+     */
+    @Test
+    fun withModelCarriesUseRealHomeIntoTheCopy() {
+        val root = tempDir()
+        val host = tempDir()
+        gitRepo(host)
+        val cli = script(
+            root,
+            "cli",
+            """printf '{"type":"text","text":"HOME=%s"}\n' "${'$'}{HOME-UNSET}"; exit 0""",
+        )
+        val sandbox = WorktreeSandboxExecutor(sandboxRoot = root)
+        val driver = SandboxedCliDriver(
+            driverId = "agy-cli",
+            displayName = "agy",
+            cliPath = cli,
+            argSpec = { prompt, _ -> listOf(prompt) },
+            sandbox = sandbox,
+            useRealHome = true,
+        )
+        // withModel 每次都造新实例（会话表不共享）——openSession 与 executeTask
+        // 必须落在**同一个**复制实例上，这正是派单链路「解析 → withModel → 开会话 →
+        // 执行」的顺序。
+        val copy = driver.withModel("gemini-3.8-flash")
+        val collected = events { queue ->
+            val session = copy.openSession(host.absolutePath, null)
+            copy.executeTask(session.sessionId, "home probe") { queue.put(it) }
+        }
+        val text = collected.filterIsInstance<DriverEvent.TokenDelta>().joinToString("") { it.delta }
+        val realHome = System.getProperty("user.home") ?: ""
+        assertTrue(
+            text.contains("HOME=$realHome"),
+            "withModel 复制后的实例必须用宿主真实 HOME（假 CLI 实际拿到：$text）",
+        )
+        assertTrue(
+            !text.contains(".sandbox-home"),
+            "绝不许落回 .sandbox-home（那是登录态丢失的形状）：$text",
+        )
+    }
+
     private fun gitLines(cwd: File, vararg args: String): List<String> {
         val proc = ProcessBuilder(listOf("git") + args.toList()).directory(cwd).start()
         val out = proc.inputStream.bufferedReader().readText()

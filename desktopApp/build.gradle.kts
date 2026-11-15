@@ -349,6 +349,11 @@ val luciolaNativeDir: Provider<String> =
 val copyLuciolaNative by tasks.registering(Copy::class) {
     // 空串 = 没解析到：不要 `from("")`（那会指向工程目录、扫描一大片），直接不复制，
     // 由下面的 doLast 给出「缺库 + 怎么补」的明确失败。
+    // **整任务跳过**（onlyIf）：Gradle Copy 会清理"上一次自己复制过、这次源里没有"
+    // 的产物——解析不到源的构建（无 -P/env 的 worktree 场景）会把上一次复制好的
+    // dylib 从 resources/common/native 里删掉（2026-11-15 实测：dylib 反复消失）。
+    // 跳过 = 目标目录原样保留，最后落位（createDistributable 的 doLast）才有得复制。
+    onlyIf { desktopLuciolaNativeDir() != null }
     val src = luciolaNativeDir.get()
     // 源=目标时跳过复制：显式把 TENON_LUCIOLA_NATIVE 指到 resources 自己（例如
     // 「就用已打包那份」的口径）会让 Copy 先截断输出再读输入，dylib 被清成
@@ -376,6 +381,45 @@ val copyLuciolaNative by tasks.registering(Copy::class) {
                 "luciola native library missing under ${dir}. " +
                     "Set TENON_LUCIOLA_NATIVE=<cargo-target/release 或 debug> (or -PluciolaNativeDir=…) " +
                     "before packaging —— 不带库的安装包会在用户机器上启动即崩。",
+            )
+        }
+    }
+}
+
+// **打包任务必须等补库任务**（2026-11-15 真机验收发现）：copyLuciolaNative 与打包之间
+// 没有依赖边时，compose 打包会先快照 resources 再补库——产出的 app 包 native 目录里
+// 只有 README，宿主进程 [transport] unavailable reason=luciola-unavailable，
+// 加密信道整条不可用而界面上看不出原因。
+// 补库任务先行（dylib 落进 resources/common/native），最终打包依赖它。
+listOf("createDistributable", "packageDistributionForCurrentOS", "packageReleaseDistributable")
+    .forEach { name ->
+        tasks.matching { it.name == name }.configureEach {
+            dependsOn(copyLuciolaNative)
+        }
+    }
+
+// **dylib 进 .app 的确定性落位**（2026-11-15 真机验收发现）：compose 的资源快照任务
+// 链里找不到可挂依赖边的那个"扫 appResourcesRootDir"任务（copyNonXmlValueResources*
+// 与 prepareComposeResources* 都不扫它）——两代任务名都试过，bundle 里始终只有
+// README 没有 dylib，宿主进程 [transport] unavailable reason=luciola-unavailable。
+// 所以在 createDistributable 的 doLast 里**直接落位**：找到产出的 .app，把
+// resources/common/native 的库复制进 Contents/app/resources/native。jpackage 的
+// .dmg 从同一 app-image 目录出，时序天然在 doLast 之后。
+tasks.matching { it.name == "createDistributable" }.configureEach {
+    doLast {
+        val nativeDir = project.layout.projectDirectory.dir("resources/common/native").asFile
+        val appRoot = File(project.buildDir, "compose/binaries/main/app")
+        val appBundle = appRoot.walkTopDown().firstOrNull { it.isDirectory && it.name.endsWith(".app") }
+            ?: return@doLast
+        val dest = File(appBundle, "Contents/app/resources/native").apply { mkdirs() }
+        nativeDir.listFiles { f -> f.isFile }.orEmpty().forEach { f ->
+            f.copyTo(File(dest, f.name), overwrite = true)
+        }
+        val dylib = File(dest, "libluciola_uniffi.dylib")
+        if (!dylib.isFile || dylib.length() == 0L) {
+            throw GradleException(
+                "luciola dylib missing in produced bundle: ${dylib.absolutePath} " +
+                    "—— luciola 信道会整条不可用（[transport] unavailable reason=luciola-unavailable）。",
             )
         }
     }

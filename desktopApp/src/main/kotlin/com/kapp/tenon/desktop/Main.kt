@@ -107,6 +107,11 @@ fun main(args: Array<String>) {
         advertiseAgent = true,
     )
     // 固定端口 8788：dsh-tenon-bridge 插件的 `baseUrl` 默认就是这个值，两边必须一致。
+    // Phase 4（移动端 Diff 审查）：补丁文件读取器 —— 平台文件 IO 只在壳层，
+    // 领域层只持路由事实（savedPaths）。补丁是 quest 产物、落在本机应用目录，
+    // 直接读文本；读不了（未接收/路径失效）如实给 null，界面画空态。
+    controller.questPatchReader = { path -> runCatching { java.io.File(path).readText() }.getOrNull() }
+
     // 传 `ControlPlane.DEFAULT_HTTP_PORT` 而不是字面量 8788 —— 单一定义点。
     val extension = DesktopExtension(
         controller = controller,

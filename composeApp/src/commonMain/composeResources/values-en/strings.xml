@@ -422,6 +422,11 @@
     <string name="agent_detail_default_team_mark">Primary team</string>
     <string name="agent_detail_default_team_inferred">inferred</string>
     <string name="exec_config_entry">Execution</string>
+    <string name="exec_config_agy_login_label">agy sign-in state</string>
+    <string name="exec_config_agy_login_ok">Signed in</string>
+    <string name="exec_config_agy_login_missing">Not signed in</string>
+    <string name="exec_config_agy_login_probing">Checking…</string>
+    <string name="exec_config_agy_login_hint">While signed out every quest fails: run `agy` once in a terminal on the host machine and complete the browser sign-in (one time only; credentials persist in the keychain).</string>
     <string name="exec_config_title">Execution config</string>
     <string name="exec_config_subtitle_format">This computer · %1$d drivers available</string>
     <string name="exec_config_driver_unassigned">Unassigned</string>
@@ -473,6 +478,7 @@
     <string name="agent_profile_meta_alone_format">@%1$s · %2$s · in no group</string>
     <string name="agent_profile_empty">No employee records yet. Give a local agent a name and it becomes an employee.</string>
     <string name="agent_profile_new">New profile</string>
+    <string name="agent_profile_edit">Edit profile</string>
     <string name="agent_profile_new_hint">Pick a local agent and give it an employee name. You can register it first and add it to groups later.</string>
     <string name="agent_profile_new_empty">No agent on this machine has reported an identity yet, so there is nothing to register. Try again once one connects to the host.</string>
     <string name="agent_profile_new_meta_format">%1$s · %2$s</string>
@@ -1337,7 +1343,8 @@
     <string name="banner_screen_view_ended">Screen session ended (%1$s)</string>
     <string name="banner_agent_ack_send_failed">The decision wasn't delivered, so the request stays pending. Try again shortly.</string>
     <string name="banner_agent_ack_not_confirmed">The peer doesn't send approval receipts (feature off, or it's offline). Your choice is recorded; what actually runs is up to the peer's Agent.</string>
-    <string name="banner_luciola_unavailable">The encrypted channel could not start (incomplete install or a missing system component), so this device can't reach any other device right now.</string>
+    <string name="banner_luciola_unavailable_platform">Encrypted channel failed to start: this shell has no luciola wiring (missing platform implementation). This device cannot talk to other devices for now.</string>
+    <string name="banner_luciola_unavailable_native">Encrypted channel failed to start: the luciola native library is missing or failed to load (incomplete install or version mismatch). This device cannot talk to other devices for now.</string>
     <string name="screen_reason_declined">Peer declined</string>
     <string name="screen_reason_busy">Peer is busy</string>
     <string name="screen_reason_unsupported">Screen sharing unsupported</string>
@@ -2094,10 +2101,21 @@ Collaboration channel connected; project directory events and progress will sync
     <string name="card_action_resume">Resume</string>
     <string name="card_action_merge">Merge to Main</string>
     <string name="card_action_retry">Retry</string>
+    <string name="card_action_override">Owner force retry</string>
     <string name="quest_input_dialog_title">Reply to Quest</string>
     <string name="quest_input_dialog_confirm">Submit Reply</string>
     <string name="quest_input_dialog_cancel">Cancel</string>
     <string name="quest_input_dialog_hint">Enter instructions or reply for the agent…</string>
+    <!-- Quest terminal log stream (Phase 1) -->
+    <string name="quest_terminal_log_title">Terminal output</string>
+    <string name="quest_terminal_log_empty">No terminal output yet</string>
+    <string name="quest_terminal_log_unavailable">Log stream unavailable: %1$s</string>
+    <string name="quest_terminal_log_hint">Live terminal output of the quest (CLI stdout/stderr)</string>
+    <string name="quest_stream_unavailable_no_host">no executor host found</string>
+    <string name="quest_stream_unavailable_channel">host offline or outdated</string>
+    <string name="quest_diff_review_title">Code review</string>
+    <string name="quest_diff_collapsed">⋯ %1$d unchanged context lines ⋯</string>
+    <string name="quest_diff_too_large">File exceeds 5000 lines; review the full patch on desktop</string>
     <!-- Automation Console -->
     <string name="automation_console_title">Automation Tasks</string>
     <string name="automation_console_subtitle">Scheduled triggers, worktree sandbox &amp; merge controls</string>

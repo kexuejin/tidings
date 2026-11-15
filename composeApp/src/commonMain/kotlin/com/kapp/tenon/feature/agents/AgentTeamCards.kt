@@ -28,6 +28,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import com.kapp.tenon.core.protocol.AVATAR_LEGACY_INITIAL_VALUE
+import com.kapp.tenon.core.protocol.sameAgent
 import com.kapp.tenon.domain.AgentEmployeeProfileUi
 import com.kapp.tenon.domain.AgentHubUi
 import com.kapp.tenon.domain.AgentTeamOrphanUi
@@ -36,7 +37,6 @@ import com.kapp.tenon.domain.AgentWorkstationPort
 import com.kapp.tenon.domain.teamDisplayName
 import com.kapp.tenon.generated.resources.Res
 import com.kapp.tenon.generated.resources.agent_count_items
-import com.kapp.tenon.generated.resources.agent_profile_section_title
 import com.kapp.tenon.generated.resources.agent_subtitle_pending
 import com.kapp.tenon.generated.resources.agent_team_ai_new
 import com.kapp.tenon.generated.resources.conv_inbox_ws_open_chat
@@ -77,14 +77,18 @@ import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
 
 /**
- * 智能体页的三档（不变量 5）：**员工**是主体，**团队**是归属的另一面，
- * **档案**是登记簿（「谁登记过」，与运行时无关）。
+ * 智能体页的两档（不变量 5）：**员工**是主体，**团队**是归属的另一面。
+ *
+ * 曾经的第三档「档案」（登记簿）已并入员工视图：与运行时卡片对得上号的档案活在
+ * 员工卡上（投影把档案名顶上显示名、行上有编辑入口），对不上号的（登记过但还没
+ * 上线的人）留在员工视图底部的登记簿小节 —— 用户模型里只有员工与团队两层，
+ * 底座只是员工的执行器配置（行上只读徽标 + 「执行配置」页），登记簿不是第三个
+ * 平级实体。
  */
-internal enum class AgentDirectoryView { EMPLOYEES, TEAMS, PROFILES }
+internal enum class AgentDirectoryView { EMPLOYEES, TEAMS }
 
 /**
- * 智能体页的两个视角 + 登记簿（不变量 5）：**员工**是主体，**团队**是归属的另一面，
- * **档案**是「谁登记过」。
+ * 智能体页的两个视角（不变量 5）：**员工**是主体，**团队**是归属的另一面。
  *
  * ## 为什么是「切换」而不是「上下两段」
  *
@@ -92,15 +96,14 @@ internal enum class AgentDirectoryView { EMPLOYEES, TEAMS, PROFILES }
  * 声明的两个方向**。上下堆在一起会让同一批人出现两遍，用户还得自己分辨哪一段是权威的。
  * 规范 §4.2 的裁决就是：视图切换，不是两段。
  *
- * 档案那一档是第三种问题（不是第三个方向）：它不依赖任何运行时事实 —— 一个人可以先建档、
- * 一个群都不进；席位全撤、agent 下线之后档案也还在。所以它也不能混进名录，
- * 但它比另两档更需要一个落点：注销此前没有任何界面入口。
+ * ## 登记簿去了哪
  *
- * ## 为什么不在这里放任何下拉
- *
- * 底座与模型是宿主本地执行档（团队粒度），改它们只在「执行配置」页做。行上放下拉
- * 等于把同一份配置画 N 遍，窄屏还会挤成三个控件（`designFormPairingGate` /
- * `designDpDebtGate` 的既有教训）。行上只留只读徽标。
+ * 档案不再是第三档（真机验收反馈：员工/团队/档案三档并列让人分不清谁是谁）。
+ * 它的三个通路全部还在，只是换了落点：与运行时卡片匹配的档案收进员工卡
+ * （行上编辑入口），孤儿档案（没上线的）在员工视图底部的小节里编辑/注销，
+ * 新建档案入口也在那。底座与模型是宿主本地执行档（团队粒度），改它们只在
+ * 「执行配置」页做 —— 行上只留只读徽标（`designFormPairingGate` /
+ * `designDpDebtGate` 的既有教训：行上放下拉等于把同一份配置画 N 遍）。
  */
 @Composable
 internal fun AgentDirectorySection(
@@ -183,20 +186,14 @@ internal fun AgentDirectorySection(
     // 「团队」那一档永远是空列表，给一颗点了什么都没有的按钮与「能力缺失 = 不画」同一条纪律。
     var view by rememberSaveable { mutableStateOf(AgentDirectoryView.EMPLOYEES) }
     val hasTeamView = teams.isNotEmpty() || onCreateTeam != null
-    // 档案那一档在**有档案 或 能建档**时出现：空表 + 有入口 = 「从零建一个人」的起点
-    // （这也是一直以来那个洞：登记入口只挂在员工详情页上，而详情页要先有一张卡才进得去）。
-    // 手机两样都没有（档案只住宿主机）⇒ 这一档照旧不出现。
-    val hasProfileView = employeeProfiles.isNotEmpty() || onNewEmployeeProfile != null
-    val hasSwitcher = hasTeamView || hasProfileView
-    // 选中的那一档没了（最后一支队解散 / 最后一份档案注销）⇒ 落回员工档，
+    val hasSwitcher = hasTeamView
+    // 选中的那一档没了（最后一支队解散）⇒ 落回员工档，
     // 不留一屏「切换器上没有它、内容却是它」的残影。
     val effectiveView = when {
         view == AgentDirectoryView.TEAMS && !hasTeamView -> AgentDirectoryView.EMPLOYEES
-        view == AgentDirectoryView.PROFILES && !hasProfileView -> AgentDirectoryView.EMPLOYEES
         else -> view
     }
     val showingTeams = hasSwitcher && effectiveView == AgentDirectoryView.TEAMS
-    val showingProfiles = hasSwitcher && effectiveView == AgentDirectoryView.PROFILES
 
     Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(sp.md)) {
         if (hasSwitcher) {
@@ -207,12 +204,10 @@ internal fun AgentDirectorySection(
             // 段头必须跟档位走：切换器换的是**哪一段**，不是「智能体」的分类筛选。
             val headingRes = when {
                 showingTeams -> Res.string.hub_view_teams
-                showingProfiles -> Res.string.agent_profile_section_title
                 else -> Res.string.hub_agent_section_title
             }
             val headingCount = when {
                 showingTeams -> teams.size
-                showingProfiles -> employeeProfiles.size
                 else -> employees.size
             }
             Row(
@@ -245,31 +240,52 @@ internal fun AgentDirectorySection(
                         onClick = { view = AgentDirectoryView.TEAMS },
                     )
                 }
-                if (hasProfileView) {
-                    DirectoryViewChip(
-                        text = stringResource(Res.string.hub_view_profiles),
-                        selected = effectiveView == AgentDirectoryView.PROFILES,
-                        onClick = { view = AgentDirectoryView.PROFILES },
-                    )
-                }
             }
         }
         if (onOpenExecutionConfig != null && !compact) {
             ExecutionConfigEntry(onClick = onOpenExecutionConfig)
         }
+        // 员工卡上的档案编辑入口（编辑入口收进卡）：回调从「档案行」换成「员工行」，
+        // 卡 → 档案的解析用与投影同一条 sameAgent 规则（不能拿显示名定位 —— 名字会变）。
+        val employeeRowEdit = onEditEmployeeProfile?.let { edit ->
+            { card: AgentHubUi ->
+                val key = card.agentKey
+                if (key != null) {
+                    employeeProfiles.firstOrNull { sameAgent(it.agentId, null, key) }?.let(edit)
+                }
+            }
+        }
+        // 与员工卡对不上号的档案 = 登记过但还没上线的人（孤儿档案）。匹配上的活在
+        // 员工卡上（投影顶显示名 + 行上编辑），孤儿留在登记簿小节 —— 注销此前没有
+        // 别的入口，整节按「能力缺失 = 不画」缺席（手机读不到档案且没有建档入口时）。
+        val orphanProfiles = employeeProfiles.filter { profile ->
+            employees.none { card -> card.agentKey != null && sameAgent(profile.agentId, null, card.agentKey) }
+        }
         when (effectiveView) {
-            AgentDirectoryView.EMPLOYEES -> AgentHubSection(
-                cards = employees,
-                now = now,
-                onOpenEntity = onOpenEntity,
-                onOpenChat = onOpenChat,
-                onOpenRowSession = onOpenRowSession,
-                compact = compact,
-                showSectionHeader = !hasSwitcher,
-                selectedHostNodeId = selectedHostNodeId,
-                selectedAgentKey = selectedAgentKey,
-                workstationPort = workstationPort,
-            )
+            AgentDirectoryView.EMPLOYEES -> Column(verticalArrangement = Arrangement.spacedBy(sp.md)) {
+                AgentHubSection(
+                    cards = employees,
+                    now = now,
+                    onOpenEntity = onOpenEntity,
+                    onOpenChat = onOpenChat,
+                    onOpenRowSession = onOpenRowSession,
+                    compact = compact,
+                    showSectionHeader = !hasSwitcher,
+                    selectedHostNodeId = selectedHostNodeId,
+                    selectedAgentKey = selectedAgentKey,
+                    workstationPort = workstationPort,
+                    onEditEmployee = employeeRowEdit,
+                )
+                if (orphanProfiles.isNotEmpty() || onNewEmployeeProfile != null) {
+                    AgentProfileSection(
+                        profiles = orphanProfiles,
+                        onEdit = onEditEmployeeProfile,
+                        onForget = onForgetEmployeeProfile,
+                        onCreate = onNewEmployeeProfile,
+                        showSectionHeader = true,
+                    )
+                }
+            }
             AgentDirectoryView.TEAMS -> AgentTeamSection(
                 teams = teams,
                 now = now,
@@ -285,14 +301,6 @@ internal fun AgentDirectorySection(
                 selectedLeaderAgentId = selectedTeamLeaderAgentId,
                 // 有切换器时段头由上面那一行承担（标题 · 计数已说清楚）；
                 // 独立使用时（手机无团队 → 无切换器）仍由本段自己画。
-                showSectionHeader = !hasSwitcher,
-            )
-            AgentDirectoryView.PROFILES -> AgentProfileSection(
-                profiles = employeeProfiles,
-                onEdit = onEditEmployeeProfile,
-                onForget = onForgetEmployeeProfile,
-                onCreate = onNewEmployeeProfile,
-                // 同上：标题与计数由切换器那一行说，本段不再叠一个。
                 showSectionHeader = !hasSwitcher,
             )
         }

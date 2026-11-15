@@ -65,6 +65,8 @@ internal object RelayControllerQuestWire {
             return
         }
         val notice = CodecQuest.decodeQuestNotice(payload) ?: return
-        receiver.handleAssistantQuestNotice(notice)
+        // 来源宿主随信封：翻面的卡盖上宿主 senderId，questSyncPull 才认得出
+        // 这张卡属于哪台宿主（归宿主缺失 = 终态对账永远轮不到它）。
+        receiver.handleAssistantQuestNotice(notice, originHost = envelope.from)
     }
 }

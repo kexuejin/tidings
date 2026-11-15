@@ -261,6 +261,26 @@ object Codec {
         at: Long? = null,
     ) = CodecChannel.channelResultPayload(channelId, ok, status, summary, artifactIds, error, at)
 
+    /** 支线日志流三帧（Phase 1）的构造门面；形状谓词与钳制纪律见 [CodecStream]。 */
+    fun streamSubPayload(questId: String, sinceSeq: Long? = null) =
+        CodecStream.streamSubPayload(questId, sinceSeq)
+
+    fun streamChunkPayload(questId: String, seq: Long, text: String) =
+        CodecStream.streamChunkPayload(questId, seq, text)
+
+    fun streamCancelPayload(questId: String) =
+        CodecStream.streamCancelPayload(questId)
+
+    /** 多端状态增量对账两帧（Phase 2）的构造门面；预算与分页见 [CodecQuestSync]。 */
+    fun questSyncReqPayload(quests: List<QuestRevPair>, cursor: String? = null) =
+        CodecQuestSync.questSyncReqPayload(quests, cursor)
+
+    fun questSyncRespPayload(
+        snapshots: List<QuestSnapshotPayload>,
+        hasMore: Boolean,
+        cursor: String?,
+    ) = CodecQuestSync.questSyncRespPayload(snapshots, hasMore, cursor)
+
     /** PPE-1 增补 D3：宣告一个工作区（cap `aws1`，尽力而为、不在 RELIABLE）。 */
     @Suppress("LongParameterList")
     fun agentWorkspacePayload(

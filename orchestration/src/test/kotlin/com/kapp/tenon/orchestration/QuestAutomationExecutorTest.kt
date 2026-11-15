@@ -49,9 +49,10 @@ class QuestAutomationExecutorTest {
         try {
             val notices = mutableListOf<AssistantQuestNotice>()
             val mergeLock = QuestSerialMergeLock(tempDir)
-            val executor = QuestAutomationExecutor(mergeLock = mergeLock) { notice ->
-                notices.add(notice)
-            }
+            val executor = QuestAutomationExecutor(
+                mergeLock = mergeLock,
+                onNotice = { notice -> notices.add(notice) },
+            )
 
             val outcome = executor.handleQuestCompletion(
                 questId = "quest-conf-1",
@@ -98,9 +99,10 @@ class QuestAutomationExecutorTest {
 
             val notices = mutableListOf<AssistantQuestNotice>()
             val mergeLock = QuestSerialMergeLock(baseDir)
-            val executor = QuestAutomationExecutor(mergeLock = mergeLock) { notice ->
-                notices.add(notice)
-            }
+            val executor = QuestAutomationExecutor(
+                mergeLock = mergeLock,
+                onNotice = { notice -> notices.add(notice) },
+            )
 
             val outcome = executor.handleQuestCompletion(
                 questId = "quest-auto-1",

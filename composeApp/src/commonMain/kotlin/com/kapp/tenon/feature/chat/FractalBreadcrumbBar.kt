@@ -39,6 +39,8 @@ import org.jetbrains.compose.resources.stringResource
 @Composable
 internal fun FractalBreadcrumbBar(
     questId: String?,
+    /** 支线的任务标题（quest 卡的 title）——面包屑显示它而不是机器可读的 questId。 */
+    questTitle: String? = null,
     subagentId: String? = null,
     onNavigateBackToMain: () -> Unit,
     onNavigateBackToQuest: (() -> Unit)? = null,
@@ -86,7 +88,9 @@ internal fun FractalBreadcrumbBar(
             )
 
             Text(
-                text = stringResource(Res.string.nav_breadcrumb_quest, questId),
+                text = stringResource(
+                    Res.string.nav_breadcrumb_quest, questTitle?.takeIf { it.isNotBlank() } ?: questId,
+                ),
                 style = MaterialTheme.typography.labelMedium,
                 color = if (subagentId != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.then(

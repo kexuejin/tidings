@@ -599,6 +599,87 @@ data class AgentToolRulesListPayload(
     val at: Long? = null,
 )
 
+/**
+ * 支线日志流 `stream-sub`（Phase 1）：设备向 quest 宿主订阅 stdout/stderr 合批日志。
+ *
+ * [sinceSeq] 是订阅端已持有的最后一批序号（缺省 = 从宿主环形缓冲的最早一批开始补）；
+ * 宿主先补齐缓冲里 `seq > sinceSeq` 的存量，再接实时。字段顺序即线上键序
+ * （与 `CodecStream.STREAM_SUB_EXPECTED_KEYS` 一致）。
+ */
+@Serializable
+data class StreamSubPayload(
+    val questId: String,
+    val sinceSeq: Long? = null,
+)
+
+/**
+ * 支线日志流 `stream-chunk`：一帧一段合批日志。[seq] 从 1 起按任务单调，兼作去重与
+ * 续传游标；[text] 受 [Limits.STREAM_CHUNK_BODY]（32 KiB，UTF-8 字节）硬约束 ——
+ * 接收侧超限整帧拒收，发送侧双刀钳制（body 一刀 + 编码帧长收敛一刀）保证不产出。
+ */
+@Serializable
+data class StreamChunkPayload(
+    val questId: String,
+    val seq: Long,
+    val text: String,
+)
+
+/** 支线日志流 `stream-cancel`：仅摘除发送方这一路订阅，其余订阅者不受影响。 */
+@Serializable
+data class StreamCancelPayload(
+    val questId: String,
+)
+
+/**
+ * 多端状态增量对账（Phase 2）：`quest-sync-req` 里的一个已知 quest 档位。
+ * 发送端只报**自己持有的 rev**，宿主比对后仅下发更新的快照 —— 绝不全量拉聊天历史。
+ */
+@Serializable
+data class QuestRevPair(
+    val questId: String,
+    val rev: Long,
+)
+
+/**
+ * `quest-sync-req`（订阅端 → quest 宿主）：本地已知的 `[questId, rev]` 档位清册，
+ * 条数 ≤ [Limits.QUEST_SYNC_MAX_QUESTS]（超出发送端分页）；[afterRev] 是上一页
+ * 响应的游标（`hasMore` 时续拉，缺省 = 从头对账）。响应**不新造帧族之外的形状**：
+ * 宿主用 `quest-sync-resp` 就地回页。
+ */
+@Serializable
+data class QuestSyncReqPayload(
+    val quests: List<QuestRevPair>,
+    /** 上一页响应的游标：本页最后一张快照的 "questId@rev"（续拉；缺省 = 从头对账）。 */
+    val cursor: String? = null,
+)
+
+/**
+ * `quest-sync-resp` 里的一个快照：quest 卡片的**整包现役载荷**（与
+ * `updateCardContent` 的入参同形 —— 收端按 `rev` 乐观锁原位推进，FTS 不动）。
+ */
+@Serializable
+data class QuestSnapshotPayload(
+    val questId: String,
+    val rev: Long,
+    val cardPayload: String,
+    /** 卡片现役状态（RUNNING/COMPLETED/…）—— 收端原样喂给 updateCardContent 的 status。 */
+    val agentState: String,
+)
+
+/**
+ * `quest-sync-resp`（宿主 → 订阅端）：仅含比请求档位**更新**的快照，按 `rev` 升序
+ * 装箱；装不下（> [Limits.QUEST_SYNC_RESP_BUDGET]）的留在下一页 —— [hasMore] +
+ * [cursorRev] 是续拉游标（请求端带 `afterRev` 再拉一页）。
+ */
+@Serializable
+data class QuestSyncRespPayload(
+    val snapshots: List<QuestSnapshotPayload>,
+    val hasMore: Boolean = false,
+    /** 本页最后一张快照的 "questId@rev" —— 续拉游标（rev 是各 quest 独立计数，
+     *  全局 rev 游标在同 rev 边界会吞掉别的 quest，code review #7）。 */
+    val cursor: String? = null,
+)
+
 
 /** 主支线（Quest）便签跨设备派发：机主助理会话便签 → 执行端。clientToken 是幂等与翻面键。 */
 @Serializable
@@ -606,3 +687,4 @@ data class QuestDispatchPayload(
     val clientToken: String,
     val prompt: String,
 )
+

@@ -37,6 +37,7 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.kapp.tenon.domain.QuestStreamState
 import com.kapp.tenon.domain.RelayController
 import com.kapp.tenon.feature.settings.RelayToolApprovalsSource
 import com.kapp.tenon.feature.settings.SETTINGS_PAGE_HOST_AUTH
@@ -155,6 +156,8 @@ fun RelayApp(
     val chromeSlice by controller.chromeFlow.collectAsState()
     val avatarSlice by controller.avatarFlow.collectAsState()
     val transferSlice by controller.transferFlow.collectAsState()
+    // 支线日志流快照（Phase 1）：收集只为驱动重组（行与状态经 controller 读侧取）。
+    val questStreamSnapshot by controller.questStreamSnapshot.collectAsState()
 
     // 幂等：start() 自己会挡住重复调用，所以重组不会重复 bind。
     LaunchedEffect(controller) { controller.start() }
@@ -443,6 +446,13 @@ fun RelayApp(
                             messageFlow = nav.activeSessionId?.let { id -> remember(id) { controller.messageFlowOf(id) } },
                             questId = nav.activeQuestId,
                             subagentId = nav.activeSubagentId,
+                            // 支线日志流（Phase 1）：行与状态按当前作战室取（本机任务读
+                            // 宿主缓冲、远端读订阅缓冲的分派在 controller 里）。
+                            questStreamLines = nav.activeQuestId?.let { controller.questStreamLines(it) } ?: emptyList(),
+                            questStreamState = nav.activeQuestId?.let { controller.questStreamStateOf(it) } ?: QuestStreamState.IDLE,
+                            questStreamUnavailableReason = nav.activeQuestId?.let { controller.questStreamUnavailableReasonOf(it) },
+                            // Phase 4：补丁整包文本（壳经读取器读落盘文件；null = 没接收）。
+                            questPatchText = controller.questPatchText(),
                         ),
                         actions = ChatScreenActions(
                             onSend = controller::sendToConversation,
@@ -599,6 +609,8 @@ fun RelayApp(
                             onCancelQuest = controller::cancelQuest,
                             onRetryQuest = controller::retryQuest,
                             onDispatchQuest = controller::dispatchAssistantQuest,
+                            // 支线日志流的订阅意图（Phase 1）：对账在域层 hub 排程。
+                            onQuestStreamDesired = controller::setQuestStreamDesired,
                         ),
                         groupActions = ChatScreenGroupActions(
                             onAddGroupMembers = controller::addGroupMembers,

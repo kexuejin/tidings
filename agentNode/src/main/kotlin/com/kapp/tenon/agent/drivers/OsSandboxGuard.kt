@@ -47,6 +47,22 @@ object OsSandboxGuard {
     enum class Kind { SEATBELT, UNSHARE }
 
     /**
+     * 沙箱任务的**网络策略**三档（实测裁决：本机 seatbelt 无法按
+     * IP/端口过滤出网——地址过滤器带端口只认 * 与 localhost、裸 IP 报
+     * "port missing"、tcp-port 关键字不存在——逐 IP 白名单不可表达）。
+     *
+     * - [AIR_GAPPED]：纯 `deny network*`。适用于不需要网络的纯本地任务。
+     * - [LOOPBACK]：deny + 仅 loopback bind/in/out。适用于要走宿主回环子服务
+     *   的任务（claude 的 Tenon MCP 脚本连 127.0.0.1:8788）。
+     * - [OPEN]：不写网络 deny。适用于必须连云后端的 CLI（agy 的 CodeAssist、
+     *   claude/codex/dsh 的模型 API）——quest 场景的全集，air-gapped 下必死。
+     *
+     * 已知边界（SECURITY.md 记录）：LOOPBACK/OPEN 档下子进程可达宿主回环上的
+     * 控制面 HTTP——控制面 token 加固是后续项。
+     */
+    enum class NetworkPolicy { AIR_GAPPED, LOOPBACK, OPEN }
+
+    /**
      * 探活当前环境能否拉起 OS 沙箱。探测本身跑一条真实命令（毫秒级）：
      * macOS 用 `sandbox-exec` 跑一条最小 profile；Linux 用 `unshare -n true`。
      */
@@ -59,7 +75,7 @@ object OsSandboxGuard {
         return when {
             os.contains("mac") || os.contains("darwin") -> {
                 val profile = File(tempDir, "tenon-os-sandbox-probe.sb")
-                runCatching { profile.writeText(seatbeltProfile(emptyList())) }
+                runCatching { profile.writeText(seatbeltProfile(NetworkPolicy.AIR_GAPPED)) }
                     .onFailure { return ProbeResult.Unavailable("cannot write probe profile: " + it.message) }
                 try {
                     val result = runCommand(
@@ -122,13 +138,27 @@ object OsSandboxGuard {
      * `(allow default)` + `(deny network*)` 是刻意的最小侵入——任务要能写 worktree、
      * 读工具链、起子进程；被收走的只有出网。白名单 IP 显式放行出站。
      */
-    fun seatbeltProfile(allowOutboundIps: List<String>): String = buildString {
+    /**
+     * seatbelt 策略生成。两种网络形态（实测裁决）：
+     *
+     * 三档语义见 [NetworkPolicy]（实测裁决与本机 filter 语法限制都记录在枚举
+     * KDoc 上）。*/
+    fun seatbeltProfile(policy: NetworkPolicy): String = buildString {
         appendLine("(version 1)")
         appendLine("(allow default)")
-        appendLine("(deny network*)")
-        appendLine("(allow system-socket)")
-        allowOutboundIps.forEach { ip ->
-            appendLine("(allow network-outbound (remote ip \"$ip\"))")
+        when (policy) {
+            NetworkPolicy.OPEN -> appendLine("(allow network*)")
+            NetworkPolicy.LOOPBACK -> {
+                appendLine("(deny network*)")
+                appendLine("(allow system-socket)")
+                appendLine("(allow network-bind)")
+                appendLine("(allow network-outbound (remote ip \"localhost:*\"))")
+                appendLine("(allow network-inbound (local ip \"localhost:*\"))")
+            }
+            NetworkPolicy.AIR_GAPPED -> {
+                appendLine("(deny network*)")
+                appendLine("(allow system-socket)")
+            }
         }
     }
 
@@ -146,13 +176,13 @@ object OsSandboxGuard {
     fun wrap(
         command: List<String>,
         kind: Kind,
-        allowOutboundIps: List<String> = emptyList(),
+        policy: NetworkPolicy = NetworkPolicy.AIR_GAPPED,
         profileDir: File = File(System.getProperty("java.io.tmpdir", "/tmp")),
     ): List<String> = when (kind) {
         Kind.SEATBELT -> {
             val profile = File(profileDir, PROFILE_FILE_NAME)
             profileDir.mkdirs()
-            profile.writeText(seatbeltProfile(allowOutboundIps))
+            profile.writeText(seatbeltProfile(policy))
             listOf("sandbox-exec", "-f", profile.absolutePath) + command
         }
 

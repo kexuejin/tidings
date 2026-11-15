@@ -53,13 +53,21 @@ class EmployeeProfileWiringGuardTest {
 
     @Test
     fun theProfileSectionOnlyOpensTheLedgerEntryWhenTheShellCanWrite() {
-        // 档案那一档的可见性判据：有档案 **或** 能建档。写成只看 `isNotEmpty()` 的话，
-        // 「零档案」这一档永远没有入口（新建按钮就在那一档里）；写成恒 true，手机端
-        // （读不到档案、也没有写通路）会多出一档永远为空的登记簿。
+        // 登记簿小节（档案档并入员工视图后）的可见性判据：有孤儿档案 **或** 能建档。
+        // 写成只看 `isNotEmpty()` 的话，「零孤儿档案」时小节永远没有入口（新建按钮
+        // 就在小节里）；写成恒 true，手机端（读不到档案、也没有写通路）会多出一段
+        // 永远为空的登记簿。判据本体 = 有孤儿 **或** 能建档（两半都要）——
+        // 与员工卡对得上号的档案不在这一段里（它们活在员工卡上）。
         val cards = live("composeApp/src/commonMain/kotlin/com/kapp/tenon/feature/agents/AgentTeamCards.kt")
         assertTrue(
-            "employeeProfiles.isNotEmpty() || onNewEmployeeProfile != null" in cards,
-            "「档案」这一档的可见性必须 = 有档案 或 能建档（两半都要）",
+            "orphanProfiles.isNotEmpty() || onNewEmployeeProfile != null" in cards,
+            "登记簿小节的可见性必须 = 有孤儿档案 或 能建档（两半都要）",
+        )
+        // 档案档已撤销（员工/档案对齐）：三档并列的切换器不再有「档案」格 ——
+        // 回归钉子，防止有人把第三档加回来（登记簿已是员工视图的小节）。
+        assertTrue(
+            "AgentDirectoryView.PROFILES" !in cards,
+            "「档案」不再作为平级档位存在：孤儿档案在员工视图底部的登记簿小节里",
         )
     }
 

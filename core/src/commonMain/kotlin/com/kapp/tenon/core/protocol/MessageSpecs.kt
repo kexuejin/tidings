@@ -74,7 +74,18 @@ object MessageSpecs {
         MessageSpec(type = MsgTypes.AGENT_INVOKE_RESULT, known = true, reliable = true, handled = true, label = MsgTypes.AGENT_INVOKE_RESULT),
         MessageSpec(type = MsgTypes.AGENT_CHANNEL, known = true, reliable = true, handled = true, label = MsgTypes.AGENT_CHANNEL),
         MessageSpec(type = MsgTypes.AGENT_CHANNEL_RESULT, known = true, reliable = true, handled = true, label = MsgTypes.AGENT_CHANNEL_RESULT),
-        // 主支线（Quest）跨设备帧族（Phase 2）：dispatch 只发给配了对端（旧端 KNOWN_TYPES
+        // 支线日志流三帧（Phase 1）：reliable 是**投递前提**（非 RELIABLE 帧到不了 inbound），
+        // 入站去重表顺带挡掉重连期间的重放块；发送侧走长连接直达、绝不入离线队列 ——
+        // 过期的日志订阅/积压块被 3 天 TTL 重放出去只会挤占真实待发的队列额度。
+        MessageSpec(type = MsgTypes.STREAM_SUB, known = true, reliable = true, handled = true, label = MsgTypes.STREAM_SUB),
+        MessageSpec(type = MsgTypes.STREAM_CHUNK, known = true, reliable = true, handled = true, label = MsgTypes.STREAM_CHUNK),
+        MessageSpec(type = MsgTypes.STREAM_CANCEL, known = true, reliable = true, handled = true, label = MsgTypes.STREAM_CANCEL),
+        // 多端状态增量对账两帧（Phase 2）：可靠不入队（recovery-req 同族）——
+        // 过期对账被 TTL 重放出去毫无意义；ACK 不到 = 对端旧版或离线，
+        // 等下一次亮屏对账（不重试）。
+        MessageSpec(type = MsgTypes.QUEST_SYNC_REQ, known = true, reliable = true, handled = true, label = MsgTypes.QUEST_SYNC_REQ),
+        MessageSpec(type = MsgTypes.QUEST_SYNC_RESP, known = true, reliable = true, handled = true, label = MsgTypes.QUEST_SYNC_RESP),
+        // 主支线（Quest）跨设备帧族（Phase 2 便签上行）：dispatch 只发给配了对端（旧端 KNOWN_TYPES
         // 没有该值 → known=false 静默忽略，发端便签如实留存——优雅降级）。notice 同理回执。
         // handled=true：入站路由在 RelayControllerMessagesComponent（配对校验在 handler 内）。
         MessageSpec(type = MsgTypes.QUEST_DISPATCH, known = true, reliable = true, handled = true, label = MsgTypes.QUEST_DISPATCH),

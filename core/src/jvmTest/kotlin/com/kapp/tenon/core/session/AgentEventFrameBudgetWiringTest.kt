@@ -47,9 +47,14 @@ class AgentEventFrameBudgetWiringTest {
             "必须把「编码后帧长」的度量传进去（frameBytes =）—— 默认参数只是按原始字节截，" +
                 "转义密集的 body（引号/反斜杠/换行）照样会产出两倍上限的帧。",
         )
+        // 线框实测（code review #2）：msg 帧比信封多 26 字节包装
+        // （{"type":"msg","envelope":… + }），量裸信封会在 (MAX-26, MAX] 窗口放行
+        // 超帧——接收侧整链判死。msgFrameWireBytes = 真编码器 + 包装，比裸
+        // Codec.encode 更强（把包装也算进度量）。
         assertTrue(
-            body.contains("Codec.encode("),
-            "帧长必须由真编码器给出（Codec.encode），不要在本文件里复刻一份转义规则。",
+            body.contains("msgFrameWireBytes("),
+            "帧长必须由线框实测给出（TcpFrames.msgFrameWireBytes = 真编码器 + msg 包装）——" +
+                "量裸信封会在 (MAX-26, MAX] 窗口放行超帧。",
         )
     }
 

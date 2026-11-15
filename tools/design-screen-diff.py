@@ -2018,12 +2018,36 @@ def main(argv=None):
     ap.add_argument("--reason", default=None, help="重记基线时写明为什么可以更差")
     ap.add_argument("--check", action="store_true", help="棘轮：差集只许变小")
     ap.add_argument("--self-test", action="store_true", help="量具先验")
+    ap.add_argument(
+        "--require-artifact", action="store_true",
+        help=f"台账（{LEDGER_REL}）缺失时硬失败。默认 SKIP：台账是 gitignored 的工作材料，"
+             "新克隆/worktree 里天然缺失 —— 缺输入 = 没验到，不是通过（AGENTS §2.7-3）。",
+    )
     args = ap.parse_args(argv)
 
     if args.self_test:
         return self_test()
 
     repo = os.path.abspath(args.root)
+    # 缺输入 = 没验到（AGENTS §2.7-3）：台账是 gitignored 的工作材料，新克隆/worktree
+    # 里天然缺失 —— 默认 SKIP 并把话说满（「这不是通过」），显式 --require-artifact
+    # 才硬失败。必须**只**拦「台账文件不存在」这一种：其余 DiffError 是真判红。
+    ledger_path = os.path.join(repo, args.ledger or LEDGER_REL)
+    if not os.path.exists(ledger_path):
+        if args.require_artifact:
+            print(
+                f"FAIL — 配对台账不存在（--require-artifact 硬失败）：{ledger_path}\n"
+                "  台账是 gitignored 的工作材料（AGENTS §7）；本机确认它该在时用这个开关。"
+            )
+            return 1
+        print(
+            f"[screen-diff] SKIP — 配对台账不存在：{ledger_path}\n"
+            "  缺输入 = 没验到，这不是通过。门禁只依赖仓库内容；台账是 gitignored 的\n"
+            "  工作材料（AGENTS §7），新克隆/worktree 里天然没有。\n"
+            "  要跑：把台账放到上面那个路径（或用 --ledger 指一个存在的）。\n"
+            "  要硬失败（本机确认台账该在）：--require-artifact。"
+        )
+        return 0
     only = None if (args.all or not args.screen) else set(args.screen)
     try:
         result = collect(repo, args.ledger, only)

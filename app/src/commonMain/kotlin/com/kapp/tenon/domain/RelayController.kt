@@ -12,7 +12,11 @@ import com.kapp.tenon.core.nowMillis
 import com.kapp.tenon.core.protocol.AssistantNoticeClamper
 import com.kapp.tenon.core.protocol.AssistantQuestNotice
 import com.kapp.tenon.core.protocol.toProtocolAgentState
+import com.kapp.tenon.core.protocol.CodecWire
+import com.kapp.tenon.core.protocol.CodecQuestSync
 import com.kapp.tenon.core.protocol.Limits
+import com.kapp.tenon.core.protocol.QuestRevPair
+import com.kapp.tenon.core.protocol.QuestSnapshotPayload
 import com.kapp.tenon.core.protocol.AgentSenderId
 import com.kapp.tenon.core.protocol.ConvId
 import com.kapp.tenon.core.protocol.TeamMemberDraft
@@ -363,6 +367,286 @@ class RelayController(
     internal var runtime: NodeRuntime? = null
     internal var jobs = mutableListOf<Job>()
     var onLocalSessionPageRequest: ((peerId: String, wsId: String, offset: Long, limit: Long?) -> Boolean)? = null
+
+    // ------------------------------------------------------- 支线日志流（Phase 1）
+
+    /**
+     * quest 日志流枢纽。发送 lambda 背后是 `NodeOutbound.sendStreamFrame`（加密长连接
+     * 直达、不入队）：ACK 不到如实落「不可用」，绝不重试 —— 语义见 [QuestStreamHub]。
+     *
+     * 宿主归属解析走 [MessageStore.questCardRow] 的 senderId（`AgentSenderId.parse`）：
+     * 这单 quest 跑在哪台机器上，卡片行自己记得。解析结果在 hub 内缓存（一次解析
+     * 终身有效），不会每帧都打 SQLite。
+     */
+    private val questStreamHub = QuestStreamHub(
+        scope = scope,
+        sendSub = { peerId, questId, sinceSeq ->
+            val rt = runtime ?: return@QuestStreamHub false
+            runCatching { rt.sendStreamSub(peerId, questId, if (sinceSeq > 0) sinceSeq else null) }.getOrDefault(false)
+        },
+        sendChunk = { peerId, questId, seq, text ->
+            val rt = runtime ?: return@QuestStreamHub false
+            runCatching { rt.sendStreamChunk(peerId, questId, seq, text) }.getOrDefault(false)
+        },
+        sendCancel = { peerId, questId ->
+            val rt = runtime ?: return@QuestStreamHub false
+            runCatching { rt.sendStreamCancel(peerId, questId) }.getOrDefault(false)
+        },
+        onDiagnostic = { tag, message -> diagnosticLogSink?.invoke(tag, message) },
+        questHostResolver = { questId ->
+            val self = state.value.selfNodeId
+            // 1) 卡行的 senderId（agent:<宿主>:<agent>）—— 宿主本地卡的权威来源。
+            val fromCard = messageStore.questCardRow(questId)?.senderId
+                ?.let { AgentSenderId.parse(it)?.first }
+            when {
+                fromCard != null && fromCard == self -> QuestStreamHub.LOCAL_HOST
+                fromCard != null -> fromCard
+                else ->
+                    // 2) 手机侧便签翻面行没有 senderId：派单上行走的就是 questPairNodes
+                    //    内的在线对端（dispatchAssistantQuest 的 fallback 同一条链），
+                    //    日志流从同一个宿主回来 —— 解析口径必须一致。
+                    state.value.settings.questPairNodes
+                        .firstOrNull { pair -> state.value.peers.any { it.nodeId == pair } }
+            }
+        },
+    )
+
+    /** UI 意图：作战室开 = true，关弹窗/切后台 = false（对账由 hub 自己排程）。 */
+    override fun setQuestStreamDesired(questId: String, wanted: Boolean) = questStreamHub.setDesired(questId, wanted)
+
+    /** quest 日志流在界面上的状态（本地/流送中/不可用/空闲）。 */
+    override fun questStreamStateOf(questId: String): QuestStreamState = questStreamHub.streamStateOf(questId)
+
+    /** UNAVAILABLE 的原因细分（面板文案据此如实：找不到宿主 vs 通道不可达）。 */
+    override fun questStreamUnavailableReasonOf(questId: String): QuestStreamUnavailableReason? =
+        questStreamHub.unavailableReasonOf(questId)
+
+    /** 订阅端修订流：UI collect 它驱动重组（AgentLiveLog 同款形状）。 */
+    val questStreamSnapshot: StateFlow<QuestStreamHub.Snapshot> get() = questStreamHub.snapshot
+
+    /** 作战室日志面板的正文来源：本机任务读宿主缓冲，远端任务读订阅缓冲。 */
+    override fun questStreamLines(questId: String): List<String> =
+        when (questStreamHub.streamStateOf(questId)) {
+            QuestStreamState.LOCAL -> questStreamHub.localSnapshotLines(questId)
+            else -> questStreamHub.snapshotLines(questId)
+        }
+
+    /**
+     * 宿主侧原始行入口（quest 日志泵的数据源）。编排层（`DesktopExtension` 的
+     * quest `runTask` lambda）经它把 CLI 子进程的每一行喂进日志流枢纽。
+     */
+    suspend fun acceptQuestStreamLine(questId: String, line: String) =
+        questStreamHub.acceptLine(questId, line)
+
+    /** 任务终局把残留半批冲进宿主缓冲（`runTask` 收尾时调用）。 */
+    suspend fun questStreamSettled(questId: String) = questStreamHub.questSettled(questId)
+
+    // ------------------------------------------------ 移动端 Diff 审查（Phase 4）
+
+    /**
+     * 补丁文本读取器（壳注入）：平台文件 IO 在壳层（桌面 java.io / Android
+     * content resolver），领域层只有路由事实 —— 这里**只**提供路径。
+     * null = 壳没接（测试宿主），界面画「先接收补丁文件」。
+     */
+    var questPatchReader: ((path: String) -> String?)? = null
+
+    /** quest 产物补丁的固定文件名（QuestRunner 收割的 patch.diff）。 */
+    private val patchFileName = "patch.diff"
+
+    /**
+     * 本会话里最新一份补丁文件（quest 产物 patch.diff）在**本机的落盘路径**。
+     * 产物帧只带元数据（§6.7），二进制走 file-msg —— 路径只能从文件消息行找。
+     */
+    fun latestQuestPatchPath(): String? {
+        val rows = state.value.messages[ConvId.ASSISTANT].orEmpty()
+        for (row in rows.asReversed()) {
+            val file = row.file ?: continue
+            if (file.name != patchFileName) continue
+            if (file.savedPaths.isEmpty()) continue
+            return file.savedPaths.first()
+        }
+        return null
+    }
+
+    /** quest 补丁的整包文本（壳读取）；null = 没有落盘的补丁或壳没接读取器。 */
+    override fun questPatchText(): String? {
+        val path = latestQuestPatchPath() ?: return null
+        return questPatchReader?.invoke(path)
+    }
+
+    // ------------------------------------------------ 多端状态增量对账（Phase 2）
+
+    /**
+     * 上一页对账请求（`quest-sync-resp.hasMore` 续拉用）：宿主 peer → 发出的清单。
+     * 单飞行即可 —— 对账是亮屏触发的串行拉取，不并发。
+     */
+    /** 进行中的对账请求（按宿主分桶）：宿主 → 发出的清单 + 最后游标。多宿主/多页并存。 */
+    private val pendingQuestSyncs = mutableMapOf<String, PendingQuestSyncPage>()
+    private val pendingQuestSyncsLock = createStateLock()
+
+    private class PendingQuestSyncPage(
+        val quests: List<com.kapp.tenon.core.protocol.QuestRevPair>,
+        var cursor: String? = null,
+    )
+
+    /**
+     * 对账拉取入口（亮屏触发，[onAppForegrounded]）：把本地已知 quest 档位按宿主
+     * 分组、按 [Limits.QUEST_SYNC_MAX_QUESTS] 分页发 `quest-sync-req`。
+     * ACK 不到（宿主离线/旧版）如实放弃 —— 等下一次亮屏，**绝不入队**。
+     */
+    fun questSyncPull() {
+        scope.launch {
+            val rt = runtime ?: return@launch
+            val self = state.value.selfNodeId
+            // 存量回退：originHost 盖章（originHost 修复）之前翻面的卡，senderId 还是
+            // 机主自己，解析不出宿主。wire 派单只可能来自配对对端 —— 恰好一个配对
+            // 时就能归主；多个配对时归不了主，宁可漏对账也不猜（猜错 = 把 A 宿主的
+            // 档位问成 B 宿主，两边都答「没有更新」，浪费一轮探测而已，但语义是脏的）。
+            val pairedFallback = state.value.settings.questPairNodes.singleOrNull()
+            val byHost = LinkedHashMap<String, MutableList<QuestRevPair>>()
+            for (row in messageStore.questRows()) {
+                val host = AgentSenderId.parse(row.senderId)?.first
+                    ?: pairedFallback
+                    ?: continue
+                if (host == self) continue // 本机任务没有「远端更权威」的档位
+                byHost.getOrPut(host) { mutableListOf() }.add(QuestRevPair(row.questId, row.rev))
+            }
+            for ((host, quests) in byHost) {
+                quests.chunked(Limits.QUEST_SYNC_MAX_QUESTS).forEachIndexed { idx, chunk ->
+                    val page = PendingQuestSyncPage(quests = chunk)
+                    pendingQuestSyncsLock.withLock { pendingQuestSyncs[host] = page }
+                    // 首页 cursor=null；续拉由 resp 的 hasMore 驱动（游标随 resp 传回）。
+                    val ok = runCatching {
+                        rt.sendQuestSyncReq(host, page.quests, cursor = null)
+                    }.getOrDefault(false)
+                    diagnosticLogSink?.invoke(
+                        "RELAY-QUEST",
+                        "quest sync pull: host=" + host.take(8) + " page=" + idx +
+                            " quests=" + chunk.size + " sent=" + ok,
+                    )
+                    if (!ok) return@forEachIndexed // 探测窗落空：这批等下次亮屏
+                }
+            }
+        }
+    }
+
+    /** 入站 `quest-sync-req`（宿主侧应答）：仅下发比请求档位**更新**的快照页。 */
+    private suspend fun handleQuestSyncReqInternal(envelope: Envelope) {
+        val rt = runtime ?: return
+        val from = envelope.from?.take(8) ?: "?"
+        diagnosticLogSink?.invoke("RELAY-QUEST", "quest sync req from " + from)
+        // 每个静默出口都留读数：对账是「卡停在进行中」的唯一兜底路径，它自己
+        // 静默了，外面就没有任何东西能区分「没有更新」与「处理崩了」。
+        runCatching {
+            val p = envelope.payload as? kotlinx.serialization.json.JsonObject
+                ?: error("payload is not an object")
+            val quests = (p["quests"] as? kotlinx.serialization.json.JsonArray)?.mapNotNull { item ->
+                (item as? kotlinx.serialization.json.JsonObject)?.let { pair ->
+                    val questId = CodecWire.strOrNull(pair["questId"], Limits.ID) ?: return@let null
+                    val rev = CodecWire.intOf(pair["rev"]) ?: return@let null
+                    if (rev < 0) null else questId to rev
+                }
+            } ?: error("quests array missing")
+            if (quests.isEmpty()) error("quests empty after parse")
+            val cursor = CodecWire.strAllowEmptyOrNull(p["cursor"], Limits.CARD_BYTES)
+            diagnosticLogSink?.invoke(
+                "RELAY-QUEST",
+                "quest sync req parsed: " + quests.joinToString(",") { it.first.take(10) + "@" + it.second } +
+                    " cursor=" + (cursor ?: "none"),
+            )
+            val knownIds = quests.map { it.first }.toSet()
+            val candidates = ArrayList<QuestSnapshotPayload>()
+            val revSeen = ArrayList<Pair<String, Long>>()
+            var matched = 0
+            for (row in messageStore.questRows()) {
+                if (row.questId !in knownIds) continue
+                matched++
+                revSeen.add(row.questId to row.rev)
+                val requested = quests.first { it.first == row.questId }.second
+                if (row.rev <= requested) continue
+                val card = messageStore.questCardRow(row.questId) ?: continue
+                val payloadText = card.cardPayload ?: continue
+                candidates.add(
+                    QuestSnapshotPayload(
+                        questId = row.questId,
+                        rev = row.rev,
+                        cardPayload = payloadText,
+                        agentState = card.agentState ?: continue,
+                    ),
+                )
+            }
+            diagnosticLogSink?.invoke(
+                "RELAY-QUEST",
+                "quest sync match: rows-with-quest=" + matched + " candidates=" + candidates.size +
+                    " revs=" + revSeen.joinToString(",") { it.first.take(10) + "@" + it.second },
+            )
+            // 续页定位：与 packSnapshots 同款的 (rev, questId) 确定性序，跳过游标
+            // 之前的所有快照（同 rev 的 quest 不会被全局 rev 游标吞掉——review #7）。
+            val resumeAfter = (p["cursor"] as? kotlinx.serialization.json.JsonPrimitive)?.content
+            val ordered = candidates.sortedWith(compareBy({ it.rev }, { it.questId }))
+            val pageCandidates = if (resumeAfter.isNullOrBlank()) {
+                ordered
+            } else {
+                val at = resumeAfter.lastIndexOf('@')
+                val cursorQuestId = if (at > 0) resumeAfter.substring(0, at) else resumeAfter
+                val cursorRev = if (at > 0) resumeAfter.substring(at + 1).toLongOrNull() else null
+                val idx = ordered.indexOfFirst { it.questId == cursorQuestId && it.rev == cursorRev }
+                if (idx >= 0) ordered.drop(idx + 1) else ordered // 游标不在清单（宿主变化）：从头发
+            }
+            diagnosticLogSink?.invoke(
+                "RELAY-QUEST",
+                "quest sync page: total=" + ordered.size + " after-cursor=" + pageCandidates.size,
+            )
+            val packed = CodecQuestSync.packSnapshots(pageCandidates)
+            if (packed.page.isEmpty()) {
+                // 没有更新：沉默（对账不是对话）——但留一行读数，外面才知道走到这了。
+                diagnosticLogSink?.invoke("RELAY-QUEST", "quest sync resp to " + from + ": no newer snapshots")
+                return
+            }
+            val ok = rt.sendQuestSyncResp(envelope.from, packed.page, packed.hasMore, packed.cursor)
+            diagnosticLogSink?.invoke(
+                "RELAY-QUEST",
+                "quest sync resp to " + (envelope.from?.take(8) ?: "?") +
+                    " snapshots=" + packed.page.size + " rest=" + packed.rest.size + " sent=" + ok,
+            )
+        }.onFailure { t ->
+            diagnosticLogSink?.invoke(
+                "RELAY-QUEST",
+                "quest sync req FAILED from " + from + ": " + (t.message ?: t::class.simpleName ?: "unknown"),
+            )
+        }
+    }
+
+    /** 入站 `quest-sync-resp`（订阅侧合并）：rev 乐观锁原位推进；`hasMore` 续拉。 */
+    private suspend fun handleQuestSyncRespInternal(envelope: Envelope) {
+        val p = envelope.payload as? kotlinx.serialization.json.JsonObject ?: return
+        val snapshots = (p["snapshots"] as? kotlinx.serialization.json.JsonArray)?.mapNotNull { item ->
+            diagnosticLogSink?.invoke("RELAY-QUEST", "quest sync resp received from " + (envelope.from?.take(8) ?: "?"))
+            (item as? kotlinx.serialization.json.JsonObject)?.let { snap ->
+                val questId = CodecWire.strOrNull(snap["questId"], Limits.ID) ?: return@let null
+                val rev = CodecWire.intOf(snap["rev"]) ?: return@let null
+                val payload = CodecWire.strOrNull(snap["cardPayload"], Limits.CARD_BYTES) ?: return@let null
+                val status = CodecWire.strAllowEmptyOrNull(snap["agentState"], Limits.AGENT_STATE)
+                if (rev < 1 || status == null) null
+                else Triple(questId, payload, status) to rev
+            }
+        } ?: return
+        for ((data, rev) in snapshots) {
+            val (questId, payloadText, status) = data
+            // rev 乐观锁在 SQL 里（quest_rev < :rev 才推进）：重复/迟到快照幂等丢弃。
+            val updated = messageStore.updateCardContent(questId, payloadText, status, rev)
+            diagnosticLogSink?.invoke(
+                "RELAY-QUEST",
+                "quest sync resp apply: quest=" + questId + " rev=" + rev + " updated=" + updated,
+            )
+        }
+        val hasMore = CodecWire.boolOf(p["hasMore"]) ?: false
+        val cursor = CodecWire.strAllowEmptyOrNull(p["cursor"], Limits.CARD_BYTES)
+        if (hasMore && !cursor.isNullOrBlank()) {
+            val page = pendingQuestSyncsLock.withLock { pendingQuestSyncs[envelope.from] } ?: return
+            runtime?.sendQuestSyncReq(envelope.from, page.quests, cursor = cursor)
+        }
+    }
     /**
      * 文本路由的派单出口。[prompt] 已经剥掉 `@` 提及，[mentionedAgentKey] 是**原文里
      * 被点名的那个键**（小写；没有点名 = null，例如工作区群里回复 agent 的接话）。
@@ -740,11 +1024,12 @@ class RelayController(
             val peer = state.value.settings.questPairNodes
                 .firstOrNull { pair -> state.value.peers.any { it.nodeId == pair } }
             scope.launch {
-                val sent = peer?.let { runtime?.sendQuestDispatch(it, token, prompt) }
-                if (sent == null) {
+                val sent = peer?.let { runtime?.sendQuestDispatch(it, token, prompt) } ?: false
+                // false = 通道不可达（对端离线/无通道）——便签如实留存，等下次亮屏对账重试。
+                if (!sent) {
                     diagnosticLogSink?.invoke(
                         "RELAY-QUEST",
-                        "assistant quest note stored (no executor): token=" + token +
+                        "assistant quest note stored (channel unavailable): token=" + token +
                             " paired=" + state.value.settings.questPairNodes.size,
                     )
                 }
@@ -755,7 +1040,20 @@ class RelayController(
     /** 机主叫停一条支线（卡片 cancel-quest 动作）。 */
     /** Phase 2：跨端回执——桌面把支线通知回执给 wire 派单端（它的便签靠 token 翻面）。 */
     fun sendQuestNoticeTo(peerId: String, notice: AssistantQuestNotice) {
-        scope.launch { runtime?.sendQuestNotice(peerId, notice) }
+        scope.launch {
+            // 终态通知必须最终到达：链路断窗（xport 握手重试 35s 一档）会吞掉单发
+            // （真机实测 quesprobe4：ok=false 后通知无声消失，便签停在 RUNNING）。
+            // 预算内重试；超预算如实放弃 —— 更长的断窗由 quest-sync 亮屏对账兜底。
+            // 投递读数走 diagnosticLogSink（诊断面可见），裸 println 不可观测。
+            val ok = QuestNoticeDelivery.deliverWithRetry(
+                send = { runtime?.sendQuestNotice(peerId, notice) ?: false },
+            )
+            diagnosticLogSink?.invoke(
+                "RELAY-QUEST",
+                "notice delivered to " + peerId.take(8) + " ok=" + ok +
+                    " (quest=" + notice.questId + " status=" + notice.status + ")",
+            )
+        }
     }
 
     fun handleOnQuestDispatch(envelope: com.kapp.tenon.core.protocol.Envelope) =
@@ -933,6 +1231,32 @@ class RelayController(
         }
         if (envelope.type == MsgTypes.AGENT_CHANNEL_RESULT) {
             invokeCtl.handleOnAgentChannelResult(envelope)
+            return
+        }
+        // 支线日志流三帧（Phase 1）：瞬态控制/流帧，不是聊天记录 —— 同一条纪律，
+        // 在 CHAT_INBOUND_TYPES 闸之前接走（NodeRuntime 的 messageStore 跳过清单里
+        // 也已按 `stream-` 前缀豁免）。
+        if (envelope.type == MsgTypes.STREAM_SUB) {
+            scope.launch { questStreamHub.handleStreamSub(envelope) }
+            return
+        }
+        if (envelope.type == MsgTypes.STREAM_CHUNK) {
+            scope.launch { questStreamHub.handleStreamChunk(envelope) }
+            return
+        }
+        if (envelope.type == MsgTypes.STREAM_CANCEL) {
+            scope.launch { questStreamHub.handleStreamCancel(envelope) }
+            return
+        }
+        // 多端状态增量对账两帧（Phase 2）：控制事实帧，与日志流同一条「在
+        // CHAT_INBOUND_TYPES 之前接走」的纪律（messageStore 跳过清单未含 quest-sync
+        // 前缀 —— 它们不是 `stream-` 族；落 envelope 日志是噪声，下面单独豁免）。
+        if (envelope.type == MsgTypes.QUEST_SYNC_REQ) {
+            scope.launch { handleQuestSyncReqInternal(envelope) }
+            return
+        }
+        if (envelope.type == MsgTypes.QUEST_SYNC_RESP) {
+            scope.launch { handleQuestSyncRespInternal(envelope) }
             return
         }
         messagesCtl.handleOnInbound(envelope)
@@ -1474,7 +1798,7 @@ class RelayController(
      * [MessageStore.updateCardContent] 的列级 rev 锁留给跨写者场景（列级更新与
      * 整行 REPLACE 混用会互相覆写，见 flip 分支注释）。
      */
-    fun handleAssistantQuestNotice(notice: AssistantQuestNotice) {
+    fun handleAssistantQuestNotice(notice: AssistantQuestNotice, originHost: String? = null) {
         val clamped = AssistantNoticeClamper.clampNotice(notice)
         if (clamped !is AssistantNoticeClamper.ClampOutcome.Success) {
             val exceeded = clamped as? AssistantNoticeClamper.ClampOutcome.Exceeded
@@ -1499,11 +1823,30 @@ class RelayController(
                 core.threads[conv]?.firstOrNull { it.clientToken == noteToken }
             }
             if (note != null) {
+                // rev 门与 questId 路径同款：已绑定**同 quest** 且 rev 不更新 → 迟到
+                // 重发丢弃。deliverWithRetry 的重发每次都是新信封 id（传输去重拦不
+                // 住），无门的翻面会让 FAILED 后迟到的 RUNNING 重发把卡打回进行中，
+                // 并经 persistThreads 把 DB 的新 rev 覆盖回去（code review #3）。
+                // 首翻（questId 未绑定）放行。
+                if (note.questId == validNotice.questId && note.questRev >= validNotice.rev) {
+                    diagnosticLogSink?.invoke(
+                        "RELAY-QUEST",
+                        "stale quest notice for token dropped: quest=" + validNotice.questId +
+                            " rev=" + validNotice.rev + " current=" + note.questRev,
+                    )
+                    return
+                }
+                // 盖上通知来源宿主：wire 派单的卡是便签翻面来的，便签的 senderId
+                // 是机主自己 —— 不盖宿主，questSyncPull 的归宿主解析就认不出这条卡
+                // 属于哪台宿主，终态对账永远轮不到它（真机实测：卡停在进行中，
+                // 亮屏对账盲区）。本机任务 originHost 为空，保持原样。
                 val flipped = note.copy(
                     card = payload,
                     agentState = validNotice.status.toProtocolAgentState(),
                     questId = validNotice.questId,
                     questRev = validNotice.rev,
+                    senderId = originHost?.let { AgentSenderId.of(it, agentId = "assistant") }
+                        ?: note.senderId,
                 )
                 handleReplaceMessage(conv, flipped)
                 messageStore.bindPendingNoteToQuest(
@@ -1550,8 +1893,9 @@ class RelayController(
             id = localMessageId(),
             peerId = conv,
             mine = false,
-            senderId = state.value.selfNodeId.takeIf { it.isNotBlank() }
-                ?.let { AgentSenderId.of(it, agentId = "assistant") },
+            senderId = originHost?.let { AgentSenderId.of(it, agentId = "assistant") }
+                ?: state.value.selfNodeId.takeIf { it.isNotBlank() }
+                    ?.let { AgentSenderId.of(it, agentId = "assistant") },
             text = validNotice.summary,
             at = nowMillis(),
             card = payload,
@@ -2247,6 +2591,9 @@ class RelayController(
         // stopBrowsing 之后 lost 回调不会再来；不清表会留下永远「在线」的幽灵设备行。
         core.mdnsServices.clear()
         _state.update { it.copy(mdnsServices = emptyList()) }
+        // 支线日志流（Phase 1）：后台不发 cancel 等于让宿主对着一台睡着的手机空转泵日志
+        // —— 意图清空 + 全量退订（方案 v3：切后台立即 CANCEL 掐断订阅）。
+        questStreamHub.cancelAllDesired()
     }
 
     /**
@@ -2257,6 +2604,12 @@ class RelayController(
         if (runtime != null) {
             startMdnsBrowsing()
         }
+        // 支线日志流（Phase 1）：切前台对账一次 —— 作战室还开着的那单会按 sinceSeq
+        // 续订补档，链路在后台断掉的情形在这里恢复。
+        scope.launch { questStreamHub.reconcile() }
+        // 多端状态增量对账（Phase 2）：亮屏即拉 —— 离线交替使用后卡片 rev 落后
+        // 的脑裂在这里收口（宿主仅回更新档位，updateCardContent 原位推进）。
+        questSyncPull()
     }
 
     suspend fun scanQrCode(): Boolean {

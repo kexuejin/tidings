@@ -60,6 +60,13 @@ internal interface AgentDomainHost {
     /** 会话分页请求桥：界面接它来向宿主再要一页（null = 没装桥）。 */
     val onLocalSessionPageRequest: ((peerId: String, wsId: String, offset: Long, limit: Long?) -> Boolean)?
 
+    /**
+     * 支线卡动作的 quest 门（orchestration 接线；null = 本机没有 runner）。
+     * [RelayControllerAgentCardActions] 的宿主侧动作分流据此路由：quest 门吃下
+     * （返回 true）就不再落通用插件路径 —— 见 handleHostCardAction 的分流判据。
+     */
+    var onQuestIntervention: ((questId: String, actionId: String, text: String) -> Boolean)?
+
     /** 生成本机乐观消息 id。 */
     fun localMessageId(): String
 
@@ -159,6 +166,12 @@ internal class AgentDomainService(
     override val onLocalSessionPageRequest:
         ((peerId: String, wsId: String, offset: Long, limit: Long?) -> Boolean)?
         get() = host.onLocalSessionPageRequest
+
+    override var onQuestIntervention: ((questId: String, actionId: String, text: String) -> Boolean)?
+        get() = host.onQuestIntervention
+        set(value) {
+            host.onQuestIntervention = value
+        }
 
     override fun localMessageId(): String = host.localMessageId()
 

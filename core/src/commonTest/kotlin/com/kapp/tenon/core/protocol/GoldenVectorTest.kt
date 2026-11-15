@@ -59,7 +59,7 @@ class GoldenVectorTest {
         // 本端实现这两个类型之后，同一批字节的结论不再与 TS 一致，留在 parity 集里就是错的。
         assertEquals(14, GOLDEN_VECTORS.size, "向量数量变了，说明生成脚本或夹具被改动过")
         assertEquals(2, OLD_NODE_EXTENSION_VERDICTS.size, "老节点结论记录被改动过")
-        assertEquals(21, EXTENSION_VECTORS.size, "PPE-1 扩展向量数量变了（M7-T3 +2、M7-T2 +3、免批规则读撤 +4）")
+        assertEquals(30, EXTENSION_VECTORS.size, "PPE-1 扩展向量数量变了（M7-T3 +2、M7-T2 +3、免批规则读撤 +4、支线日志流 +5、状态对账 +4）")
     }
 
     @Test
@@ -281,6 +281,37 @@ class GoldenVectorTest {
                     ),
                 ),
                 at = TS,
+            ),
+        )
+        // 支线日志流三帧（Phase 1）出站字节护栏：键序 = Payloads.kt 声明序。
+        // sinceSeq 为 null 时整个键省略（encodeDefaults=false + explicitNulls=false）。
+        assertTyped(
+            "stream-sub", MsgTypes.STREAM_SUB, PEER,
+            Codec.streamSubPayload(questId = "q-1", sinceSeq = 5),
+        )
+        assertTyped(
+            "stream-chunk", MsgTypes.STREAM_CHUNK, PEER,
+            Codec.streamChunkPayload(questId = "q-1", seq = 7, text = "build ok"),
+        )
+        assertTyped(
+            "stream-cancel", MsgTypes.STREAM_CANCEL, PEER,
+            Codec.streamCancelPayload(questId = "q-1"),
+        )
+        // 多端状态对账两帧（Phase 2）出站字节护栏：键序 = Payloads.kt 声明序。
+        assertTyped(
+            "quest-sync-req", MsgTypes.QUEST_SYNC_REQ, PEER,
+            Codec.questSyncReqPayload(
+                quests = listOf(QuestRevPair("q-1", 3), QuestRevPair("q-2", 9)),
+            ),
+        )
+        assertTyped(
+            "quest-sync-resp", MsgTypes.QUEST_SYNC_RESP, PEER,
+            Codec.questSyncRespPayload(
+                snapshots = listOf(
+                    QuestSnapshotPayload(questId = "q-1", rev = 5, cardPayload = "card-payload-q1", agentState = "RUNNING"),
+                ),
+                hasMore = false,
+                cursor = null,
             ),
         )
     }

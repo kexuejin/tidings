@@ -90,6 +90,65 @@ internal object SchemaSelfHeal {
     )
 
     /**
+     * `22.sqm` 的 MessageEntity 三列（quest_id / quest_rev / client_token）——
+     * **带存在性守卫的补列**。
+     *
+     * ## 为什么"只补表、不改列"的边界要在这里破一次
+     *
+     * 原边界（"改列必须走 .sqm"）的前提是 .sqm 真的会跑。这台机器的宿主老库是
+     * **实证反例**：`card_payload`（18.sqm 的列）在 ⇒ [resolveMigrateFrom] 的哨兵链
+     * 把起点抬到 `schemaVersion` ⇒ 22/23 两段被判"早就跑过"整段跳过 ——
+     * `user_version = 24` 而 quest 表与三列**全都不在**（quest 真机验收现场）。
+     * 列不可能从别处来；守卫式的 ADD COLUMN（先问 pragma 再补）是幂等的，且只补
+     * **缺失**的列、从不改动已存在的形状 —— 与"补建"同一精神，只是对象是列。
+     */
+    internal data class MissingColumnDdl(val table: String, val column: String, val ddl: String)
+
+    internal val questColumnStatements: List<MissingColumnDdl> = listOf(
+        MissingColumnDdl("MessageEntity", "quest_id", "ALTER TABLE MessageEntity ADD COLUMN quest_id TEXT DEFAULT NULL"),
+        MissingColumnDdl("MessageEntity", "quest_rev", "ALTER TABLE MessageEntity ADD COLUMN quest_rev INTEGER NOT NULL DEFAULT 0"),
+        MissingColumnDdl("QuestLedger", "client_token", "ALTER TABLE QuestLedger ADD COLUMN client_token TEXT DEFAULT NULL"),
+        MissingColumnDdl("QuestLedger", "auto_merge", "ALTER TABLE QuestLedger ADD COLUMN auto_merge INTEGER NOT NULL DEFAULT 1"),
+        MissingColumnDdl("MessageEntity", "client_token", "ALTER TABLE MessageEntity ADD COLUMN client_token TEXT DEFAULT NULL"),
+    )
+
+    /** `22.sqm` 的两条索引（排在列之后 —— 索引引用的列得先在）。 */
+    internal val questIndexStatements: List<String> = listOf(
+        "CREATE INDEX IF NOT EXISTS index_message_quest_id ON MessageEntity(quest_id)",
+        "CREATE INDEX IF NOT EXISTS index_message_client_token ON MessageEntity(client_token)",
+    )
+
+    /** `22.sqm` 的支线挂起等待状态表（与 RelayDatabase.sq 的定义同形，IF NOT EXISTS）。 */
+    internal const val QUEST_SUSPENDED_STATE =
+        "CREATE TABLE IF NOT EXISTS QuestSuspendedState (" +
+            "quest_id TEXT NOT NULL PRIMARY KEY, " +
+            "conv_id TEXT NOT NULL, " +
+            "prompt TEXT NOT NULL, " +
+            "status TEXT NOT NULL, " +
+            "rev INTEGER NOT NULL DEFAULT 0, " +
+            "suspended_at INTEGER NOT NULL)"
+
+    /** `23.sqm` 的支线执行台账（与 RelayDatabase.sq 的定义同形，IF NOT EXISTS）。 */
+    internal const val QUEST_LEDGER =
+        "CREATE TABLE IF NOT EXISTS QuestLedger (" +
+            "quest_id TEXT NOT NULL PRIMARY KEY, " +
+            "branch TEXT NOT NULL, " +
+            "worktree_path TEXT NOT NULL, " +
+            "main_workspace TEXT NOT NULL, " +
+            "conv_id TEXT NOT NULL, " +
+            "title TEXT NOT NULL, " +
+            "status TEXT NOT NULL, " +
+            "prompt TEXT NOT NULL DEFAULT '', " +
+            "agent_key TEXT NOT NULL DEFAULT '', " +
+            "updated_at INTEGER NOT NULL)"
+
+    /** 顺序有意义：列先于索引（索引引用列），表互相独立。 */
+    internal val questStatements: List<String> = listOf(
+        QUEST_SUSPENDED_STATE,
+        QUEST_LEDGER,
+    )
+
+    /**
      * 逐条补建。
      *
      * **失败只留痕不抛**：这一步是"修历史遗留"，不是"开库前置条件"。
@@ -105,5 +164,40 @@ internal object SchemaSelfHeal {
                     println("[db] self-heal FAILED: " + (t.message ?: t::class.simpleName) + " | " + sql)
                 }
         }
+        // quest 三列（带存在性守卫）→ 索引 → 表。列必须在索引之前：索引引用列。
+        for (column in questColumnStatements) {
+            if (hasColumn(driver, column.table, column.column)) continue
+            runCatching { driver.execute(identifier = null, sql = column.ddl, parameters = 0).value }
+                .onFailure { t ->
+                    println("[db] self-heal FAILED (column " + column.column + "): " +
+                        (t.message ?: t::class.simpleName) + " | " + column.ddl)
+                }
+        }
+        for (sql in questIndexStatements + questStatements) {
+            runCatching { driver.execute(identifier = null, sql = sql, parameters = 0).value }
+                .onFailure { t ->
+                    println("[db] self-heal FAILED: " + (t.message ?: t::class.simpleName) + " | " + sql)
+                }
+        }
+    }
+
+    /**
+     * `PRAGMA table_info` 的列名集合里有没有这一列（真实现场的判据形状，与
+     * `DatabaseDriverFactory.jvm.kt` 的 columnsOf 同一口径）。
+     */
+    private fun hasColumn(driver: SqlDriver, table: String, column: String): Boolean {
+        var hit = false
+        driver.executeQuery(
+            identifier = null,
+            sql = "PRAGMA table_info($table)",
+            mapper = { cursor ->
+                while (cursor.next().value) {
+                    if (cursor.getString(1)?.equals(other = column, ignoreCase = true) == true) hit = true
+                }
+                app.cash.sqldelight.db.QueryResult.Value(Unit)
+            },
+            parameters = 0,
+        ).value
+        return hit
     }
 }

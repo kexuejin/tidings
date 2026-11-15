@@ -49,11 +49,20 @@ class LinkK1Test {
         caps = caps,
     )
 
-    // 30s = 观测预算不是断言（§2.7-6）：建链/互认各步在全量串行满载下实测会在
-    // 10s 内轮换着红（testStabilityGate run2 复现，单跑恒绿）。上限与 awaitUntil 同款默认值。
-    private suspend fun awaitTrue(what: String, timeoutMs: Long = 30_000, condition: () -> Boolean) {
+    // 60s = 观测预算不是断言（§2.7-6）：建链/互认各步在全量串行满载下实测会在
+    // 10s 内轮换着红（testStabilityGate run2 复现，单跑恒绿）。30s 档在稳定性门
+    // 的**第 1 轮**（冷 JVM + 全量串行）仍偶发超窗（2026-11-15 三跑两红，全部
+    // 落在拨号 await；第 2/3 轮与主干全绿）—— 冷启动窗口给足到 60s。
+    private suspend fun awaitTrue(what: String, timeoutMs: Long = 60_000, condition: () -> Boolean) {
+        var diagAt = 0L
         withTimeout(timeoutMs) {
-            while (!condition()) delay(20)
+            while (!condition()) {
+                if (System.currentTimeMillis() - diagAt > 10_000) {
+                    diagAt = System.currentTimeMillis()
+                    println("[linkk1-diag] waiting=$what")
+                }
+                delay(20)
+            }
         }
     }
 
@@ -115,7 +124,8 @@ class LinkK1Test {
             assertEquals(SendOutcome.SENT, host.messenger.sendUserMessage("phone-node", outgoing))
             // 30s = 观测预算不是断言（§2.7-6）：全量串行满载时下行一条文本实测会在
             // 5s 预算内轮换着红（单跑恒绿）。上限放宽到 awaitUntil 同款默认值。
-            val got = withTimeout(30_000) { received.await() }
+            // 60s = 观测预算不是断言（§2.7-6，冷启动窗口放宽同 awaitTrue）。
+        val got = withTimeout(60_000) { received.await() }
             val text = ((got.payload as? JsonObject)?.get("text"))?.jsonPrimitive?.content
             assertEquals("走长连接的下行", text)
             watch.cancel()
