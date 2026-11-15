@@ -611,6 +611,9 @@ internal fun WorkspaceBoardView(
                             unit = unit,
                             online = group.online,
                             now = now,
+                            // 收敛型裁决：看板行只回答「这个目录有多少活」，会话内容
+                            // 收进工作区详情——原始事件文本不再泄漏到清单页。
+                            showActiveSession = false,
                             onOpenUnit = {
                                 onSelectAgent(unit.peerId)
                                 onOpenWorkspace(unit.peerId, unit.wsId, null)

@@ -23,6 +23,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.kapp.tenon.generated.resources.agent_detail_ws_session_count
 import com.kapp.tenon.generated.resources.Res
 import com.kapp.tenon.generated.resources.agent_session_state_archived
 import com.kapp.tenon.generated.resources.agent_session_state_busy
@@ -129,6 +130,11 @@ internal data class WorkspaceUnitSessionUi(
 internal fun WorkspaceUnitCard(
     ui: WorkspaceUnitCardUi,
     now: Long,
+    /**
+     * 收敛模式（收敛型裁决）：false = 不画活跃会话块（title + 原始事件 summary），
+     * 改画「N 个会话」计数行——清单页（智能体看板）用；详情/消息页保持 true。
+     */
+    showActiveSession: Boolean = true,
     onClick: () -> Unit,
     onOpenChat: () -> Unit,
     avatar: @Composable () -> Unit,
@@ -256,7 +262,17 @@ internal fun WorkspaceUnitCard(
             }
 
             val session = ui.session
-            if (session != null) {
+            if (session != null && !showActiveSession) {
+                // 收敛模式：会话内容收进详情（工作区详情的会话列表），行上只说「多少」。
+                // 会话数为 0 时此行不画（「还没有会话」的空态提示已在上面）。
+                if (ui.sessionCount > 0) {
+                    Text(
+                        text = stringResource(Res.string.agent_detail_ws_session_count, ui.sessionCount),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            } else if (session != null) {
                 Column(
                     modifier = Modifier.fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(sp.xs),

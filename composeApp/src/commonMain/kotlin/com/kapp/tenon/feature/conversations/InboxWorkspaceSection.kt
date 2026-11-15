@@ -93,6 +93,8 @@ internal fun InboxUnitRow(
     now: Long,
     onOpenUnit: (WorkspaceUnitUi) -> Unit,
     onOpenChat: (String) -> Unit,
+    /** 收敛模式（智能体看板）：不画活跃会话块，改画会话计数行。 */
+    showActiveSession: Boolean = true,
 ) {
     val unknownKind = stringResource(Res.string.conv_inbox_ws_badge_unknown_kind)
     val agentKey = unit.agentKind ?: unknownKind
@@ -132,7 +134,7 @@ internal fun InboxUnitRow(
             } else {
                 null
             },
-            chatLabel = stringResource(Res.string.conv_inbox_ws_open_chat),
+        chatLabel = stringResource(Res.string.conv_inbox_ws_open_chat),
             pendingLabel = if (unit.pendingCount > 0) {
                 stringResource(Res.string.conv_inbox_ws_pending_pill, unit.pendingCount)
             } else {
@@ -156,6 +158,7 @@ internal fun InboxUnitRow(
             access = unit.access,
         ),
         now = now,
+        showActiveSession = showActiveSession,
         onClick = { onOpenUnit(unit) },
         onOpenChat = { onOpenChat(unit.peerId) },
         avatar = {
