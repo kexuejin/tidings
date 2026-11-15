@@ -52,7 +52,6 @@ import com.kapp.tenon.generated.resources.hub_team_orphan_section
 import com.kapp.tenon.generated.resources.hub_team_place_format
 import com.kapp.tenon.generated.resources.hub_team_size_format
 import com.kapp.tenon.generated.resources.hub_view_employees
-import com.kapp.tenon.generated.resources.hub_view_profiles
 import com.kapp.tenon.generated.resources.hub_view_teams
 import com.kapp.tenon.generated.resources.ic_chat_bubble
 import com.kapp.tenon.generated.resources.ic_chev

@@ -160,7 +160,15 @@ data class CardRenderPlan(
     val showExpiredTag: Boolean,
     /** 审批卡 + 无资格 ⇒ 「等待机主处理」。没有这行，只读态就是一张「不知道为什么没有按钮」的卡。 */
     val showWaitingForHost: Boolean,
+    /** 失联心跳告警（规格 §5.2 / §6.3）：working 态且心跳超时（默认 60s）。 */
+    val isHeartbeatStale: Boolean = false,
 )
+
+/** 宿主心跳是否已超时失去响应（纯函数，入参 now 钉死时钟，门禁合规）。 */
+fun isHeartbeatStale(lastBeatTs: Long?, now: Long, thresholdMs: Long = 60_000L): Boolean {
+    if (lastBeatTs == null || lastBeatTs <= 0L || now <= 0L) return false
+    return (now - lastBeatTs) > thresholdMs
+}
 
 /**
  * 算这张卡的渲染决策。
@@ -177,11 +185,13 @@ fun cardRenderPlanOf(
 ): CardRenderPlan {
     val expired = isCardExpired(card.expiresAt, now)
     val hasActions = card.actions.isNotEmpty()
+    val stale = card.state == "working" && isHeartbeatStale(card.lastBeatTs, now)
     return CardRenderPlan(
         showActions = hasActionChannel && hasActions && eligibility == CardActionEligibility.Actionable,
         actionsEnabled = !expired,
         showExpiredTag = expired,
         showWaitingForHost = hasActions && eligibility == CardActionEligibility.ReadOnly,
+        isHeartbeatStale = stale,
     )
 }
 
@@ -263,6 +273,9 @@ fun prototypeSavedPathOf(
     savedPathOf: (AgentCardArtifact) -> String?,
 ): String? = ArtifactPreview.prototypeOf(card.artifacts)?.let(savedPathOf)
 
+/** 打回反馈文本的最大字符数：留给前缀与竖线（16 字符）后，严格不超过 Limits.AGENT_RUN_ID（64）。 */
+const val MAX_REJECT_REVISION_FEEDBACK_CHARS = 48
+
 /**
  * 打回动作与反馈文本的**单槽编码**：`reject-revision|<文本>`。
  *
@@ -271,19 +284,50 @@ fun prototypeSavedPathOf(
  * 严格白名单是协议事实，渲染层不扩）。 Phase 4 的宿主编排器按前缀拆开，
  * 竖线后面的文本进下一轮自愈的前置约束。
  *
- * 编码侧是纯函数、解码侧在宿主（Phase 4）：竖线替换在**这里**做而不是宿主做，
- * 否则「文本里带竖线」会成为两端各猜一次的歧义。
+ * 编码侧是纯函数、解码侧在宿主（Phase 4）：竖线替换与长度钳制在**这里**做而不是宿主做，
+ * 保证跨设备投递时 actionId 严格不超过 [com.kapp.tenon.core.protocol.Limits.AGENT_RUN_ID]，
+ * 防止对端因超限整帧丢弃。
  */
 fun rejectRevisionActionIdOf(feedbackText: String): String {
     val cleaned = feedbackText.trim()
     if (cleaned.isEmpty()) return SYSTEM_ACTION_REJECT_REVISION
-    return "$SYSTEM_ACTION_REJECT_REVISION|${cleaned.replace("|", "/")}"
+    val clamped = cleaned.take(MAX_REJECT_REVISION_FEEDBACK_CHARS)
+    return "$SYSTEM_ACTION_REJECT_REVISION|${clamped.replace("|", "/")}"
 }
 
 /** 见 [rejectRevisionActionIdOf]：非打回前缀原样返回 null，空反馈返回空串。 */
 fun feedbackTextOf(actionId: String): String? =
     actionId.removePrefix("$SYSTEM_ACTION_REJECT_REVISION|")
         .takeIf { actionId != it }
+
+/**
+ * 按钮是否应以垂直通栏堆叠（Vertical Stack）排布（规格 §4.2 / §6.4）：
+ *
+ * 1. 只有 1 颗按钮：横向满宽即可，不走堆叠；
+ * 2. 3 颗及以上按钮：横排必然严重挤压，必须垂直堆叠；
+ * 3. 2 颗按钮时：
+ *    - 若任意一颗按钮文本字数较长（中文 > 9 字符，或含空格的英文 > 14 字符）；
+ *    - 或文案总字符数超过阈值（中文 > 16 字符，或含空格的英文 > 24 字符）；
+ *    - 或可用宽度较窄（<= 320dp）且总字数超过 10 字符；
+ *    则自动转为垂直通栏堆叠，主强调动作（approval）置顶，次要动作置底，
+ *    避免长词条被横向挤压成 3~4 行畸形按钮。
+ */
+fun shouldStackCardActionsVertically(
+    actionCount: Int,
+    actionTexts: List<String>,
+    availableWidthDp: Float,
+): Boolean {
+    if (actionCount <= 1) return false
+    if (actionCount >= 3) return true
+    val maxTextLen = actionTexts.maxOfOrNull { it.length } ?: 0
+    val totalLen = actionTexts.sumOf { it.length }
+    val hasWhitespace = actionTexts.any { it.contains(' ') }
+    val thresholdMax = if (hasWhitespace) 14 else 9
+    val thresholdTotal = if (hasWhitespace) 24 else 16
+    if (maxTextLen > thresholdMax || totalLen > thresholdTotal) return true
+    if (availableWidthDp in 0.1f..320f && totalLen > 10) return true
+    return false
+}
 
 /**
  * 这张卡的会话免审**此刻**是否已生效（纯函数）：

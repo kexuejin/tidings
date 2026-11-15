@@ -47,7 +47,11 @@ import com.kapp.tenon.domain.TeamExecutionProfileUi
 import com.kapp.tenon.domain.TeamExecutionSaveResult
 import com.kapp.tenon.generated.resources.Res
 import com.kapp.tenon.generated.resources.common_cancel
-import com.kapp.tenon.generated.resources.group_auth_save
+import com.kapp.tenon.generated.resources.common_close
+import com.kapp.tenon.generated.resources.team_roster_dialog_title_readonly
+import com.kapp.tenon.generated.resources.team_roster_apply_config
+import com.kapp.tenon.generated.resources.team_member_model_follow_leader
+import com.kapp.tenon.generated.resources.team_roster_readonly_hub_notice
 import com.kapp.tenon.generated.resources.team_roster_add_member
 import com.kapp.tenon.generated.resources.team_roster_alias_hint
 import com.kapp.tenon.generated.resources.team_roster_dialog_title
@@ -150,6 +154,8 @@ fun TeamRosterDialog(
      * 整段不画（声明编辑不受影响）。
      */
     executionPort: TeamExecutionPort? = null,
+    /** 只读名片模式（群信息等消费端使用）：仅展示成员画像、分工与基座引擎，不可增删组员与保存 */
+    readOnly: Boolean = false,
 ) {
     val sp = LocalAppSpacing.current
     // D4：席位身份不再要求 defaultWsId —— 未暴露目录的席位同样可以编团队。
@@ -218,7 +224,14 @@ fun TeamRosterDialog(
 
     RelayDialog(
         onDismissRequest = onDismiss,
-        title = { Text(stringResource(Res.string.team_roster_dialog_title, agentName)) },
+        title = {
+            Text(
+                stringResource(
+                    if (readOnly) Res.string.team_roster_dialog_title_readonly else Res.string.team_roster_dialog_title,
+                    agentName,
+                ),
+            )
+        },
         content = {
             Column(
                 modifier = Modifier
@@ -235,14 +248,14 @@ fun TeamRosterDialog(
                         modifier = Modifier.padding(vertical = sp.md),
                     )
                 } else {
-                    if (editableSeats.size > 1) {
+                    if (editableSeats.size > 1 && !readOnly) {
                         SeatSelector(
                             seats = editableSeats,
                             selectedAgentId = selectedAgentId,
                             onSelect = { selectedAgentId = it },
                         )
                     }
-                    if (pointerMissing) {
+                    if (pointerMissing && !readOnly) {
                         // Zero-Workspace Guard（指针）：席位可看，执行档与保存置灰。
                         Text(
                             text = stringResource(Res.string.team_roster_no_ws_warning),
@@ -251,34 +264,36 @@ fun TeamRosterDialog(
                             modifier = Modifier.padding(vertical = sp.xs),
                         )
                     }
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(sp.sm6),
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        AppSwitch(
-                            checked = enabled,
-                            onCheckedChange = {
-                                enabled = it
-                                // 从零开启时才给预设；已有的编制不动（§2.3）。
-                                if (it && drafts.isEmpty()) {
-                                    drafts = teamRosterPreset(takenTokens, presetRoleLabels)
-                                }
-                                issues = emptyList()
-                            },
-                            enabled = !pointerMissing,
-                        )
-                        Column {
-                            Text(
-                                text = stringResource(Res.string.team_roster_enable_switch),
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.SemiBold,
+                    if (!readOnly) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(sp.sm6),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            AppSwitch(
+                                checked = enabled,
+                                onCheckedChange = {
+                                    enabled = it
+                                    // 从零开启时才给预设；已有的编制不动（§2.3）。
+                                    if (it && drafts.isEmpty()) {
+                                        drafts = teamRosterPreset(takenTokens, presetRoleLabels)
+                                    }
+                                    issues = emptyList()
+                                },
+                                enabled = !pointerMissing,
                             )
-                            Text(
-                                text = stringResource(Res.string.team_roster_enable_desc),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
+                            Column {
+                                Text(
+                                    text = stringResource(Res.string.team_roster_enable_switch),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                                Text(
+                                    text = stringResource(Res.string.team_roster_enable_desc),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
                         }
                     }
                     Text(
@@ -295,50 +310,62 @@ fun TeamRosterDialog(
                             modifier = Modifier.padding(top = sp.sm6),
                         )
                         drafts.forEachIndexed { index, draft ->
-                            MemberDraftRow(
-                                index = index,
-                                draft = draft,
-                                issue = issues.firstOrNull { it.index == index },
-                                onNameChange = { value ->
-                                    drafts = drafts.updateAt(index) { it.copy(name = value) }
-                                },
-                                onRoleChange = { value ->
-                                    drafts = drafts.updateAt(index) { it.copy(role = value) }
-                                },
-                                onRemove = {
-                                    drafts = drafts.filterIndexed { i, _ -> i != index }
-                                    issues = emptyList()
-                                },
-                            )
-                            // **执行配置行**（§7.1，仅席位宿主 + 端口在位时画）：
-                            // kind（执行/审查）+ 驱动下拉（只在位驱动）+ 模型 + 人设。
-                            // 模型从本轮起真的可写：`TeamExecutionMemberSpec.models`
-                            // 一路带到 `executeCliTask(model=)`，两条保存期判据
-                            // （驱动不支持 / 多值）会在这里把原因显示出来。
-                            if (executionEditable && index < execMembers.size) {
-                                ExecutionConfigRow(
-                                    member = execMembers[index],
-                                    drivers = driverCatalog,
-                                    onKindChange = { kind ->
-                                        execMembers = execMembers.updateExecAt(index) { it.copy(kind = kind) }
+                            if (readOnly) {
+                                ReadOnlyMemberCard(
+                                    index = index,
+                                    draft = draft,
+                                    execMember = execMembers.getOrNull(index),
+                                )
+                            } else {
+                                MemberDraftRow(
+                                    index = index,
+                                    draft = draft,
+                                    issue = issues.firstOrNull { it.index == index },
+                                    onNameChange = { value ->
+                                        drafts = drafts.updateAt(index) { it.copy(name = value) }
                                     },
-                                    onDriverChange = { key ->
-                                        execMembers = execMembers.updateExecAt(index) { it.copy(driverKey = key) }
+                                    onRoleChange = { value ->
+                                        drafts = drafts.updateAt(index) { it.copy(role = value) }
                                     },
-                                    onModelChange = { model ->
-                                        execMembers = execMembers.updateExecAt(index) {
-                                            it.copy(models = model?.let { m -> listOf(m) } ?: emptyList())
-                                        }
-                                    },
-                                    onPromptChange = { prompt ->
-                                        execMembers = execMembers.updateExecAt(index) {
-                                            it.copy(customPrompt = prompt?.trim()?.take(2000)?.ifBlank { null })
-                                        }
+                                    onRemove = {
+                                        drafts = drafts.filterIndexed { i, _ -> i != index }
+                                        issues = emptyList()
                                     },
                                 )
+                                // **执行配置行**（§7.1，仅席位宿主 + 端口在位时画）：
+                                if (executionEditable && index < execMembers.size) {
+                                    ExecutionConfigRow(
+                                        member = execMembers[index],
+                                        drivers = driverCatalog,
+                                        onKindChange = { kind ->
+                                            execMembers = execMembers.updateExecAt(index) { it.copy(kind = kind) }
+                                        },
+                                        onDriverChange = { key ->
+                                            execMembers = execMembers.updateExecAt(index) { it.copy(driverKey = key) }
+                                        },
+                                        onModelChange = { model ->
+                                            execMembers = execMembers.updateExecAt(index) {
+                                                it.copy(models = model?.let { m -> listOf(m) } ?: emptyList())
+                                            }
+                                        },
+                                        onPromptChange = { prompt ->
+                                            execMembers = execMembers.updateExecAt(index) {
+                                                it.copy(customPrompt = prompt?.trim()?.take(2000)?.ifBlank { null })
+                                            }
+                                        },
+                                    )
+                                }
                             }
                         }
-                        if (execReasons.isNotEmpty()) {
+                        if (readOnly) {
+                            Text(
+                                text = stringResource(Res.string.team_roster_readonly_hub_notice),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = sp.xs),
+                            )
+                        }
+                        if (execReasons.isNotEmpty() && !readOnly) {
                             Column {
                                 execReasons.forEach { reason ->
                                     Text(
@@ -349,58 +376,59 @@ fun TeamRosterDialog(
                                 }
                             }
                         }
-                        // **撞名不是错，是本群别名**：先把「保存后在这里叫什么」摆出来，
-                        // 别让用户按档案里的名字去 @ 一个在本群叫别的名字的人。
-                        val ownTokens = selectedSeat?.teamMembers.orEmpty()
-                            .flatMap { listOf(it.name, it.name.lowercase()) }
-                            .toSet()
-                        val aliased = TeamRosterValidation
-                            .resolveNames(drafts, takenTokens - ownTokens)
-                            .filter { it.isAliased }
-                        RosterAliasNotes(aliased)
-                        if (issues.any { it.kind == TeamRosterIssueKind.TOO_MANY }) {
-                            Text(
-                                text = stringResource(Res.string.team_roster_max_members, Limits.TEAM_MEMBERS_MAX),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.error,
-                            )
-                        }
-                        if (drafts.size < Limits.TEAM_MEMBERS_MAX) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(sp.sm6),
-                                modifier = Modifier.fillMaxWidth().padding(top = sp.xs),
-                            ) {
-                                AppTextButton(
-                                    text = stringResource(Res.string.team_roster_add_member),
-                                    onClick = {
-                                        drafts = drafts + newDraft(name = "", role = "", takenTokens, drafts)
-                                        issues = emptyList()
-                                    },
-                                    size = AppButtonSize.Small,
-                                )
+                        if (!readOnly) {
+                            // **撞名不是错，是本群别名**：先把「保存后在这里叫什么」摆出来，
+                            val ownTokens = selectedSeat.teamMembers.orEmpty()
+                                .flatMap { listOf(it.name, it.name.lowercase()) }
+                                .toSet()
+                            val aliased = TeamRosterValidation
+                                .resolveNames(drafts, takenTokens - ownTokens)
+                                .filter { it.isAliased }
+                            RosterAliasNotes(aliased)
+                            if (issues.any { it.kind == TeamRosterIssueKind.TOO_MANY }) {
                                 Text(
-                                    text = stringResource(Res.string.team_roster_quick_roles),
+                                    text = stringResource(Res.string.team_roster_max_members, Limits.TEAM_MEMBERS_MAX),
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    color = MaterialTheme.colorScheme.error,
                                 )
-                                quickRoles.forEach { quick ->
-                                    // 标签在 Composable 作用域解析（onClick 不是 Composable 上下文）。
-                                    val roleLabel = stringResource(quick.roleRes)
+                            }
+                            if (drafts.size < Limits.TEAM_MEMBERS_MAX) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(sp.sm6),
+                                    modifier = Modifier.fillMaxWidth().padding(top = sp.xs),
+                                ) {
                                     AppTextButton(
-                                        text = "+" + roleLabel,
+                                        text = stringResource(Res.string.team_roster_add_member),
                                         onClick = {
-                                            if (drafts.size < Limits.TEAM_MEMBERS_MAX) {
-                                                drafts = drafts + quick.toDraft(
-                                                    roleLabel = roleLabel,
-                                                    takenTokens = takenTokens,
-                                                    existing = drafts,
-                                                )
-                                                issues = emptyList()
-                                            }
+                                            drafts = drafts + newDraft(name = "", role = "", takenTokens, drafts)
+                                            issues = emptyList()
                                         },
                                         size = AppButtonSize.Small,
                                     )
+                                    Text(
+                                        text = stringResource(Res.string.team_roster_quick_roles),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                    quickRoles.forEach { quick ->
+                                        // 标签在 Composable 作用域解析（onClick 不是 Composable 上下文）。
+                                        val roleLabel = stringResource(quick.roleRes)
+                                        AppTextButton(
+                                            text = "+" + roleLabel,
+                                            onClick = {
+                                                if (drafts.size < Limits.TEAM_MEMBERS_MAX) {
+                                                    drafts = drafts + quick.toDraft(
+                                                        roleLabel = roleLabel,
+                                                        takenTokens = takenTokens,
+                                                        existing = drafts,
+                                                    )
+                                                    issues = emptyList()
+                                                }
+                                            },
+                                            size = AppButtonSize.Small,
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -418,7 +446,7 @@ fun TeamRosterDialog(
                         )
                     }
                 }
-                if (showHostManagedNotice) {
+                if (showHostManagedNotice && !readOnly) {
                     Text(
                         text = stringResource(Res.string.team_roster_mobile_notice),
                         style = MaterialTheme.typography.labelSmall,
@@ -429,69 +457,70 @@ fun TeamRosterDialog(
             }
         },
         confirmButton = {
-            val seat = selectedSeat
-            RelayDialogButton(
-                text = stringResource(Res.string.group_auth_save),
-                enabled = seat != null && !pointerMissing,
-                primary = true,
-                onClick = {
-                    // 保存流程用 if/else 链而非早退标签（onClick 标签在非 inline
-                    // 传递链上会被编译器判 unresolved —— 本仓踩过一次的形态）。
-                    val proceed = if (seat == null) {
-                        false
-                    } else if (!enabled) {
-                        onSave(seat.agentId, null)
-                        onDismiss()
-                        false
-                    } else {
-                        // 保存前校验（§2.3）：错误就地指出行/字段，不允许存下去再说。
-                        // 撞名不在这里拦 —— 名字的最终形态由写路径的 `resolveNames` 决定，
-                        // 这里只预览（上面的别名提示行），不另写一份判据。
-                        val found = TeamRosterValidation.validate(
-                            drafts.map { it.copy(name = it.name.trim(), role = it.role.trim()) },
-                        )
-                        if (found.isNotEmpty()) {
-                            issues = found
+            if (readOnly) {
+                RelayDialogButton(
+                    text = stringResource(Res.string.common_close),
+                    primary = true,
+                    onClick = onDismiss,
+                )
+            } else {
+                val seat = selectedSeat
+                RelayDialogButton(
+                    text = stringResource(Res.string.team_roster_apply_config),
+                    enabled = seat != null && !pointerMissing,
+                    primary = true,
+                    onClick = {
+                        val proceed = if (seat == null) {
+                            false
+                        } else if (!enabled) {
+                            onSave(seat.agentId, null)
+                            onDismiss()
                             false
                         } else {
-                            // **执行档先写、声明后广播**（§7.1 一条动作：任一步失败整次不保存）。
-                            // D16：执行档主键的一半 = 群指针的 dirId（不是席位 wsId）——
-                            // 群没设指针就不落档（对话框保存路径的 fail-closed）。
-                            val pointerDirId = groupId?.let { executionPort?.groupPointerDirId(it) }
-                            if (executionEditable && executionPort != null && groupId != null &&
-                                pointerDirId != null
-                            ) {
-                                val execProfile = TeamExecutionProfileUi(
-                                    dirId = pointerDirId,
-                                    leaderAgentId = seat.agentId,
-                                    members = execMembers,
-                                )
-                                // 档 ⊆ 声明（§3.4.6）：按**保存后的稳定 agentId**对齐。
-                                val declared = drafts.map { it.agentId.trim().lowercase() }.toSet()
-                                when (val verdict = executionPort.save(execProfile, declared)) {
-                                    is TeamExecutionSaveResult.Rejected -> {
-                                        execReasons = verdict.reasons
-                                        false
-                                    }
-                                    TeamExecutionSaveResult.Saved -> true
-                                }
+                            val found = TeamRosterValidation.validate(
+                                drafts.map { it.copy(name = it.name.trim(), role = it.role.trim()) },
+                            )
+                            if (found.isNotEmpty()) {
+                                issues = found
+                                false
                             } else {
-                                true
+                                val pointerDirId = groupId?.let { executionPort?.groupPointerDirId(it) }
+                                if (executionEditable && executionPort != null && groupId != null &&
+                                    pointerDirId != null
+                                ) {
+                                    val execProfile = TeamExecutionProfileUi(
+                                        dirId = pointerDirId,
+                                        leaderAgentId = seat.agentId,
+                                        members = execMembers,
+                                    )
+                                    val declared = drafts.map { it.agentId.trim().lowercase() }.toSet()
+                                    when (val verdict = executionPort.save(execProfile, declared)) {
+                                        is TeamExecutionSaveResult.Rejected -> {
+                                            execReasons = verdict.reasons
+                                            false
+                                        }
+                                        TeamExecutionSaveResult.Saved -> true
+                                    }
+                                } else {
+                                    true
+                                }
                             }
                         }
-                    }
-                    if (proceed) {
-                        val agentId = seat?.agentId
-                        if (agentId != null) {
-                            onSave(agentId, drafts.map { it.copy(name = it.name.trim(), role = it.role.trim()) })
+                        if (proceed) {
+                            val agentId = seat?.agentId
+                            if (agentId != null) {
+                                onSave(agentId, drafts.map { it.copy(name = it.name.trim(), role = it.role.trim()) })
+                            }
+                            onDismiss()
                         }
-                        onDismiss()
-                    }
-                },
-            )
+                    },
+                )
+            }
         },
-        dismissButton = {
-            RelayDialogButton(text = stringResource(Res.string.common_cancel), onClick = onDismiss)
+        dismissButton = if (readOnly) null else {
+            {
+                RelayDialogButton(text = stringResource(Res.string.common_cancel), onClick = onDismiss)
+            }
         },
     )
 }
@@ -553,6 +582,81 @@ private fun SeatSelector(
                                 MaterialTheme.colorScheme.error
                             },
                             maxLines = 1,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 驱动展示名归一（将底层驱动标识转为用户友好的名称）。
+ */
+internal fun formatDriverName(key: String): String = when (key.trim().lowercase()) {
+    "codex" -> "Codex CLI"
+    "claude" -> "Claude CLI"
+    "opencode" -> "OpenCode"
+    "gemini" -> "Gemini CLI"
+    else -> key.ifBlank { "" }
+}
+
+@Composable
+private fun ReadOnlyMemberCard(
+    index: Int,
+    draft: TeamMemberDraft,
+    execMember: TeamExecutionMemberUi?,
+) {
+    val sp = LocalAppSpacing.current
+    Surface(
+        shape = MaterialTheme.shapes.small,
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(Modifier.padding(sp.md)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(sp.sm6),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    text = draft.name.ifBlank { stringResource(Res.string.team_roster_member_index, index + 1) },
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f),
+                )
+                Surface(
+                    shape = MaterialTheme.shapes.extraSmall,
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                ) {
+                    Text(
+                        text = draft.role.ifBlank { stringResource(Res.string.team_roster_member_role_label) },
+                        style = MaterialTheme.typography.labelSmall,
+                        modifier = Modifier.padding(horizontal = sp.sm6, vertical = sp.xxs),
+                    )
+                }
+            }
+            execMember?.let { exec ->
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(sp.sm6),
+                    modifier = Modifier.padding(top = sp.xs),
+                ) {
+                    val kindLabel = if (exec.kind == TeamExecutionKindsUi.WORKER) {
+                        stringResource(Res.string.team_exec_kind_worker)
+                    } else {
+                        stringResource(Res.string.team_exec_kind_reviewer)
+                    }
+                    Text(
+                        text = kindLabel + if (exec.driverKey.isNotBlank()) " · " + formatDriverName(exec.driverKey) else "",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    exec.models.firstOrNull()?.let { model ->
+                        Text(
+                            text = "(" + model + ")",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
                         )
                     }
                 }
@@ -705,7 +809,7 @@ private fun ExecutionConfigRow(
                         onClick = { expanded = true },
                     ) {
                         Text(
-                            text = member.driverKey.ifBlank { stringResource(Res.string.team_exec_pick_driver) },
+                            text = formatDriverName(member.driverKey).ifBlank { stringResource(Res.string.team_exec_pick_driver) },
                             style = MaterialTheme.typography.labelSmall,
                             modifier = Modifier.padding(horizontal = sp.sm6, vertical = sp.xxs),
                         )
@@ -718,7 +822,7 @@ private fun ExecutionConfigRow(
                         ) {
                             drivers.sorted().forEach { key ->
                                 Text(
-                                    text = key,
+                                    text = formatDriverName(key),
                                     style = MaterialTheme.typography.labelSmall,
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -781,19 +885,53 @@ private fun ExecutionConfigRow(
             )
         }
         if (showModelInput) {
-            OutlinedTextField(
-                value = currentModel.orEmpty(),
-                onValueChange = { raw -> onModelChange(raw.trim().take(80).ifBlank { null }) },
-                placeholder = {
-                    Text(
-                        text = stringResource(Res.string.team_exec_model_placeholder),
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                },
+            Column(
                 modifier = Modifier.fillMaxWidth().padding(top = sp.xs),
-                textStyle = MaterialTheme.typography.bodySmall,
-                singleLine = true,
-            )
+                verticalArrangement = Arrangement.spacedBy(sp.xxs),
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(sp.xs),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    val presets = listOf(
+                        null to stringResource(Res.string.team_member_model_follow_leader),
+                        "claude-3-5-sonnet" to "Claude 3.5",
+                        "gpt-4o" to "GPT-4o",
+                        "deepseek-chat" to "DeepSeek",
+                    )
+                    presets.forEach { (modelVal, label) ->
+                        val isSel = currentModel == modelVal
+                        Surface(
+                            shape = MaterialTheme.shapes.extraSmall,
+                            color = if (isSel) {
+                                MaterialTheme.colorScheme.primaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.surfaceVariant
+                            },
+                            onClick = { onModelChange(modelVal) },
+                        ) {
+                            Text(
+                                text = label,
+                                style = MaterialTheme.typography.labelSmall,
+                                modifier = Modifier.padding(horizontal = sp.sm6, vertical = sp.xxs),
+                            )
+                        }
+                    }
+                }
+                OutlinedTextField(
+                    value = currentModel.orEmpty(),
+                    onValueChange = { raw -> onModelChange(raw.trim().take(80).ifBlank { null }) },
+                    placeholder = {
+                        Text(
+                            text = stringResource(Res.string.team_exec_model_placeholder),
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    textStyle = MaterialTheme.typography.bodySmall,
+                    singleLine = true,
+                )
+            }
         }
     }
 }

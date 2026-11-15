@@ -39,8 +39,9 @@ class StageHandoffSpeechWiringGuardTest {
     @Test
     fun theDesktopStageChainMapsAssigneesToRole() {
         assertTrue(
-            desktopChain.contains("assignees = stages.map { it.role }"),
-            "卡片步骤行与工牌 assignees 必须对齐为角色名",
+            desktopChain.contains("assignees = stages.map { it.assignee?.ifBlank { null } ?: it.role }") ||
+                desktopChain.contains("assignees = stages.map { it.role }"),
+            "卡片步骤行与工牌 assignees 必须对齐为承办人或角色名",
         )
     }
 

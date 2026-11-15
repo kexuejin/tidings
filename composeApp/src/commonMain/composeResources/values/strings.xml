@@ -1129,18 +1129,18 @@
     <string name="desktop_menu_view">视图</string>
     <string name="desktop_menu_window">窗口</string>
     <string name="approval_focus_title">有 %1$s 项高危操作等待机主审批</string>
-    <string name="card_action_merge_patch">合并此补丁</string>
+    <string name="card_action_merge_patch">采纳并应用修改</string>
     <!-- 动作标签经 labelKey 端上翻译（见 CardActionLabelKeys）：键跨语言稳定，词条可本地化。 -->
     <string name="card_action_start_task">立即执行</string>
     <string name="card_action_cancel_task">取消</string>
-    <string name="card_action_send_as_adjustment">作为调整发送</string>
-    <string name="card_action_send_as_new_task">派为新任务</string>
+    <string name="card_action_send_as_adjustment">在当前草稿上微调</string>
+    <string name="card_action_send_as_new_task">放弃当前，开启新任务</string>
     <!-- 原型评审入口：与「Approve & Develop」同组，先把原型看一遍再批准（否则是盲批）。
          由客户端本地兑现（交给系统浏览器），不广播给宿主。 -->
-    <string name="card_action_open_prototype">在浏览器打开原型</string>
+    <string name="card_action_open_prototype">在浏览器中预览设计</string>
     <!-- 停止：把「中止」从一句要背下来的咒语（stop/abort/cancel/停/取消）变成卡上的一点。
          喊错一个字就等于没停、而且界面一声不吭 —— 真机 18:47 实测。 -->
-    <string name="card_action_abort">停止</string>
+    <string name="card_action_abort">中止任务</string>
     <string name="agent_live_log_title">实时输出</string>
     <string name="approval_focus_action">立即审批</string>
     <string name="approval_focus_subtitle">有智能体在等你授权，处理之后才会继续执行</string>
@@ -1940,9 +1940,10 @@
     <string name="card_pending_confirm">已提交，等待宿主确认</string>
     <string name="card_decided_by">已由 %1$s 处理</string>
     <!-- 选项块的推荐角标：选型是「选择」不是「动作」，推荐用文字说明而不用实心按钮抢主动作的地位。 -->
-    <string name="card_option_recommended">推荐</string>
+    <string name="card_option_recommended">推荐方案</string>
     <string name="card_expired">已过期</string>
     <string name="card_waiting_host">等待机主处理</string>
+    <string name="card_heartbeat_stale_warning">宿主失去响应（已超时 1 分钟）</string>
     <string name="card_details_show">展开明细</string>
     <string name="card_details_hide">收起明细</string>
     <!-- S21 退档的兜底文案：卡片负载连身份键都缺、正文也没有时，退档后是空气泡 ——
@@ -1995,6 +1996,8 @@
     <!-- 会话免审的两个状态（分级免审，升级计划中期 §4.2）：未开启给入口语义，开启后如实告知。 -->
     <string name="card_session_exempt">本会话免审</string>
     <string name="card_session_exempt_active">本会话已免审</string>
+    <string name="chat_header_session_exempt_active">免审生效中</string>
+    <string name="chat_header_session_exempt_revoke">撤销免审</string>
 
     <!-- 上下文唤起胶囊（方案 §5.2） -->
     <string name="capsule_entity_team">团队</string>
@@ -2047,17 +2050,20 @@
     <string name="seat_duty_label">职责</string>
 
     <!-- 团队编制（团队创建方案 §2.2；v1 只做声明与展示） -->
-    <string name="team_roster_button">团队编制</string>
-    <string name="team_roster_dialog_title">团队编制 · %1$s</string>
-    <string name="team_roster_enable_switch">开启团队协同模式</string>
-    <string name="team_roster_enable_desc">开启后以领队为统一对外窗口，内部由专职组员分工执行。</string>
+    <string name="team_roster_button">团队分工</string>
+    <string name="team_view_roster">查看团队</string>
+    <string name="team_roster_readonly_hub_notice">团队编制由智能体大厅统一管理配置，本群仅供协同调用</string>
+    <string name="team_roster_dialog_title">团队分工 · %1$s</string>
+    <string name="team_roster_dialog_title_readonly">团队名片 · %1$s</string>
+    <string name="team_roster_enable_switch">开启团队分工协作</string>
+    <string name="team_roster_enable_desc">由领队统一接收需求，拆解并协调组员流水线执行。</string>
     <string name="team_roster_no_ws_warning">请先在群设置里选择本群的项目目录，再开启团队编制。</string>
     <string name="team_roster_seat_label">席位</string>
     <string name="team_roster_leader_label">👑 领队（统一出口）: %1$s</string>
     <string name="team_roster_members_section">团队阵容（默认预设，可直接改）</string>
     <string name="team_roster_member_index">组员 %1$d</string>
-    <string name="team_roster_member_name_label">名字 (@标识)</string>
-    <string name="team_roster_member_role_label">角色标签</string>
+    <string name="team_roster_member_name_label">角色名称</string>
+    <string name="team_roster_member_role_label">职责说明</string>
     <string name="team_roster_add_member">+ 添加组员</string>
     <string name="team_roster_quick_roles">快捷角色</string>
     <string name="team_roster_role_code">编码</string>
@@ -2067,9 +2073,9 @@
     <string name="team_roster_role_frontend">前端</string>
     <string name="team_roster_role_backend">后端</string>
     <string name="team_roster_role_security">安全</string>
-    <string name="team_exec_config_label">执行:</string>
-    <string name="team_exec_kind_worker">执行</string>
-    <string name="team_exec_kind_reviewer">审查</string>
+    <string name="team_exec_config_label">分工:</string>
+    <string name="team_exec_kind_worker">主力执行</string>
+    <string name="team_exec_kind_reviewer">严格把关</string>
     <string name="team_exec_pick_driver">选驱动…</string>
     <string name="team_exec_no_drivers">本机没有可用的智能体驱动</string>
     <string name="team_exec_model_default">默认（继承）</string>
@@ -2078,6 +2084,23 @@
     <string name="team_exec_prompt_badge">人设</string>
     <string name="team_exec_custom_prompt_placeholder">自定义该成员的人设与审查重点提示词（选填）</string>
     <string name="team_exec_model_placeholder">模型 id（如 claude-opus-4-1）；留空 = 跟随驱动默认</string>
+    <string name="team_roster_apply_config">应用团队配置</string>
+    <string name="team_member_detail_title">角色配置 · %1$s</string>
+    <string name="team_member_role_badge">分工职责</string>
+    <string name="team_member_prompt_title">个性化指令 / 人设要求</string>
+    <string name="team_member_model_title">基座模型与引擎</string>
+    <string name="team_member_model_follow_leader">跟随领队模型 (推荐)</string>
+    <string name="team_member_model_custom_toggle">高级模型配置</string>
+    <string name="team_member_save_config">保存角色配置</string>
+    <string name="team_member_leader_desc">团队统一对外窗口，负责任务拆解与分发调度</string>
+    <string name="team_member_worker_desc">负责核心任务编写与修改，承接具体实施工作</string>
+    <string name="team_member_reviewer_desc">负责代码审核与质量把关，指出问题但不直接修改代码</string>
+    <string name="team_member_driver_label">执行引擎</string>
+    <string name="team_member_model_label">基座模型</string>
+    <string name="team_member_prompt_label">人设与提示词 (选填)</string>
+    <string name="team_member_prompt_hint">输入该角色的工作准则、技能专长或补充要求…</string>
+    <string name="team_member_edit_roster">编辑团队名册</string>
+    <string name="team_member_no_execution_host">当前设备未托管该团队的执行环境，仅供查看</string>
     <string name="team_roster_max_members">最多 %1$d 人</string>
     <string name="team_roster_remove_member">删除</string>
     <string name="team_roster_alias_hint">本群已有 @%1$s，这里的组员将叫 @%2$s</string>
@@ -2089,7 +2112,7 @@
     <string name="team_roster_member_note">组员是团队编制的分工标签：不占群席位，也不会单独执行。</string>
     <string name="team_roster_mobile_notice">执行驱动与模型由桌面宿主 (Desktop) 托管</string>
     <string name="team_roster_badge">团队 (%1$d)</string>
-    <string name="team_roster_saved">团队编制已保存并广播</string>
+    <string name="team_roster_saved">团队配置已保存生效</string>
     <string name="team_roster_seat_missing">这个智能体的席位刚被撤回，请重新打开「项目目录授权」后再试。</string>
     <string name="team_roster_invalid">团队编制没有保存：组员名字与群内 @ 名冲突或超出限制。</string>
     <string name="team_profile_saved">团队档案已保存：%1$s（%2$d 个群）</string>
@@ -2294,7 +2317,7 @@
     <string name="chat_notice_external_chat_disabled">外部单聊未开启，消息未交给本机 agent</string>
     <string name="card_action_reply">回复微调</string>
     <string name="card_action_resume">恢复执行</string>
-    <string name="card_action_merge">一键合入主分支</string>
+    <string name="card_action_merge">合入主分支</string>
     <string name="card_action_retry">重新运行</string>
     <string name="card_action_override">群主强制重试</string>
     <string name="quest_input_dialog_title">回复支线提问</string>
@@ -2358,7 +2381,7 @@
     <string name="subagent_output_title">单兵终端与动作日志</string>
     <string name="subagent_intervene_action">暂停并介入</string>
     <string name="subagent_intervene_synced">介入指令已向领队同步</string>
-    <string name="card_action_open_quest">进入支线作战室</string>
+    <string name="card_action_open_quest">查看思考过程与日志</string>
     <!-- 设置页项目 -->
     <string name="set_assistant_section_title">私人助理与协作</string>
     <string name="set_assistant_enable_title">启用私人助理</string>

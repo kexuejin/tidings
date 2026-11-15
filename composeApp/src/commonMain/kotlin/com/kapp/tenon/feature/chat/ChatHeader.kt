@@ -143,6 +143,8 @@ internal fun ChatHeader(
      * 由外部统筹当前激活会话，保证头部信息与会话流的一致性。
      */
     activeSession: AgentSessionUi? = null,
+    sessionExemptActive: Boolean = false,
+    onRevokeSessionExempt: (() -> Unit)? = null,
     /**
      * 这一屏**可见**的会话条数（已按工作区收窄），由调用方算好传进来。
      *
@@ -234,6 +236,8 @@ internal fun ChatHeader(
             avatarOnline = null,
             secondaryText = secondaryText,
             density = ChatHeaderDensity.Phone,
+            sessionExemptActive = sessionExemptActive,
+            onRevokeSessionExempt = onRevokeSessionExempt,
             modifier = Modifier.weight(1f),
             titleTrailing = {
                 if (group == null) {

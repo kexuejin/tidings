@@ -146,10 +146,10 @@ internal class RelayStateWriter(
                 merged[convId] = ConversationSummaryRow(
                     convId = convId,
                     lastMessageId = last.id,
-                    // 与落库那份（refreshSummary）共用同一份派生：`<think>` 清洗 + 文件名兜底。
+                    // 与落库那份（refreshSummary）共用同一份派生：卡片人话摘要 + `<think>` 清洗 + 文件名兜底。
                     // 内存里 text 本来就是剥过推理的正文，这里再过一次是幂等的；
                     // 意义在于两条路径**不可能**再各说各话（重启前后同一个预览）。
-                    lastTextPreview = conversationPreviewOf(last.text, last.file?.name),
+                    lastTextPreview = conversationPreviewOf(last.text, last.file?.name, last.renderCard),
                     lastMessageAt = last.at,
                     lastMessageIsMine = last.mine,
                 )

@@ -68,6 +68,11 @@ data class ChainStage(
      * 也不进卡 JSON；老调用与老卡缺省即 null，零影响。
      */
     val model: String? = null,
+    /**
+     * 承办角色名字（如 "weather-re-coder"）：调度与展示属性，不进传输帧白名单。
+     * 当配置了具体成员名字时，用于卡片步骤行区分执行角色身份与分工职责。
+     */
+    val assignee: String? = null,
 )
 
 /** 一棒的起点事实：上一棒停在哪、它说了什么、产物指针在哪。 */

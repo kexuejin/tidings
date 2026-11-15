@@ -605,11 +605,13 @@ private fun DeskAgentPaneExpandedPreview() {
             toolApprovalsSourceOf = null,
             onRequestToolRules = null,
             // 逐参武装补账：桌面壳生产侧传真数据（DesktopShell: execDevicesOf = controller.execDevicesOf）。
-            execDevicesOf = listOf(
-                com.kapp.tenon.domain.ExecDeviceRow(nodeId = "self-node", label = "本机", trusted = true, checked = true, isSelf = true),
-                com.kapp.tenon.domain.ExecDeviceRow(nodeId = "peer-node-1", label = "老周的茶桌", trusted = true, checked = false, isSelf = false),
-            ),
-            onToggleExecDevice = { _, _ -> },
+            execDevicesOf = { _ ->
+                listOf(
+                    com.kapp.tenon.domain.ExecDeviceRow(nodeId = "self-node", label = "本机", trusted = true, checked = true, isSelf = true),
+                    com.kapp.tenon.domain.ExecDeviceRow(nodeId = "peer-node-1", label = "老周的茶桌", trusted = true, checked = false, isSelf = false),
+                )
+            },
+            onToggleExecDevice = { _, _, _ -> },
             chatSlice = previewSlicesOf(desktopPreviewState()).chat,settingsSlice = previewSlicesOf(desktopPreviewState()).settings,nodeSlice = previewSlicesOf(desktopPreviewState()).node,agentSlice = previewSlicesOf(desktopPreviewState()).agent,
             selectedAgentId = null,
             onSelectAgent = {},

@@ -71,7 +71,7 @@ import com.kapp.tenon.generated.resources.common_profile_unavailable
 import com.kapp.tenon.generated.resources.group_auth_entry
 import com.kapp.tenon.generated.resources.group_member_agent_badge
 import com.kapp.tenon.generated.resources.team_roster_badge
-import com.kapp.tenon.generated.resources.team_roster_button
+import com.kapp.tenon.generated.resources.team_view_roster
 import com.kapp.tenon.generated.resources.workspace_member_section_agents
 import com.kapp.tenon.generated.resources.workspace_member_section_humans
 import org.jetbrains.compose.resources.stringResource
@@ -866,7 +866,7 @@ private fun GroupInfoBody(
                             if (onSetTeamRoster != null && rowSeats.isNotEmpty()) {
                                 {
                                     AppTextButton(
-                                        text = stringResource(Res.string.team_roster_button),
+                                        text = stringResource(Res.string.team_view_roster),
                                         onClick = { teamRosterFor = identity to rowSeats },
                                         size = AppButtonSize.Small,
                                     )
@@ -985,6 +985,7 @@ private fun GroupInfoBody(
             selfNodeId = selfNodeId,
             groupId = group.groupId,
             executionPort = teamExecutionPort,
+            readOnly = true,
             onDismiss = { teamRosterFor = null },
             onSave = { agentId, roster ->
                 teamRosterFor = null

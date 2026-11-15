@@ -867,6 +867,8 @@ fun AgentConsoleScreen(
             if (detail != null) {
                 AgentTeamDetailView(
                     detail = detail,
+                    selfNodeId = settingsSlice.settings.nodeId,
+                    teamExecutionPort = teamExecutionPort,
                     onBack = {
                         if (onLeaveTeamDetail != null) {
                             onLeaveTeamDetail()

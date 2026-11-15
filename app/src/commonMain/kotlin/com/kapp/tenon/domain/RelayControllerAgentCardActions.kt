@@ -361,6 +361,11 @@ internal class RelayControllerAgentCardActions(
             handleHostCardAction(groupId, agentId, cardId, actionId, decidedBy = self)
         } else {
             val rt = host.runtime ?: return
+            val safeActionId = if (actionId.length > com.kapp.tenon.core.protocol.Limits.AGENT_RUN_ID) {
+                actionId.take(com.kapp.tenon.core.protocol.Limits.AGENT_RUN_ID)
+            } else {
+                actionId
+            }
             host.scope.launch {
                 runCatching {
                     rt.sendAgentInvoke(
@@ -370,7 +375,7 @@ internal class RelayControllerAgentCardActions(
                         agentId = agentId,
                         requestedBy = self,
                         deadlineMs = ACTION_INVOKE_DEADLINE_MS,
-                        actionId = actionId,
+                        actionId = safeActionId,
                         cardId = cardId,
                         cardRev = cardRev,
                         decidedBy = self,

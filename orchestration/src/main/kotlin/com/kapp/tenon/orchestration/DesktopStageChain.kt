@@ -141,7 +141,7 @@ object DesktopStageChain {
                         ChainProgress(chainId, ++rev, state, title, current, statuses.toList(),
                             percent, banner, checks = pendingChecks, details = details,
                             // 承办人：每棒的角色名（展示事实，由 cardOf 转工牌名与步骤行徽标）。
-                            assignees = stages.map { it.role },
+                            assignees = stages.map { it.assignee?.ifBlank { null } ?: it.role },
                             // 产物行（name + bytes，cardOf 已渲染）：本机绝对路径只活在
                             // ArtifactPipe 的投递参数里，绝不进这张卡的 JSON。
                             artifacts = artifacts,

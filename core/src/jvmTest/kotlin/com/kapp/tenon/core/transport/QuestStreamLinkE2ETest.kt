@@ -2,11 +2,9 @@
 
 package com.kapp.tenon.core.transport
 
-import com.kapp.tenon.core.protocol.Codec
 import com.kapp.tenon.core.protocol.Envelope
 import com.kapp.tenon.core.protocol.MsgTypes
 import com.kapp.tenon.core.protocol.Profile
-import com.kapp.tenon.core.protocol.makeEnvelope
 import com.kapp.tenon.core.session.NodeRuntime
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope

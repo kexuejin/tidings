@@ -96,8 +96,8 @@ fun conversations(
                             convId = convId,
                             lastMessageId = last.id,
                             // 与落库那份（refreshSummary）共用同一份派生（conversationPreviewOf）：
-                            // `<think>` 清洗 + 文件名兜底 —— 兜底路径也不许有第二份写法。
-                            lastTextPreview = conversationPreviewOf(last.text, last.file?.name),
+                            // 卡片人话摘要 + `<think>` 清洗 + 文件名兜底 —— 兜底路径也不许有第二份写法。
+                            lastTextPreview = conversationPreviewOf(last.text, last.file?.name, last.renderCard),
                             lastMessageAt = last.at,
                             lastMessageIsMine = last.mine,
                         )

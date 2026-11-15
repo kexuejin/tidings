@@ -61,7 +61,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.Spacer
 import com.kapp.tenon.ui.ContentWidths
+import com.kapp.tenon.ui.components.AppButton
 import com.kapp.tenon.ui.components.AppButtonSize
+import com.kapp.tenon.ui.components.AppButtonTone
 import com.kapp.tenon.ui.components.AppTextButton
 import com.kapp.tenon.domain.model.MessageUi
 import com.kapp.tenon.generated.resources.Res
@@ -109,11 +111,14 @@ import com.kapp.tenon.generated.resources.card_type_status
 import com.kapp.tenon.generated.resources.card_type_team_task_board
 import com.kapp.tenon.generated.resources.card_type_timeout
 import com.kapp.tenon.generated.resources.card_waiting_host
+import com.kapp.tenon.generated.resources.card_heartbeat_stale_warning
+import com.kapp.tenon.generated.resources.card_action_abort
 import com.kapp.tenon.generated.resources.agent_state_banner_failed
 import com.kapp.tenon.ui.theme.LocalAppSpacing
-import com.kapp.tenon.ui.theme.RelayElevations
+import com.kapp.tenon.ui.theme.LocalCardShape
 import com.kapp.tenon.ui.theme.SurfaceTiers
 import com.kapp.tenon.ui.theme.accents
+import com.kapp.tenon.ui.theme.relayCardShadow
 import org.jetbrains.compose.resources.stringResource
 
 /**
@@ -213,15 +218,19 @@ fun AgentCardBubble(
         hasActionChannel = onAction != null,
         now = now,
     )
+    val cardShape = LocalCardShape.current
     Surface(
-        // 升级稿 .acard（prototype/relay.html:515-518）：surface 底 + 8% 黑细边 + 16 圆角
-        // + 双层柔和投影 + 壳自带 16×18 内边距与 12 的块间 gap（flex column）。
+        // 升级稿 .acard（prototype/relay.html:515-518）：surface 底 + 8% 黑细边 + 自适应圆角 (LocalCardShape)
+        // + 自绘柔和投影 (relayCardShadow) + 壳自带 16×18 内边距与 12 的块间 gap（flex column）。
         // 旧稿（fdc4e1d6）的「块自带 padding + 发丝线」结构随升级稿整段作废。
-        shape = MaterialTheme.shapes.large,
+        shape = cardShape,
         color = MaterialTheme.colorScheme.surface,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.08f)),
-        shadowElevation = RelayElevations.Card,
-        modifier = modifier.fillMaxWidth().widthIn(max = ContentWidths.Settings),
+        shadowElevation = 0.dp,
+        modifier = modifier
+            .fillMaxWidth()
+            .widthIn(max = ContentWidths.Settings)
+            .relayCardShadow(shape = cardShape),
     ) {
         Column(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = sp.lg),
@@ -275,6 +284,9 @@ fun AgentCardBubble(
             // 高危命令展示框（原型稿 .cmd-box）
             card.cmd?.let { CardCmdBox(it) }
             card.banner?.let { CardBannerRow(it) }
+            if (plan.isHeartbeatStale) {
+                CardHeartbeatWarningBanner(card = card, onAction = onAction)
+            }
             card.progress?.let { CardProgressRow(it, card.elapsedSec) }
             // Acceptance 检查清单（升级计划 Phase 2 要点 2）：新式卡走 checks（带单项耗时 /
             // 观察结论 / 日志抽屉），老卡继续走 StepList。两者都画会把同一批步骤说两遍 ——
@@ -871,6 +883,62 @@ private fun CardNeutralTag(text: String) {
     )
 }
 
+/**
+ * 宿主心跳超时自愈告警横幅（规格 §5.2 / §6.3）：
+ * working 态下心跳中断超过 60s 时展示警告横幅，并提供一键中止任务按钮。
+ */
+@Composable
+private fun CardHeartbeatWarningBanner(
+    card: AgentCardUi,
+    onAction: ((card: AgentCardUi, actionId: String) -> Unit)?,
+) {
+    val sp = LocalAppSpacing.current
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(
+                MaterialTheme.accents.warn.copy(alpha = 0.12f),
+                MaterialTheme.shapes.small,
+            )
+            .border(
+                1.dp,
+                MaterialTheme.accents.warn.copy(alpha = 0.35f),
+                MaterialTheme.shapes.small,
+            )
+            .padding(horizontal = sp.md10, vertical = sp.sm6),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(sp.xs),
+            modifier = Modifier.weight(1f),
+        ) {
+            Icon(
+                painter = painterResource(Res.drawable.ic_warn),
+                contentDescription = null,
+                tint = MaterialTheme.accents.warn,
+                modifier = Modifier.size(com.kapp.tenon.ui.theme.IconSizes.Inline),
+            )
+            Text(
+                text = stringResource(Res.string.card_heartbeat_stale_warning),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        if (onAction != null) {
+            AppButton(
+                text = stringResource(Res.string.card_action_abort),
+                onClick = { onAction(card, SYSTEM_ACTION_ABORT_TASK) },
+                size = AppButtonSize.Small,
+                tone = AppButtonTone.Danger,
+            )
+        }
+    }
+}
+
 /** 原子 1/5 · Banner（§7.3）：一行带色的说明。 */
 @Composable
 private fun CardBannerRow(banner: AgentCardBanner) {
@@ -1271,6 +1339,11 @@ private fun CardStepRow(step: AgentCardStep) {
     val labelWeight = if (step.status == AgentCardStepStatus.Running) FontWeight.SemiBold else FontWeight.Normal
     val statusLabel = stepStatusLabel(step.status)
     Column(modifier = Modifier.fillMaxWidth()) {
+        val hasAssignee = !step.assignee.isNullOrBlank() && step.assignee.trim() != step.label.trim()
+        val isRoleLabel = step.label.length <= 6 && !step.label.startsWith("@")
+        val titleText = if (hasAssignee && isRoleLabel) step.assignee.orEmpty() else step.label
+        val badgeText = if (hasAssignee && isRoleLabel) step.label else step.assignee?.takeIf { it.trim() != step.label.trim() }
+
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(sp.md10),
@@ -1283,7 +1356,7 @@ private fun CardStepRow(step: AgentCardStep) {
         ) {
             StepStatusIcon(step.status)
             Text(
-                text = step.label,
+                text = titleText,
                 style = MaterialTheme.typography.bodySmall,
                 fontWeight = labelWeight,
                 color = labelColor,
@@ -1291,7 +1364,7 @@ private fun CardStepRow(step: AgentCardStep) {
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
-            step.assignee?.let {
+            badgeText?.let {
                 Text(
                     text = it,
                     style = MaterialTheme.typography.labelSmall,

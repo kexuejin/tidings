@@ -975,13 +975,13 @@
     <string name="desktop_menu_view">View</string>
     <string name="desktop_menu_window">Window</string>
     <string name="approval_focus_title">%1$s high-risk operations awaiting host approval</string>
-    <string name="card_action_merge_patch">Merge patch</string>
+    <string name="card_action_merge_patch">Apply Changes</string>
     <!-- Action labels are localized by key (see CardActionLabelKeys). -->
     <string name="card_action_start_task">Start now</string>
     <string name="card_action_cancel_task">Cancel</string>
-    <string name="card_action_send_as_adjustment">Send as adjustment</string>
-    <string name="card_action_send_as_new_task">Send as new task</string>
-    <string name="card_action_abort">Stop</string>
+    <string name="card_action_send_as_adjustment">Adjust Current Draft</string>
+    <string name="card_action_send_as_new_task">Discard &amp; Start New</string>
+    <string name="card_action_abort">Abort Task</string>
     <string name="agent_live_log_title">Live output</string>
     <string name="approval_focus_action">Review Now</string>
     <string name="approval_focus_subtitle">An Agent is waiting for your approval before it continues.</string>
@@ -1748,6 +1748,7 @@ Collaboration channel connected; project directory events and progress will sync
     <string name="card_option_recommended">Recommended</string>
     <string name="card_expired">Expired</string>
     <string name="card_waiting_host">Waiting for the host to handle it</string>
+    <string name="card_heartbeat_stale_warning">Host unresponsive (timed out > 1m)</string>
     <string name="card_details_show">Show details</string>
     <string name="card_details_hide">Hide details</string>
     <!-- S21 fallback copy: when a card payload has no identity keys *and* no body text,
@@ -1796,6 +1797,8 @@ Collaboration channel connected; project directory events and progress will sync
          open states the fact honestly. -->
     <string name="card_session_exempt">Exempt this session</string>
     <string name="card_session_exempt_active">Session exempt active</string>
+    <string name="chat_header_session_exempt_active">Exempt active</string>
+    <string name="chat_header_session_exempt_revoke">Revoke exemption</string>
 
     <!-- Context capsule (plan §5.2) -->
     <string name="capsule_entity_team">Team</string>
@@ -1848,17 +1851,20 @@ Collaboration channel connected; project directory events and progress will sync
     <string name="seat_duty_label">Duty</string>
 
     <!-- Team roster (team creation plan §2.2; v1 declaration & display only) -->
-    <string name="team_roster_button">Team Roster</string>
-    <string name="team_roster_dialog_title">Team Roster · %1$s</string>
+    <string name="team_roster_button">Team Roles</string>
+    <string name="team_view_roster">View Team</string>
+    <string name="team_roster_readonly_hub_notice">Team rosters and roles are managed in Agent Hub; group view is read-only.</string>
+    <string name="team_roster_dialog_title">Team Roles · %1$s</string>
+    <string name="team_roster_dialog_title_readonly">Team Profile · %1$s</string>
     <string name="team_roster_enable_switch">Enable Team Collaboration</string>
-    <string name="team_roster_enable_desc">Leader acts as unified window with internal members.</string>
+    <string name="team_roster_enable_desc">The leader coordinates tasks and delegates execution to specialized members.</string>
     <string name="team_roster_no_ws_warning">Choose this group\'s project directory in group settings before enabling a team.</string>
     <string name="team_roster_seat_label">Seat</string>
     <string name="team_roster_leader_label">👑 Leader (unified window): %1$s</string>
     <string name="team_roster_members_section">Roster (preset, editable)</string>
     <string name="team_roster_member_index">Member %1$d</string>
-    <string name="team_roster_member_name_label">Name (@mention)</string>
-    <string name="team_roster_member_role_label">Role Label</string>
+    <string name="team_roster_member_name_label">Role Name</string>
+    <string name="team_roster_member_role_label">Responsibility</string>
     <string name="team_roster_add_member">+ Add Member</string>
     <string name="team_roster_quick_roles">Quick Roles</string>
     <string name="team_roster_role_code">Coding</string>
@@ -1868,8 +1874,8 @@ Collaboration channel connected; project directory events and progress will sync
     <string name="team_roster_role_frontend">Frontend</string>
     <string name="team_roster_role_backend">Backend</string>
     <string name="team_roster_role_security">Security</string>
-    <string name="team_exec_config_label">Execution:</string>
-    <string name="team_exec_kind_worker">Worker</string>
+    <string name="team_exec_config_label">Role:</string>
+    <string name="team_exec_kind_worker">Lead Worker</string>
     <string name="team_exec_kind_reviewer">Reviewer</string>
     <string name="team_exec_pick_driver">Pick driver…</string>
     <string name="team_exec_no_drivers">No agent driver available on this machine</string>
@@ -1879,6 +1885,23 @@ Collaboration channel connected; project directory events and progress will sync
     <string name="team_exec_prompt_badge">Persona</string>
     <string name="team_exec_custom_prompt_placeholder">Custom persona &amp; focus prompt for this member (optional)</string>
     <string name="team_exec_model_placeholder">Model id (e.g. claude-opus-4-1); blank = driver default</string>
+    <string name="team_roster_apply_config">Apply Team Configuration</string>
+    <string name="team_member_detail_title">Member Config · %1$s</string>
+    <string name="team_member_role_badge">Assigned Role</string>
+    <string name="team_member_prompt_title">Custom Instructions &amp; Persona</string>
+    <string name="team_member_model_title">Base Engine &amp; Model</string>
+    <string name="team_member_model_follow_leader">Inherit Leader Model (Recommended)</string>
+    <string name="team_member_model_custom_toggle">Advanced Model Settings</string>
+    <string name="team_member_save_config">Save Configuration</string>
+    <string name="team_member_leader_desc">Unified outward point of contact, coordinating tasks and execution.</string>
+    <string name="team_member_worker_desc">Carries out primary execution, writes and modifies code.</string>
+    <string name="team_member_reviewer_desc">Performs strict review and quality checks; does not modify code directly.</string>
+    <string name="team_member_driver_label">Execution Engine</string>
+    <string name="team_member_model_label">Base Model</string>
+    <string name="team_member_prompt_label">Persona &amp; Prompt (Optional)</string>
+    <string name="team_member_prompt_hint">Guidelines, expertise, or additional requirements for this role…</string>
+    <string name="team_member_edit_roster">Edit Roster</string>
+    <string name="team_member_no_execution_host">Current device does not host this team\'s execution environment. Read-only.</string>
     <string name="team_roster_max_members">Up to %1$d</string>
     <string name="team_roster_remove_member">Remove</string>
     <string name="team_roster_alias_hint">This group already has @%1$s, so the member here will be @%2$s</string>
@@ -1890,7 +1913,7 @@ Collaboration channel connected; project directory events and progress will sync
     <string name="team_roster_member_note">Members are division-of-work labels: no extra group seats, no separate execution.</string>
     <string name="team_roster_mobile_notice">Execution drivers and models are managed by Desktop host</string>
     <string name="team_roster_badge">Team (%1$d)</string>
-    <string name="team_roster_saved">Team roster saved and broadcast</string>
+    <string name="team_roster_saved">Team configuration is now active</string>
     <string name="team_roster_seat_missing">This agent's seat was just revoked. Reopen Group Auth and try again.</string>
     <string name="team_roster_invalid">Team roster not saved: a member name conflicts with group @ tokens or exceeds limits.</string>
     <string name="team_profile_managed">This team\'s roster is managed by its team profile. Edit the team itself; the change applies to every group it joined.</string>
@@ -2043,7 +2066,7 @@ Collaboration channel connected; project directory events and progress will sync
     <string name="desktop_msg_file_unsupported">Tenon message files are not supported yet — this opens the main window only</string>
     <!-- Prototype review entry (stage A human gate). The card action is resolved
          on-device: the .html is opened by the system browser, never rendered in-app. -->
-    <string name="card_action_open_prototype">Open prototype</string>
+    <string name="card_action_open_prototype">Preview in Browser</string>
     <string name="card_artifact_preview_kind_html">Web prototype</string>
     <string name="card_artifact_preview_external_only">Web prototypes open in the system browser; they are not rendered in-app</string>
     <string name="chat_mention_host_offline">Asleep / offline</string>
@@ -2163,7 +2186,7 @@ Collaboration channel connected; project directory events and progress will sync
     <string name="subagent_output_title">Terminal &amp; Execution Log</string>
     <string name="subagent_intervene_action">Pause &amp; Intervene</string>
     <string name="subagent_intervene_synced">Intervention synced to Leader</string>
-    <string name="card_action_open_quest">Enter Quest War Room</string>
+    <string name="card_action_open_quest">View Logs &amp; Thoughts</string>
     <!-- Settings Page Entries -->
     <string name="set_assistant_section_title">Assistant &amp; Collaboration</string>
     <string name="set_assistant_enable_title">Enable Personal Assistant</string>

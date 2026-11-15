@@ -2,13 +2,19 @@
 
 package com.kapp.tenon.feature.chat
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -17,9 +23,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.kapp.tenon.generated.resources.Res
+import com.kapp.tenon.generated.resources.chat_header_session_exempt_active
+import com.kapp.tenon.generated.resources.chat_header_session_exempt_revoke
+import com.kapp.tenon.generated.resources.ic_close
+import com.kapp.tenon.generated.resources.ic_shield
 import com.kapp.tenon.ui.components.PeerAvatar
 import com.kapp.tenon.ui.components.StatusDot
 import com.kapp.tenon.ui.theme.LocalAppSpacing
+import com.kapp.tenon.ui.theme.accents
+import org.jetbrains.compose.resources.painterResource
+import org.jetbrains.compose.resources.stringResource
 
 /**
  * 聊天顶栏的**内容原语**：头像（+ 桌面的在场点）+ 标题行 + 副行。
@@ -64,6 +78,8 @@ internal fun ChatHeaderContent(
     avatarBytes: ByteArray? = null,
     /** 桌面窄栏：副行允许折两行（手机恒单行）。 */
     narrow: Boolean = false,
+    sessionExemptActive: Boolean = false,
+    onRevokeSessionExempt: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
     titleTrailing: @Composable RowScope.() -> Unit = {},
     secondaryContent: (@Composable () -> Unit)? = null,
@@ -125,6 +141,11 @@ internal fun ChatHeaderContent(
                     // 让短名字只占自己的宽，标签紧贴名字（原型 .dh2 里 badge 就在标题旁）。
                     modifier = Modifier.weight(1f, fill = false),
                 )
+                if (sessionExemptActive) {
+                    ChatHeaderSessionExemptCapsule(
+                        onRevoke = onRevokeSessionExempt,
+                    )
+                }
                 titleTrailing()
             }
             if (secondaryContent != null) {
@@ -140,6 +161,54 @@ internal fun ChatHeaderContent(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+        }
+    }
+}
+
+/**
+ * 顶部会话免审常驻胶囊（规格 §5.6 / §6.2）：
+ * 当会话处于免审生效期时，常驻展示绿色微胶囊与撤销按钮，杜绝静默放行失控风险。
+ */
+@Composable
+private fun ChatHeaderSessionExemptCapsule(
+    onRevoke: (() -> Unit)?,
+) {
+    val sp = LocalAppSpacing.current
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(sp.xs),
+        modifier = Modifier
+            .background(
+                MaterialTheme.accents.online.copy(alpha = 0.12f),
+                CircleShape,
+            )
+            .border(
+                1.dp,
+                MaterialTheme.accents.online.copy(alpha = 0.28f),
+                CircleShape,
+            )
+            .clickable(enabled = onRevoke != null) { onRevoke?.invoke() }
+            .padding(horizontal = sp.sm6, vertical = 2.dp),
+    ) {
+        Icon(
+            painter = painterResource(Res.drawable.ic_shield),
+            contentDescription = null,
+            tint = MaterialTheme.accents.online,
+            modifier = Modifier.size(11.dp),
+        )
+        Text(
+            text = stringResource(Res.string.chat_header_session_exempt_active),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.accents.online,
+            maxLines = 1,
+        )
+        if (onRevoke != null) {
+            Icon(
+                painter = painterResource(Res.drawable.ic_close),
+                contentDescription = stringResource(Res.string.chat_header_session_exempt_revoke),
+                tint = MaterialTheme.accents.online,
+                modifier = Modifier.size(10.dp),
+            )
         }
     }
 }

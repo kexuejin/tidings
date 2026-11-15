@@ -122,6 +122,51 @@ class SqlDelightMessageStoreCardInPlaceTest {
         assertEquals(7, reopened.loadBoardCardRev("card-A"))
     }
 
+    @Test
+    fun cardPreviewRendersHumanReadableSummaryInConversationList() {
+        val card = buildJsonObject {
+            put("cardId", JsonPrimitive("card-99"))
+            put("title", JsonPrimitive("修复打回意见超长丢帧"))
+            put("rev", JsonPrimitive(1))
+            put("state", JsonPrimitive("working"))
+        }
+        val msg = MessageUi(
+            id = "m99",
+            peerId = "group:g1",
+            mine = false,
+            text = "任务 [card-99] rev1 · working",
+            at = 1000L,
+            card = card,
+        )
+        store.save(mapOf("group:g1" to listOf(msg)))
+
+        val summaries = store.loadSummaries()
+        val summary = summaries.firstOrNull { it.convId == "group:g1" }
+        assertEquals("[Card] 修复打回意见超长丢帧 · working", summary?.lastTextPreview)
+
+        // 原位刷新推进状态至 review_ready
+        val updatedCard = buildJsonObject {
+            put("cardId", JsonPrimitive("card-99"))
+            put("title", JsonPrimitive("修复打回意见超长丢帧"))
+            put("rev", JsonPrimitive(2))
+            put("state", JsonPrimitive("review_ready"))
+        }
+        val refreshed = msg.copy(
+            cardPayload = updatedCard,
+            agentState = "review_ready",
+            at = 2000L,
+        )
+        store.save(mapOf("group:g1" to listOf(refreshed)))
+
+        val updatedSummaries = store.loadSummaries()
+        val updatedSummary = updatedSummaries.firstOrNull { it.convId == "group:g1" }
+        assertEquals("[Card] 修复打回意见超长丢帧 · review_ready", updatedSummary?.lastTextPreview)
+
+        // 重建实例（模拟重启）后读盘验证
+        val reopened = SqlDelightMessageStore(database)
+        assertEquals("[Card] 修复打回意见超长丢帧 · review_ready", reopened.loadSummaries().firstOrNull { it.convId == "group:g1" }?.lastTextPreview)
+    }
+
     private fun docsizeRows(): Int =
         driver.executeQuery(
             null,

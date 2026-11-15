@@ -6,6 +6,8 @@ import app.cash.sqldelight.db.SqlDriver
 import com.kapp.tenon.core.nowMillis
 import com.kapp.tenon.db.RelayDatabase
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import com.kapp.tenon.domain.model.AgentApprovalUi
 import com.kapp.tenon.domain.model.AgentArtifactKey
 import com.kapp.tenon.domain.model.AgentArtifactUi
@@ -200,8 +202,13 @@ class SqlDelightMessageStore(
             // 预览与内存路径共用**同一份**派生（[conversationPreviewOf]）：库里的 text
             // 带 `<think>` 推理包装（见 toRowValues），不清洗就会在重启后把推理原文
             // 漏进列表预览；文件消息的正文是空串，不读 file_json 就会落成 null，
-            // 界面画成「还没聊过，打个招呼」—— 重启前明明显示的是文件名。
-            last_text_preview = conversationPreviewOf(latest.text, decodeFileCard(latest.file_json)?.name),
+            // 界面画成「还没聊过，打个招呼」—— 重启前明明显示的是文件名；工单卡片
+            // 优先解析最新卡片载荷（card_payload ?: card_json）生成人读摘要。
+            last_text_preview = conversationPreviewOf(
+                text = latest.text,
+                fileName = decodeFileCard(latest.file_json)?.name,
+                cardJson = latest.card_payload ?: latest.card_json,
+            ),
             last_message_at = latest.timestamp,
             last_message_is_mine = if (latest.mine == 1L) 1L else 0L,
         )
@@ -1014,18 +1021,65 @@ private fun com.kapp.tenon.db.SelectLatestMessageOfConv.hasRenderableContent(): 
  * ① 带 reasoning 的消息落库时是 `"<think>\n…\n</think>\n" + 正文`（见 [MessageRowValues.text]
  * 的写法），直接取原始 text 就把推理原文漏进列表预览；
  * ② 文件消息的正文是空串，文件名在 `file_json` 列里，不取它就落成 null，
- * 界面画成「还没聊过，打个招呼」—— 重启前明明显示的是文件名。
+ * 界面画成「还没聊过，打个招呼」—— 重启前明明显示的是文件名；
+ * ③ 工单卡片消息的 text 往往是调试日志（如 `任务 [task-89] rev3 · working`），
+ * 直接取 raw text 会暴露机器日志；解析 card_payload / card_json 提取标题与状态人读文案。
  * 三条调用点都走这里，「摘要怎么生成」就没有第二份写法可以漂移。
  *
- * 规则只有两条：
- * 1. 正文先剥 `<think>` 推理包装（与读回路径 [parseThinkingContent] 是同一把刀）——
+ * 规则：
+ * 1. 优先解析卡片载荷（card / cardJson），生成 `[工单] $title · $stateLabel` 人话摘要；
+ * 2. 正文先剥 `<think>` 推理包装（与读回路径 [parseThinkingContent] 是同一把刀）——
  *    推理是聊天流里折叠展示的，不是给列表预览的；
- * 2. 剥完为空（文件消息 / 纯推理 / 空串）退回文件名；连文件名都没有才是 null
+ * 3. 剥完为空（文件消息 / 纯推理 / 空串）退回文件名；连文件名都没有才是 null
  *    （null = 界面画「还没聊过」。这一格必须能区分「没聊过」与「聊了但没正文」，
  *    所以空串不能折成某句文案 —— 文案归 UI 层）。
  */
-internal fun conversationPreviewOf(text: String, fileName: String?): String? {    val (_, cleaned) = parseThinkingContent(text)
+internal fun conversationPreviewOf(
+    text: String,
+    fileName: String?,
+    cardJson: String? = null,
+): String? {
+    val cardPreview = extractCardPreview(cardJson)
+    if (cardPreview != null) return cardPreview
+    val (_, cleaned) = parseThinkingContent(text)
     return cleaned.takeIf { it.isNotBlank() } ?: fileName?.takeIf { it.isNotBlank() }
+}
+
+internal fun conversationPreviewOf(
+    text: String,
+    fileName: String?,
+    card: JsonObject?,
+): String? {
+    val cardPreview = extractCardPreview(card)
+    if (cardPreview != null) return cardPreview
+    val (_, cleaned) = parseThinkingContent(text)
+    return cleaned.takeIf { it.isNotBlank() } ?: fileName?.takeIf { it.isNotBlank() }
+}
+
+internal fun extractCardPreview(cardJson: String?): String? {
+    if (cardJson.isNullOrBlank()) return null
+    val json = runCatching {
+        MessageStore.json.parseToJsonElement(cardJson) as? JsonObject
+    }.getOrNull() ?: return null
+    return extractCardPreview(json)
+}
+
+internal fun extractCardPreview(card: JsonObject?): String? {
+    if (card == null || card.isEmpty()) return null
+    val title = (card["title"] as? JsonPrimitive)?.content?.takeIf { it.isNotBlank() }
+        ?: (card["taskTitle"] as? JsonPrimitive)?.content?.takeIf { it.isNotBlank() }
+    val state = (card["state"] as? JsonPrimitive)?.content?.takeIf { it.isNotBlank() }
+        ?: (card["status"] as? JsonPrimitive)?.content?.takeIf { it.isNotBlank() }
+    val cardId = (card["cardId"] as? JsonPrimitive)?.content?.takeIf { it.isNotBlank() }
+
+    return when {
+        title != null && state != null -> "[Card] $title · $state"
+        title != null -> "[Card] $title"
+        cardId != null && state != null -> "[Card] $cardId · $state"
+        state != null -> "[Card] $state"
+        cardId != null -> "[Card] $cardId"
+        else -> null
+    }
 }
 
 /**

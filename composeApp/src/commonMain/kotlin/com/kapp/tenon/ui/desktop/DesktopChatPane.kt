@@ -545,6 +545,8 @@ public fun DesktopChatHeader(
      */
     onClearMessages: (() -> Unit)? = null,
     onCloseAndClearConversation: (() -> Unit)? = null,
+    sessionExemptActive: Boolean = false,
+    onRevokeSessionExempt: (() -> Unit)? = null,
 ) {
     // 「请求查看屏幕」的确认表单：以前点那颗图标按钮**直接发请求**，原型 d30-reqscreen
     // 在中间有一张确认卡（说明 + 取消 / 发送请求）。改成先开表单、确认后才发。
@@ -599,6 +601,8 @@ public fun DesktopChatHeader(
                     secondaryText = if (groupLine == null) privateLine else groupLine,
                     density = ChatHeaderDensity.Desktop,
                     narrow = narrow,
+                    sessionExemptActive = sessionExemptActive,
+                    onRevokeSessionExempt = onRevokeSessionExempt,
                     avatar = peer.avatar,
                     avatarBytes = avatarBytes,
                     modifier = Modifier.weight(1f),

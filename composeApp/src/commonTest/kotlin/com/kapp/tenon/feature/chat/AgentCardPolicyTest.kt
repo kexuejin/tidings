@@ -354,4 +354,49 @@ class AgentCardPolicyTest {
         assertNull(agentStateBannerToneOf(""))
         assertNull(agentStateBannerToneOf(null))
     }
+
+    @Test
+    fun heartbeatWatchdogDetectsStaleWorkingCards() {
+        // null 或非正数心跳不判超时
+        assertFalse(isHeartbeatStale(null, now = 100_000L))
+        assertFalse(isHeartbeatStale(0L, now = 100_000L))
+        assertFalse(isHeartbeatStale(-1L, now = 100_000L))
+
+        // 阈值边界判定（60s）
+        assertFalse(isHeartbeatStale(40_000L, now = 100_000L, thresholdMs = 60_000L))
+        assertTrue(isHeartbeatStale(39_999L, now = 100_000L, thresholdMs = 60_000L))
+
+        // working 态卡片且心跳超时 => plan.isHeartbeatStale 成立
+        val workingCard = AgentCardUi(
+            cardId = "task-heartbeat",
+            rev = 1,
+            state = "working",
+            lastBeatTs = 10_000L,
+        )
+        val stalePlan = cardRenderPlanOf(
+            card = workingCard,
+            eligibility = CardActionEligibility.Actionable,
+            hasActionChannel = true,
+            now = 70_001L,
+        )
+        assertTrue(stalePlan.isHeartbeatStale, "working 态下超过 60s 未收到心跳必须触发 isHeartbeatStale")
+
+        val freshPlan = cardRenderPlanOf(
+            card = workingCard,
+            eligibility = CardActionEligibility.Actionable,
+            hasActionChannel = true,
+            now = 69_999L,
+        )
+        assertFalse(freshPlan.isHeartbeatStale, "心跳在 60s 内不应触发超时告警")
+
+        // 终态卡片（merged / aborted 等）即使心跳距今很久也不应触发告警
+        val doneCard = workingCard.copy(state = "merged")
+        val donePlan = cardRenderPlanOf(
+            card = doneCard,
+            eligibility = CardActionEligibility.Actionable,
+            hasActionChannel = true,
+            now = 100_000L,
+        )
+        assertFalse(donePlan.isHeartbeatStale, "终态卡片不触发心跳超时告警")
+    }
 }

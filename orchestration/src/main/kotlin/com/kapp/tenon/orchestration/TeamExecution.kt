@@ -234,22 +234,28 @@ object TeamPlanCompiler {
             )
         }
         val stages = buildList {
+            val workerName = hitMember.name.ifBlank { hitMember.agentId }
             add(
                 ChainStage(
                     role = workerStageRole(hitMember),
                     agentKey = worker.driverKey,
                     instruction = workerInstruction(goal, worker.customPrompt) + briefSuffix,
                     model = worker.models.firstOrNull(),
+                    assignee = workerName,
                 ),
             )
             reviewers.forEach { reviewer ->
                 val declaredRole = declaredRoleById[reviewer.agentId.trim().lowercase()]
+                val reviewerName = declaredMembers.firstOrNull {
+                    it.agentId.trim().lowercase() == reviewer.agentId.trim().lowercase()
+                }?.let { it.name.ifBlank { it.agentId } } ?: reviewer.agentId
                 add(
                     ChainStage(
                         role = declaredRole?.ifBlank { null } ?: "reviewer",
                         agentKey = reviewer.driverKey,
                         instruction = reviewInstruction(goal, declaredRole, reviewer.customPrompt) + briefSuffix,
                         model = reviewer.models.firstOrNull(),
+                        assignee = reviewerName,
                     ),
                 )
             }

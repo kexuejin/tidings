@@ -19,8 +19,10 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -227,38 +229,59 @@ internal fun CardRevisionDrawer(
             horizontalArrangement = Arrangement.spacedBy(sp.sm6),
             modifier = Modifier.fillMaxWidth(),
         ) {
-            RevisionChip(Res.string.card_revision_chip_test, enabled) { feedback = feedback.appendChip(it) }
-            RevisionChip(Res.string.card_revision_chip_contrast, enabled) { feedback = feedback.appendChip(it) }
-            RevisionChip(Res.string.card_revision_chip_compat, enabled) { feedback = feedback.appendChip(it) }
-            RevisionChip(Res.string.card_revision_chip_perf, enabled) { feedback = feedback.appendChip(it) }
+            RevisionChip(Res.string.card_revision_chip_test, enabled) {
+                feedback = feedback.appendChip(it).take(MAX_REJECT_REVISION_FEEDBACK_CHARS)
+            }
+            RevisionChip(Res.string.card_revision_chip_contrast, enabled) {
+                feedback = feedback.appendChip(it).take(MAX_REJECT_REVISION_FEEDBACK_CHARS)
+            }
+            RevisionChip(Res.string.card_revision_chip_compat, enabled) {
+                feedback = feedback.appendChip(it).take(MAX_REJECT_REVISION_FEEDBACK_CHARS)
+            }
+            RevisionChip(Res.string.card_revision_chip_perf, enabled) {
+                feedback = feedback.appendChip(it).take(MAX_REJECT_REVISION_FEEDBACK_CHARS)
+            }
         }
         // 输入框：无边框药丸（.rev-inp 的 surface 底 + 细边），与 MessageComposer 的
         // 「输入框自带容器」分工一致 —— 这里画的是抽屉自己的行内输入。
+        // 长度上限由 [MAX_REJECT_REVISION_FEEDBACK_CHARS] 锁定（48 字符），保证跨设备派单时
+        // 拼接后的 actionId 严格符合 Limits.AGENT_RUN_ID，杜绝宿主整帧拒收。
         androidx.compose.foundation.text.BasicTextField(
             value = feedback,
-            onValueChange = { feedback = it },
+            onValueChange = { feedback = it.take(MAX_REJECT_REVISION_FEEDBACK_CHARS) },
             enabled = enabled,
             textStyle = MaterialTheme.typography.bodySmall.copy(
                 color = MaterialTheme.colorScheme.onSurface,
             ),
             decorationBox = { inner ->
-                Box(
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(MaterialTheme.colorScheme.surface, MaterialTheme.shapes.small)
                         .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.12f), MaterialTheme.shapes.small)
                         .padding(horizontal = sp.md10, vertical = sp.sm6),
                 ) {
-                    if (feedback.isEmpty()) {
+                    Box(modifier = Modifier.weight(1f)) {
+                        if (feedback.isEmpty()) {
+                            Text(
+                                text = stringResource(Res.string.card_revision_hint),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        inner()
+                    }
+                    if (feedback.isNotEmpty()) {
+                        Spacer(Modifier.width(sp.sm6))
                         Text(
-                            text = stringResource(Res.string.card_revision_hint),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
+                            text = "${feedback.length}/$MAX_REJECT_REVISION_FEEDBACK_CHARS",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                         )
                     }
-                    inner()
                 }
             },
             modifier = Modifier.fillMaxWidth(),
@@ -545,6 +568,54 @@ private fun artifactIntentLabel(intentKey: String): String? = when (intentKey) {
  * 由调用方按「这份产物此刻能不能打开」把整颗按钮摘掉，而不是画一颗灰的。
  */
 @Composable
+private fun CardActionButton(
+    card: AgentCardUi,
+    action: AgentCardAction,
+    text: String,
+    ui: CardActionUi,
+    actionsEnabled: Boolean,
+    onAction: (card: AgentCardUi, actionId: String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val isDanger = action.style == "danger" ||
+        action.actionId == SYSTEM_ACTION_ABORT_TASK ||
+        action.actionId == SYSTEM_ACTION_REJECT_REVISION ||
+        action.actionId.startsWith("$SYSTEM_ACTION_REJECT_REVISION|")
+
+    val iconRes = when {
+        action.actionId == SYSTEM_ACTION_MERGE_PATCH -> Res.drawable.ic_check_double
+        action.actionId == SYSTEM_ACTION_ABORT_TASK -> Res.drawable.ic_close
+        action.actionId == SYSTEM_ACTION_REJECT_REVISION ||
+            action.actionId.startsWith("$SYSTEM_ACTION_REJECT_REVISION|") -> Res.drawable.ic_close
+        action.actionId == "approve-prototype" -> Res.drawable.ic_check_double
+        action.actionId == SYSTEM_ACTION_OPEN_PROTOTYPE -> Res.drawable.ic_link
+        action.actionId == "retry" -> Res.drawable.ic_refresh
+        else -> null
+    }
+    if (action.approval) {
+        AppButton(
+            text = text,
+            onClick = { onAction(card, action.actionId) },
+            enabled = actionsEnabled && !ui.disabled,
+            size = AppButtonSize.Medium,
+            tone = if (isDanger) AppButtonTone.Danger else AppButtonTone.Primary,
+            leadingIcon = iconRes,
+            modifier = modifier,
+        )
+    } else {
+        AppOutlinedButton(
+            text = text,
+            onClick = { onAction(card, action.actionId) },
+            enabled = actionsEnabled && !ui.disabled,
+            size = AppButtonSize.Medium,
+            tone = if (isDanger) AppButtonTone.Danger else AppButtonTone.Neutral,
+            leadingIcon = iconRes,
+            modifier = modifier,
+        )
+    }
+}
+
+@Composable
 internal fun CardButtonGroupRow(
     card: AgentCardUi,
     pendingActions: Set<String>,
@@ -553,59 +624,64 @@ internal fun CardButtonGroupRow(
     isActionVisible: ((AgentCardAction) -> Boolean)? = null,
 ) {
     val sp = LocalAppSpacing.current
-    Column(verticalArrangement = Arrangement.spacedBy(sp.sm)) {
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(sp.md10),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            card.actions.filter { isActionVisible?.invoke(it) ?: true }.forEach { action ->
-                val ui = cardActionUiOf(card, pendingActions, action.actionId)
-                // 文案优先序（跨端约定）：本端认识的 labelKey → 已知系统动作的端上词条 →
-                // payload 的 label → actionId。旧 payload（只有 label）与旧端（只读 label）
-                // 都被这三条兜住，永远有字。
-                val keyedLabel = localizedCardActionLabel(action)
-                val text = when {
-                    ui.lock == CardActionLock.PendingConfirm -> stringResource(Res.string.card_pending_confirm)
-                    keyedLabel != null -> keyedLabel
-                    action.actionId == SYSTEM_ACTION_MERGE_PATCH -> stringResource(Res.string.card_action_merge_patch)
-                    action.actionId == SYSTEM_ACTION_ABORT_TASK -> stringResource(Res.string.card_action_abort)
-                    else -> cardActionLabel(action, null)
-                }
+    val visibleActions = card.actions.filter { isActionVisible?.invoke(it) ?: true }
+    if (visibleActions.isEmpty()) return
 
-                val isDanger = action.style == "danger" ||
-                    action.actionId == SYSTEM_ACTION_ABORT_TASK ||
-                    action.actionId == SYSTEM_ACTION_REJECT_REVISION ||
-                    action.actionId.startsWith("$SYSTEM_ACTION_REJECT_REVISION|")
+    val actionItems = visibleActions.map { action ->
+        val ui = cardActionUiOf(card, pendingActions, action.actionId)
+        val keyedLabel = localizedCardActionLabel(action)
+        val text = when {
+            ui.lock == CardActionLock.PendingConfirm -> stringResource(Res.string.card_pending_confirm)
+            keyedLabel != null -> keyedLabel
+            action.actionId == SYSTEM_ACTION_MERGE_PATCH -> stringResource(Res.string.card_action_merge_patch)
+            action.actionId == SYSTEM_ACTION_ABORT_TASK -> stringResource(Res.string.card_action_abort)
+            else -> cardActionLabel(action, null)
+        }
+        Triple(action, ui, text)
+    }
 
-                val iconRes = when {
-                    action.actionId == SYSTEM_ACTION_MERGE_PATCH -> Res.drawable.ic_check_double
-                    action.actionId == SYSTEM_ACTION_ABORT_TASK -> Res.drawable.ic_close
-                    action.actionId == SYSTEM_ACTION_REJECT_REVISION ||
-                        action.actionId.startsWith("$SYSTEM_ACTION_REJECT_REVISION|") -> Res.drawable.ic_close
-                    action.actionId == "approve-prototype" -> Res.drawable.ic_check_double
-                    action.actionId == SYSTEM_ACTION_OPEN_PROTOTYPE -> Res.drawable.ic_link
-                    action.actionId == "retry" -> Res.drawable.ic_refresh
-                    else -> null
-                }
-                if (action.approval) {
-                    AppButton(
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+        val widthDp = maxWidth.value
+        val shouldStack = shouldStackCardActionsVertically(
+            actionCount = actionItems.size,
+            actionTexts = actionItems.map { it.third },
+            availableWidthDp = widthDp,
+        )
+
+        if (shouldStack) {
+            // 垂直通栏堆叠（规格 §4.2 / §6.4）：主强调动作（approval=true）置顶，次要动作置底
+            val sortedItems = actionItems.sortedByDescending { it.first.approval }
+            Column(
+                verticalArrangement = Arrangement.spacedBy(sp.sm),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                sortedItems.forEach { (action, ui, text) ->
+                    CardActionButton(
+                        card = card,
+                        action = action,
                         text = text,
-                        onClick = { onAction(card, action.actionId) },
-                        enabled = actionsEnabled && !ui.disabled,
-                        size = AppButtonSize.Medium,
-                        tone = if (isDanger) AppButtonTone.Danger else AppButtonTone.Primary,
-                        leadingIcon = iconRes,
-                        modifier = Modifier.weight(1f),
+                        ui = ui,
+                        actionsEnabled = actionsEnabled,
+                        onAction = onAction,
+                        modifier = Modifier.fillMaxWidth(),
                     )
-                } else {
-                    AppOutlinedButton(
+                }
+            }
+        } else {
+            // 水平排列：单按钮满宽，多按钮等分布列
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(sp.md10),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                actionItems.forEach { (action, ui, text) ->
+                    CardActionButton(
+                        card = card,
+                        action = action,
                         text = text,
-                        onClick = { onAction(card, action.actionId) },
-                        enabled = actionsEnabled && !ui.disabled,
-                        size = AppButtonSize.Medium,
-                        tone = if (isDanger) AppButtonTone.Danger else AppButtonTone.Neutral,
-                        leadingIcon = iconRes,
-                        modifier = Modifier.weight(1f),
+                        ui = ui,
+                        actionsEnabled = actionsEnabled,
+                        onAction = onAction,
+                        modifier = if (actionItems.size == 1) Modifier.fillMaxWidth() else Modifier.weight(1f),
                     )
                 }
             }

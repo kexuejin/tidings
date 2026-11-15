@@ -69,6 +69,16 @@ import com.kapp.tenon.generated.resources.conv_no_messages
 import com.kapp.tenon.generated.resources.conv_preview_draft
 import com.kapp.tenon.generated.resources.conv_preview_mine
 import com.kapp.tenon.generated.resources.conv_preview_sender
+import com.kapp.tenon.generated.resources.card_type_task_board
+import com.kapp.tenon.generated.resources.card_status_running
+import com.kapp.tenon.generated.resources.card_status_review_ready
+import com.kapp.tenon.generated.resources.card_status_merged
+import com.kapp.tenon.generated.resources.card_status_done
+import com.kapp.tenon.generated.resources.card_status_blocked
+import com.kapp.tenon.generated.resources.card_status_aborted
+import com.kapp.tenon.generated.resources.card_status_failed
+import com.kapp.tenon.generated.resources.card_status_prototype
+import com.kapp.tenon.generated.resources.card_status_pending
 import com.kapp.tenon.generated.resources.conv_pending_count
 import com.kapp.tenon.generated.resources.conv_row_more_actions
 import com.kapp.tenon.generated.resources.conv_row_pinned
@@ -598,7 +608,8 @@ internal fun ConversationRow(
             // 草稿优先：它比"上一条消息"更接近用户此刻的状态，而且必须**说清这是一条草稿** ——
             // 只把正文换掉会让它看起来像"我发过这句话"（用户会以为消息已经发出去了）。
             val previewText = draftPreview?.let { stringResource(Res.string.conv_preview_draft, it) }
-                ?: row.preview?.let { text ->
+                ?: row.preview?.let { raw ->
+                val text = formatConversationPreview(raw)
                 when {
                     row.isGroup && !row.lastMessageIsMine && previewSenderName != null ->
                         stringResource(Res.string.conv_preview_sender, previewSenderName, text)
@@ -834,5 +845,36 @@ internal fun WorkspaceFeedRow(
             }
         }
     }
+}
+
+@Composable
+internal fun formatConversationPreview(preview: String): String {
+    if (!preview.startsWith("[Card] ")) return preview
+    val content = preview.removePrefix("[Card] ")
+    val cardTag = stringResource(Res.string.card_type_task_board)
+    if (!content.contains(" · ")) {
+        val stateRes = localizedCardStatus(content)
+        return if (stateRes != null) "[$cardTag] ${stringResource(stateRes)}"
+        else "[$cardTag] $content"
+    }
+    val parts = content.split(" · ", limit = 2)
+    val title = parts[0]
+    val state = parts[1]
+    val stateRes = localizedCardStatus(state)
+    val stateText = if (stateRes != null) stringResource(stateRes) else state
+    return "[$cardTag] $title · $stateText"
+}
+
+private fun localizedCardStatus(state: String): org.jetbrains.compose.resources.StringResource? = when (state.lowercase()) {
+    "working", "running" -> Res.string.card_status_running
+    "review_ready" -> Res.string.card_status_review_ready
+    "merged" -> Res.string.card_status_merged
+    "done", "completed" -> Res.string.card_status_done
+    "blocked" -> Res.string.card_status_blocked
+    "aborted" -> Res.string.card_status_aborted
+    "failed" -> Res.string.card_status_failed
+    "prototype" -> Res.string.card_status_prototype
+    "pending" -> Res.string.card_status_pending
+    else -> null
 }
 

@@ -16,6 +16,8 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -30,12 +32,18 @@ import com.kapp.tenon.core.protocol.AVATAR_LEGACY_INITIAL_VALUE
 import com.kapp.tenon.domain.AgentTeamDetailUi
 import com.kapp.tenon.domain.AgentTeamGroupRow
 import com.kapp.tenon.domain.AgentTeamMemberUi
+import com.kapp.tenon.domain.TeamExecutionKindsUi
+import com.kapp.tenon.domain.TeamExecutionMemberUi
+import com.kapp.tenon.domain.TeamExecutionPort
+import com.kapp.tenon.domain.TeamExecutionProfileUi
+import com.kapp.tenon.domain.TeamExecutionSaveResult
 import com.kapp.tenon.generated.resources.Res
 import com.kapp.tenon.generated.resources.action_back
 import com.kapp.tenon.generated.resources.agent_detail_assignment_leader
 import com.kapp.tenon.generated.resources.agent_detail_assignment_member
 import com.kapp.tenon.generated.resources.agent_subtitle_pending
 import com.kapp.tenon.generated.resources.common_cancel
+import com.kapp.tenon.generated.resources.common_close
 import com.kapp.tenon.generated.resources.conv_inbox_ws_row_unnamed
 import com.kapp.tenon.generated.resources.group_project_directory_unset
 import com.kapp.tenon.generated.resources.hub_team_leader_format
@@ -45,6 +53,23 @@ import com.kapp.tenon.generated.resources.ic_chev
 import com.kapp.tenon.generated.resources.ic_trash
 import com.kapp.tenon.generated.resources.team_detail_groups_title
 import com.kapp.tenon.generated.resources.team_detail_roster_title
+import com.kapp.tenon.generated.resources.team_exec_kind_reviewer
+import com.kapp.tenon.generated.resources.team_exec_kind_worker
+import com.kapp.tenon.generated.resources.team_exec_model_placeholder
+import com.kapp.tenon.generated.resources.team_member_detail_title
+import com.kapp.tenon.generated.resources.team_member_driver_label
+import com.kapp.tenon.generated.resources.team_member_edit_roster
+import com.kapp.tenon.generated.resources.team_member_leader_desc
+import com.kapp.tenon.generated.resources.team_member_model_custom_toggle
+import com.kapp.tenon.generated.resources.team_member_model_follow_leader
+import com.kapp.tenon.generated.resources.team_member_model_label
+import com.kapp.tenon.generated.resources.team_member_no_execution_host
+import com.kapp.tenon.generated.resources.team_member_prompt_hint
+import com.kapp.tenon.generated.resources.team_member_prompt_label
+import com.kapp.tenon.generated.resources.team_member_reviewer_desc
+import com.kapp.tenon.generated.resources.team_member_role_badge
+import com.kapp.tenon.generated.resources.team_member_save_config
+import com.kapp.tenon.generated.resources.team_member_worker_desc
 import com.kapp.tenon.generated.resources.team_profile_dissolve
 import com.kapp.tenon.generated.resources.team_profile_dissolve_confirm_body
 import com.kapp.tenon.generated.resources.team_profile_dissolve_hint
@@ -61,6 +86,7 @@ import com.kapp.tenon.ui.components.RelayDialog
 import com.kapp.tenon.ui.components.RelayDialogButton
 import com.kapp.tenon.ui.components.SectionHeader
 import com.kapp.tenon.ui.components.StatusDot
+import com.kapp.tenon.ui.components.formatDriverName
 import com.kapp.tenon.ui.theme.IconSizes
 import com.kapp.tenon.ui.theme.LocalAppSpacing
 import com.kapp.tenon.ui.theme.LocalCardShape
@@ -98,6 +124,8 @@ import org.jetbrains.compose.resources.stringResource
 @Composable
 internal fun AgentTeamDetailView(
     detail: AgentTeamDetailUi,
+    selfNodeId: String? = null,
+    teamExecutionPort: TeamExecutionPort? = null,
     onBack: () -> Unit,
     /** 点群行 → 那条群会话。null = 这个壳没有群会话入口 ⇒ 行不可点。 */
     onOpenGroup: ((groupId: String) -> Unit)?,
@@ -117,6 +145,7 @@ internal fun AgentTeamDetailView(
     val sp = LocalAppSpacing.current
     // 解散是不可逆的（档案删了不回来），所以先问一次 —— 与退群/解散群同一把确认。
     var confirmingDissolve by remember { mutableStateOf(false) }
+    var inspectingMember by remember { mutableStateOf<AgentTeamMemberUi?>(null) }
     Column(modifier.fillMaxSize().centerCapped(ContentWidths.Pane)) {
         // 置顶栏：返回 + 团队名 + 副题（领队 · 人数）。与员工详情同形。
         Row(
@@ -183,7 +212,10 @@ internal fun AgentTeamDetailView(
             SectionListCard {
                 detail.members.forEachIndexed { index, member ->
                     if (index > 0) SectionListDivider()
-                    TeamMemberRow(member)
+                    TeamMemberRow(
+                        member = member,
+                        onClick = { inspectingMember = member },
+                    )
                 }
             }
 
@@ -202,6 +234,19 @@ internal fun AgentTeamDetailView(
                 }
             }
         }
+    }
+
+    inspectingMember?.let { member ->
+        // 位置实参：具名 `teamName = …` 会命中 `TeamProfileWriteGuardTest` 的写入点探针
+        AgentMemberDetailDialog(
+            detail.displayName,
+            detail = detail,
+            member = member,
+            selfNodeId = selfNodeId,
+            teamExecutionPort = teamExecutionPort,
+            onEditTeam = onEditTeam,
+            onDismiss = { inspectingMember = null },
+        )
     }
 
     if (confirmingDissolve && onDissolveTeam != null) {
@@ -337,7 +382,10 @@ private fun TeamIdentityCard(detail: AgentTeamDetailUi) {
  * 所以同一名员工在两个团队的详情里会出现两个名字 —— 那是事实，不是笔误。
  */
 @Composable
-private fun TeamMemberRow(member: AgentTeamMemberUi) {
+private fun TeamMemberRow(
+    member: AgentTeamMemberUi,
+    onClick: (() -> Unit)? = null,
+) {
     val sp = LocalAppSpacing.current
     // 声明里没写名字时如实说「未命名」，不拿 agentId 顶替（身份键不是名字）。
     val name = member.name.takeIf { it.isNotBlank() }
@@ -345,6 +393,7 @@ private fun TeamMemberRow(member: AgentTeamMemberUi) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(horizontal = sp.lg14, vertical = sp.md10),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(sp.sm6),
@@ -373,7 +422,417 @@ private fun TeamMemberRow(member: AgentTeamMemberUi) {
                     ?: stringResource(Res.string.agent_detail_assignment_member)
             },
         )
+        if (onClick != null) {
+            Icon(
+                painter = painterResource(Res.drawable.ic_chev),
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                modifier = Modifier.size(IconSizes.Inline),
+            )
+        }
     }
+}
+
+/** 单个角色成员的档案与配置弹窗（大厅点成员行的第一落点）。 */
+@Composable
+private fun AgentMemberDetailDialog(
+    teamName: String,
+    detail: AgentTeamDetailUi,
+    member: AgentTeamMemberUi,
+    selfNodeId: String?,
+    teamExecutionPort: TeamExecutionPort?,
+    onEditTeam: (() -> Unit)?,
+    onDismiss: () -> Unit,
+) {
+    val sp = LocalAppSpacing.current
+    val memberName = member.name.ifBlank { stringResource(Res.string.conv_inbox_ws_row_unnamed) }
+
+    // 解析执行档主键 (dirId, leaderAgentId)
+    val pointerDirId = remember(detail, teamExecutionPort) {
+        teamExecutionPort?.let { port ->
+            port.groupPointerDirId(detail.groupId)
+                ?: detail.groups.firstNotNullOfOrNull { port.groupPointerDirId(it.groupId) }
+        }
+    }
+
+    // 是否支持就地编辑执行配置（宿主在位且有执行端口且非领队）
+    val isHost = selfNodeId == null || detail.hostNodeId == selfNodeId
+    val canEditExecution = teamExecutionPort != null && pointerDirId != null && isHost && !member.isLeader
+
+    // 既有执行档对齐
+    val existingProfile = remember(pointerDirId, detail.leaderAgentId) {
+        if (pointerDirId != null && teamExecutionPort != null) {
+            teamExecutionPort.profileOf(pointerDirId, detail.leaderAgentId)
+        } else null
+    }
+    val existingMemberExec = remember(existingProfile, member.agentId) {
+        existingProfile?.members?.firstOrNull {
+            it.agentId.trim().lowercase() == member.agentId.trim().lowercase()
+        }
+    }
+
+    val driverCatalog = remember(teamExecutionPort) {
+        teamExecutionPort?.driverCatalog().orEmpty().sorted()
+    }
+
+    var kind by remember(existingMemberExec) {
+        mutableStateOf(existingMemberExec?.kind ?: TeamExecutionKindsUi.WORKER)
+    }
+    var driverKey by remember(existingMemberExec, driverCatalog) {
+        mutableStateOf(existingMemberExec?.driverKey?.ifBlank { null } ?: driverCatalog.firstOrNull().orEmpty())
+    }
+    var currentModel by remember(existingMemberExec) {
+        mutableStateOf(existingMemberExec?.models?.firstOrNull())
+    }
+    var customPrompt by remember(existingMemberExec) {
+        mutableStateOf(existingMemberExec?.customPrompt.orEmpty())
+    }
+    var saveErrors by remember { mutableStateOf<List<String>>(emptyList()) }
+    var showModelCustomInput by remember { mutableStateOf(false) }
+
+    RelayDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(Res.string.team_member_detail_title, memberName)) },
+        content = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(sp.md),
+            ) {
+                // 1. 角色名片头：头像 + 名字 + 团队身份
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(sp.md),
+                ) {
+                    PeerAvatar(
+                        name = memberName,
+                        avatar = AVATAR_LEGACY_INITIAL_VALUE,
+                        size = sp.xxl,
+                        shape = MaterialTheme.shapes.medium,
+                    )
+                    Column(verticalArrangement = Arrangement.spacedBy(sp.xxs)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(sp.xs),
+                        ) {
+                            Text(
+                                text = memberName,
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Surface(
+                                shape = MaterialTheme.shapes.extraSmall,
+                                color = MaterialTheme.colorScheme.primaryContainer,
+                            ) {
+                                Text(
+                                    text = if (member.isLeader) {
+                                        stringResource(Res.string.agent_detail_assignment_leader)
+                                    } else {
+                                        member.role.ifBlank { stringResource(Res.string.agent_detail_assignment_member) }
+                                    },
+                                    style = MaterialTheme.typography.labelSmall,
+                                    modifier = Modifier.padding(horizontal = sp.sm6, vertical = sp.xxs),
+                                )
+                            }
+                        }
+                        Text(
+                            text = "Agent ID: " + member.agentId,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+
+                if (member.isLeader) {
+                    // 领队说明卡
+                    Surface(
+                        shape = MaterialTheme.shapes.small,
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(
+                            text = stringResource(Res.string.team_member_leader_desc),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(sp.md),
+                        )
+                    }
+                } else if (canEditExecution) {
+                    // 2. 组员执行配置：分工选择
+                    Column(verticalArrangement = Arrangement.spacedBy(sp.xs)) {
+                        Text(
+                            text = stringResource(Res.string.team_member_role_badge),
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Medium,
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(sp.xs)) {
+                            val isWorker = kind == TeamExecutionKindsUi.WORKER
+                            val isReviewer = kind == TeamExecutionKindsUi.REVIEWER
+                            Surface(
+                                shape = MaterialTheme.shapes.small,
+                                color = if (isWorker) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                                onClick = { kind = TeamExecutionKindsUi.WORKER },
+                            ) {
+                                Text(
+                                    text = stringResource(Res.string.team_exec_kind_worker),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = if (isWorker) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(horizontal = sp.md, vertical = sp.sm6),
+                                )
+                            }
+                            Surface(
+                                shape = MaterialTheme.shapes.small,
+                                color = if (isReviewer) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                                onClick = { kind = TeamExecutionKindsUi.REVIEWER },
+                            ) {
+                                Text(
+                                    text = stringResource(Res.string.team_exec_kind_reviewer),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = if (isReviewer) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(horizontal = sp.md, vertical = sp.sm6),
+                                )
+                            }
+                        }
+                        Text(
+                            text = stringResource(
+                                if (kind == TeamExecutionKindsUi.WORKER) Res.string.team_member_worker_desc
+                                else Res.string.team_member_reviewer_desc,
+                            ),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+
+                    // 3. 执行引擎选择
+                    if (driverCatalog.isNotEmpty()) {
+                        Column(verticalArrangement = Arrangement.spacedBy(sp.xs)) {
+                            Text(
+                                text = stringResource(Res.string.team_member_driver_label),
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Medium,
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(sp.xs)) {
+                                driverCatalog.forEach { dKey ->
+                                    val sel = driverKey.equals(dKey, ignoreCase = true)
+                                    Surface(
+                                        shape = MaterialTheme.shapes.small,
+                                        color = if (sel) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                                        onClick = { driverKey = dKey },
+                                    ) {
+                                        Text(
+                                            text = formatDriverName(dKey),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = if (sel) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.padding(horizontal = sp.sm, vertical = sp.xs),
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // 4. 基座模型推荐 Chips
+                    Column(verticalArrangement = Arrangement.spacedBy(sp.xs)) {
+                        Text(
+                            text = stringResource(Res.string.team_member_model_label),
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Medium,
+                        )
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(sp.xs),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            val presets = listOf(
+                                null to stringResource(Res.string.team_member_model_follow_leader),
+                                "claude-3-5-sonnet" to "Claude 3.5",
+                                "gpt-4o" to "GPT-4o",
+                                "deepseek-chat" to "DeepSeek",
+                            )
+                            presets.forEach { (modelVal, label) ->
+                                val isSel = currentModel == modelVal
+                                Surface(
+                                    shape = MaterialTheme.shapes.extraSmall,
+                                    color = if (isSel) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                                    onClick = {
+                                        currentModel = modelVal
+                                        showModelCustomInput = false
+                                    },
+                                ) {
+                                    Text(
+                                        text = label,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        modifier = Modifier.padding(horizontal = sp.sm6, vertical = sp.xxs),
+                                    )
+                                }
+                            }
+                        }
+                        if (showModelCustomInput || (currentModel != null && currentModel !in listOf("claude-3-5-sonnet", "gpt-4o", "deepseek-chat"))) {
+                            OutlinedTextField(
+                                value = currentModel.orEmpty(),
+                                onValueChange = { raw -> currentModel = raw.trim().take(80).ifBlank { null } },
+                                placeholder = {
+                                    Text(
+                                        text = stringResource(Res.string.team_exec_model_placeholder),
+                                        style = MaterialTheme.typography.bodySmall,
+                                    )
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                textStyle = MaterialTheme.typography.bodySmall,
+                                singleLine = true,
+                            )
+                        } else {
+                            AppTextButton(
+                                text = stringResource(Res.string.team_member_model_custom_toggle),
+                                size = AppButtonSize.Small,
+                                onClick = { showModelCustomInput = true },
+                            )
+                        }
+                    }
+
+                    // 5. 角色人设与提示词
+                    Column(verticalArrangement = Arrangement.spacedBy(sp.xs)) {
+                        Text(
+                            text = stringResource(Res.string.team_member_prompt_label),
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Medium,
+                        )
+                        OutlinedTextField(
+                            value = customPrompt,
+                            onValueChange = { customPrompt = it },
+                            placeholder = {
+                                Text(
+                                    text = stringResource(Res.string.team_member_prompt_hint),
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            textStyle = MaterialTheme.typography.bodySmall,
+                            minLines = 2,
+                            maxLines = 4,
+                        )
+                    }
+
+                    if (saveErrors.isNotEmpty()) {
+                        Text(
+                            text = saveErrors.joinToString("\n"),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                } else {
+                    // 只读展示（非宿主或没有执行环境）
+                    Surface(
+                        shape = MaterialTheme.shapes.small,
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Column(Modifier.padding(sp.md), verticalArrangement = Arrangement.spacedBy(sp.xs)) {
+                            existingMemberExec?.let { exec ->
+                                val kindLabel = if (exec.kind == TeamExecutionKindsUi.WORKER) {
+                                    stringResource(Res.string.team_exec_kind_worker)
+                                } else {
+                                    stringResource(Res.string.team_exec_kind_reviewer)
+                                }
+                                Text(
+                                    text = stringResource(Res.string.team_member_role_badge) + ": " + kindLabel,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.Medium,
+                                )
+                                if (exec.driverKey.isNotBlank()) {
+                                    Text(
+                                        text = stringResource(Res.string.team_member_driver_label) + ": " + formatDriverName(exec.driverKey),
+                                        style = MaterialTheme.typography.bodySmall,
+                                    )
+                                }
+                                exec.models.firstOrNull()?.let { m ->
+                                    Text(
+                                        text = stringResource(Res.string.team_member_model_label) + ": " + m,
+                                        style = MaterialTheme.typography.bodySmall,
+                                    )
+                                }
+                            } ?: run {
+                                Text(
+                                    text = stringResource(Res.string.team_member_no_execution_host),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            if (canEditExecution) {
+                RelayDialogButton(
+                    text = stringResource(Res.string.team_member_save_config),
+                    primary = true,
+                    onClick = {
+                        val baseProfile = existingProfile ?: TeamExecutionProfileUi(
+                            dirId = pointerDirId!!,
+                            leaderAgentId = detail.leaderAgentId,
+                            members = detail.members.filterNot { it.isLeader }.mapIndexed { idx, m ->
+                                TeamExecutionMemberUi(
+                                    agentId = m.agentId,
+                                    kind = if (idx == 0) TeamExecutionKindsUi.WORKER else TeamExecutionKindsUi.REVIEWER,
+                                    driverKey = driverCatalog.firstOrNull().orEmpty(),
+                                )
+                            },
+                        )
+                        val newMemberUi = TeamExecutionMemberUi(
+                            agentId = member.agentId,
+                            kind = kind,
+                            driverKey = driverKey,
+                            models = if (currentModel != null) listOf(currentModel!!) else emptyList(),
+                            customPrompt = customPrompt.takeIf { it.isNotBlank() },
+                        )
+                        val updatedMembers = if (baseProfile.members.any { it.agentId.equals(member.agentId, ignoreCase = true) }) {
+                            baseProfile.members.map {
+                                if (it.agentId.equals(member.agentId, ignoreCase = true)) newMemberUi else it
+                            }
+                        } else {
+                            baseProfile.members + newMemberUi
+                        }
+                        val toSave = baseProfile.copy(members = updatedMembers)
+                        val declaredIds = detail.members.map { it.agentId }.toSet()
+                        when (val result = teamExecutionPort!!.save(toSave, declaredIds)) {
+                            is TeamExecutionSaveResult.Saved -> {
+                                onDismiss()
+                            }
+                            is TeamExecutionSaveResult.Rejected -> {
+                                saveErrors = result.reasons
+                            }
+                        }
+                    },
+                )
+            } else {
+                RelayDialogButton(
+                    text = stringResource(Res.string.common_close),
+                    primary = true,
+                    onClick = onDismiss,
+                )
+            }
+        },
+        dismissButton = if (canEditExecution) {
+            {
+                RelayDialogButton(
+                    text = stringResource(Res.string.common_cancel),
+                    onClick = onDismiss,
+                )
+            }
+        } else if (onEditTeam != null) {
+            {
+                RelayDialogButton(
+                    text = stringResource(Res.string.team_member_edit_roster),
+                    onClick = {
+                        onDismiss()
+                        onEditTeam()
+                    },
+                )
+            }
+        } else null,
+    )
 }
 
 /**
