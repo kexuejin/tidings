@@ -153,4 +153,45 @@ class EmployeeProfileCandidatesTest {
             "已建档的 agent 不该再出现在候选表里",
         )
     }
+
+    // ---- 卡片 → 档案的宿主判据（[employeeProfileOf]） ----
+
+    private fun profile(agentId: String, name: String = "小码") = AgentEmployeeProfileUi(
+        employeeId = "emp-$agentId",
+        agentId = agentId,
+        name = name,
+        token = "dsh-coder",
+        duty = "coder",
+        groupNames = emptyList(),
+    )
+
+    @Test
+    fun aLocalCardFindsItsProfile() {
+        val hit = employeeProfileOf(card(agentKey = "dsh-029bbbf3"), listOf(profile("dsh")), self)
+        assertEquals("emp-dsh", hit?.employeeId, "本机卡按前缀归一找到自己的档案")
+    }
+
+    @Test
+    fun aRemoteCardNeverFindsALocalProfile() {
+        // 两台机器上都有 `dsh-coder` 是常态。编辑键落到远端卡上，用户改的是**本机**那份档案，
+        // 而屏幕上看起来改的是对面那个人 —— 这类错没法从界面自证。
+        val hit = employeeProfileOf(
+            card(hostNodeId = peer, agentKey = "dsh-coder"),
+            listOf(profile("dsh-coder")),
+            self,
+        )
+        assertEquals(null, hit, "远端卡没有本机档案")
+    }
+
+    @Test
+    fun anUnknownSelfIdNeverPairs() {
+        // 身份还在恢复：不知道「本机」是谁，就不能拿一个未知身份去配对。
+        val hit = employeeProfileOf(card(agentKey = "dsh"), listOf(profile("dsh")), "")
+        assertEquals(null, hit)
+    }
+
+    @Test
+    fun aCardWithoutAnIdentityKeyNeverPairs() {
+        assertEquals(null, employeeProfileOf(card(agentKey = null), listOf(profile("dsh")), self))
+    }
 }

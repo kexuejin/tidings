@@ -4,6 +4,7 @@ package com.kapp.tenon.domain
 
 import com.kapp.tenon.core.protocol.AgentDuties
 import com.kapp.tenon.core.protocol.GroupMeta
+import com.kapp.tenon.core.protocol.sameAgent
 
 /**
  * 员工**档案管理**的一行：登记簿视角，不是运行时视角。
@@ -137,4 +138,32 @@ public fun employeeProfileLedger(settingsSlice: SettingsSlice): List<AgentEmploy
             )
         }
         .sortedBy { it.name }
+}
+
+/**
+ * 员工卡 → 它的**本机**档案（卡片行上那颗「编辑」键的唯一判据）。
+ *
+ * ## 为什么不能只按 agentId 找
+ *
+ * 员工身份键是 `(hostNodeId, agentId)`，而 `employeeProfiles` 只住宿主本机设置。
+ * 只拿 `agentId` 去撞，配上 [sameAgent] 的前缀归一（`dsh` 会认下 `dsh-…`），
+ * 就会把**别人机器上**的 `dsh-coder` 认成本机这一位 —— 于是远端卡片上出现一颗
+ * 点了会改本机档案的编辑键。这类错最难自证：两边的名字一模一样，用户以为
+ * 自己改的是「那台机器上的那个人」。
+ *
+ * 所以这里**先按宿主**再过身份：宿主不是本机 ⇒ 没有档案，一颗键都不给。
+ *
+ * @param selfNodeId 本机节点 id；空串（身份还在恢复）时一律 null —— 宁可暂时不给入口，
+ *   也不拿一个未知身份去配对。
+ */
+public fun employeeProfileOf(
+    card: AgentHubUi,
+    profiles: List<AgentEmployeeProfileUi>,
+    selfNodeId: String,
+): AgentEmployeeProfileUi? {
+    val self = selfNodeId.trim()
+    if (self.isEmpty() || card.hostNodeId != self) return null
+    val key = card.agentKey?.trim().orEmpty()
+    if (key.isEmpty()) return null
+    return profiles.firstOrNull { sameAgent(it.agentId, null, key) }
 }

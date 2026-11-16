@@ -36,8 +36,10 @@ import com.kapp.tenon.generated.resources.agent_profile_forget_hint
 import com.kapp.tenon.generated.resources.agent_profile_hint
 import com.kapp.tenon.generated.resources.agent_profile_meta_alone_format
 import com.kapp.tenon.generated.resources.agent_profile_meta_groups_format
+import com.kapp.tenon.generated.resources.agent_empty_exit_title
 import com.kapp.tenon.generated.resources.agent_profile_new
 import com.kapp.tenon.generated.resources.agent_profile_new_empty
+import com.kapp.tenon.generated.resources.agent_profile_new_empty_hint
 import com.kapp.tenon.generated.resources.agent_profile_new_hint
 import com.kapp.tenon.generated.resources.agent_profile_new_meta_format
 import com.kapp.tenon.generated.resources.agent_profile_section_title
@@ -266,25 +268,27 @@ internal fun EmployeeProfileCreateDialog(
     candidates: List<AgentEmployeeCandidateUi>,
     onPick: (AgentEmployeeCandidateUi) -> Unit,
     onDismiss: () -> Unit,
+    /**
+     * 前置条件不满足时的出路：去节点页确认宿主在线。
+     *
+     * null = 这个壳没有节点页（预览）⇒ 只保留「取消」，但不假装能建档 ——
+     * 表单本身也不展开（见下方 [candidates] 为空的分支）。
+     */
+    onFindNodes: (() -> Unit)? = null,
 ) {
     val sp = LocalAppSpacing.current
+    val hasCandidates = candidates.isNotEmpty()
     RelayDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(Res.string.agent_profile_new)) },
         content = {
-            Column(verticalArrangement = Arrangement.spacedBy(sp.sm)) {
-                Text(
-                    text = stringResource(Res.string.agent_profile_new_hint),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                if (candidates.isEmpty()) {
+            if (hasCandidates) {
+                Column(verticalArrangement = Arrangement.spacedBy(sp.sm)) {
                     Text(
-                        text = stringResource(Res.string.agent_profile_new_empty),
+                        text = stringResource(Res.string.agent_profile_new_hint),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                } else {
                     // 与「添加成员」同一个高度收口（比例上限 + 列表自己滚），
                     // 候选多时不会把对话框顶出屏幕。
                     RelayDialogContentHeight(defaultMaxHeight = 320.dp) { cap ->
@@ -295,6 +299,35 @@ internal fun EmployeeProfileCreateDialog(
                         }
                     }
                 }
+            } else {
+                // 一个候选都没有时**不展开选择器、也不放表单**：档案必须挂在真实存在的
+                // 本机 agent 上，空表提交只会产出一座派不出去的幽灵。这里只说清前置条件
+                // 与出路 —— 此前这一支只有一句「暂时无法建档」加一颗「取消」，用户点了
+                // 「新建档案」却只能关掉，是一次没有出口的操作。
+                Column(verticalArrangement = Arrangement.spacedBy(sp.sm6)) {
+                    Text(
+                        text = stringResource(Res.string.agent_profile_new_empty),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Text(
+                        text = stringResource(Res.string.agent_profile_new_empty_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            if (!hasCandidates && onFindNodes != null) {
+                RelayDialogButton(
+                    text = stringResource(Res.string.agent_empty_exit_title),
+                    primary = true,
+                    onClick = {
+                        onDismiss()
+                        onFindNodes()
+                    },
+                )
             }
         },
         dismissButton = {

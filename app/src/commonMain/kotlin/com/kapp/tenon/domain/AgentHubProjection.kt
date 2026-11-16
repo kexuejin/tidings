@@ -439,6 +439,11 @@ public fun agentHubDetail(
  *
  * 席位宿主哪怕此刻不在线、节点表里也没有，也要入账：它是一份**编制声明**，
  * 「组织里还有这台数字员工」这件事不因当前看不见而消失（离线如实标注）。
+ *
+ * 本机也在这里**先入表**，而不是从 `agentPeers` 反推。`agentPeers` 只在「本机宣告过
+ * 工作区」时才合成那台本机 —— 于是最常见的一档（会话已经跑起来、目录一个都还没宣告）
+ * 会让整台本机从宿主枚举里消失：卡片流显示 0，而 agent 就在这台机器上。宿主入表与
+ * 「有没有卡」是两件事：这里只决定**枚举**，聚类仍由台账决定，没有事实仍然没有卡。
  */
 private fun hubHostOnlineStates(
     agentSlice: AgentSlice,
@@ -447,6 +452,7 @@ private fun hubHostOnlineStates(
 ): LinkedHashMap<String, Boolean> {
     val selfNodeId = settingsSlice.settings.nodeId
     val onlineByHost = LinkedHashMap<String, Boolean>()
+    if (selfNodeId.isNotEmpty()) onlineByHost[selfNodeId] = true
     agentPeers(agentSlice, nodeSlice, settingsSlice).forEach { peer ->
         onlineByHost[peer.nodeId] = peer.online || peer.nodeId == selfNodeId
     }

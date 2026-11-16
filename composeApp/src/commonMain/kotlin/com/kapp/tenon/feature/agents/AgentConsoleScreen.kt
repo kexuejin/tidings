@@ -503,6 +503,8 @@ fun AgentConsoleScreen(
             // 员工**档案**（登记簿视角）：与团队档案同一个 gate —— 手机读不到 `employeeProfiles`
             // （只住宿主机）⇒ 恒空 ⇒ 那一档不出现；写通路（编辑 / 注销）同样由桌面壳独占。
             employeeProfiles = hubEmployeeProfiles,
+            // 编辑键的宿主判据：名录里也有别的设备的智能体，档案只住本机。
+            selfNodeId = settingsSlice.settings.nodeId,
             onEditEmployeeProfile = onEditEmployeeProfile,
             onForgetEmployeeProfile = onForgetEmployee,
             // 「新建档案」的落点是**选择器**（本屏持有），不是壳：候选表由卡片流与档案表
@@ -612,6 +614,8 @@ fun AgentConsoleScreen(
                 newProfile(candidate)
             },
             onDismiss = { profileCreateOpen = false },
+            // 候选为空时给一条真出路：节点页确认宿主在线，而不是一颗只能关掉的按钮。
+            onFindNodes = onFindNodes,
         )
     }
 
@@ -647,6 +651,8 @@ fun AgentConsoleScreen(
                 teamEditing = null
             },
             onDismiss = { teamEditing = null },
+            // 没有领队候选时不再展开假表单，直接给「去看看节点」这条出路。
+            onFindNodes = onFindNodes,
         )
     }
 
@@ -680,6 +686,7 @@ fun AgentConsoleScreen(
             leaders = leaderOptions,
             groups = groupOptions,
             onGenerate = { need -> generateTeam(need, leaderKeys, aiDefaults) },
+            onFindNodes = onFindNodes,
             onConfirm = { spec, groupIds ->
                 val reasons = mutableListOf<String>()
                 onSaveTeam(null, spec.teamTitle, spec.leaderAgentId, spec.toMemberDrafts(), groupIds)

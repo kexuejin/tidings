@@ -162,6 +162,38 @@ class AgentHubProjectionTest {
         assertTrue(hubAgentsOf(state()).isEmpty(), "什么都没上报时一张卡都不该有")
     }
 
+    // ---- 本机也是宿主之一 ----
+
+    /**
+     * 本机跑起来的 agent 必须在卡片流里 —— 哪怕它一个目录都还没宣告。
+     *
+     * 判据不是「宣告里有没有本机」，而是「本机有没有任何 agent 事实」。只拿
+     * `agentWorkspaces` 反推本机会漏掉最常见的一档：刚起的会话还没有目录
+     * （`POST /v1/agent/workspace` 从没发生过），于是整个本机从宿主枚举里消失，
+     * 界面显示「智能体（0）」并劝用户去看别的节点 —— 而 agent 就在这台机器上。
+     */
+    @Test
+    fun localSessionWithoutAnyWorkspaceStillProducesCard() {
+        val s = state(
+            sessions = listOf(session(self, "s-self", agentId = "dsh-029bbbf3")),
+        )
+        val cards = hubAgentsOf(s)
+        assertEquals(1, cards.size, "本机有会话就必须有一张卡")
+        assertEquals(self, cards.single().hostNodeId, "卡的宿主是本机")
+        assertTrue(cards.single().online, "本机恒在线")
+    }
+
+    /** 只有席位（群里有编制、还没跑起来）的本机 agent 同样要出卡。 */
+    @Test
+    fun localSeatOnlyProducesCard() {
+        val s = state(
+            groups = listOf(group("g-1", "研发群", listOf(seat("dsh-coder", self, "小码")))),
+        )
+        val cards = hubAgentsOf(s)
+        assertEquals(1, cards.size, "本机席位也是一份 agent 事实")
+        assertEquals(self, cards.single().hostNodeId)
+    }
+
     // ---- 合并规则（决策稿 §3） ----
 
     @Test

@@ -26,6 +26,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import com.kapp.tenon.domain.TeamScaffoldSpec
 import com.kapp.tenon.generated.resources.Res
+import com.kapp.tenon.generated.resources.agent_empty_exit_title
 import com.kapp.tenon.generated.resources.agent_team_confirm
 import com.kapp.tenon.generated.resources.agent_team_exec_rejected
 import com.kapp.tenon.generated.resources.agent_team_generate
@@ -45,6 +46,7 @@ import com.kapp.tenon.generated.resources.agent_team_title
 import com.kapp.tenon.generated.resources.common_cancel
 import com.kapp.tenon.generated.resources.team_profile_groups_none
 import com.kapp.tenon.generated.resources.team_profile_no_leaders
+import com.kapp.tenon.generated.resources.team_profile_prereq_body
 import com.kapp.tenon.ui.components.RelayDialog
 import com.kapp.tenon.ui.components.RelayDialogButton
 import com.kapp.tenon.ui.theme.LocalAppSpacing
@@ -72,8 +74,48 @@ internal fun TeamBuilderDialog(
     onGenerate: suspend (need: String) -> TeamScaffoldSpec?,
     onConfirm: (spec: TeamScaffoldSpec, groupIds: List<String>) -> List<String>,
     onDismiss: () -> Unit,
+    /** 没有领队候选时的出路：去节点页确认宿主在线。null = 预览壳没有节点页。 */
+    onFindNodes: (() -> Unit)? = null,
 ) {
     val sp = LocalAppSpacing.current
+    // 与手动建队同一条前置条件：没有本机领队就不展开需求输入框。
+    // 生成按钮此前只是置灰，用户仍可先写一大段需求再发现按不动 —— 那是假操作。
+    if (leaders.isEmpty()) {
+        RelayDialog(
+            onDismissRequest = onDismiss,
+            title = { Text(stringResource(Res.string.agent_team_title)) },
+            content = {
+                Column(verticalArrangement = Arrangement.spacedBy(sp.sm6)) {
+                    Text(
+                        text = stringResource(Res.string.team_profile_prereq_body),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Text(
+                        text = stringResource(Res.string.team_profile_no_leaders),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            },
+            confirmButton = {
+                if (onFindNodes != null) {
+                    RelayDialogButton(
+                        text = stringResource(Res.string.agent_empty_exit_title),
+                        primary = true,
+                        onClick = {
+                            onDismiss()
+                            onFindNodes()
+                        },
+                    )
+                }
+            },
+            dismissButton = {
+                RelayDialogButton(text = stringResource(Res.string.common_cancel), onClick = onDismiss)
+            },
+        )
+        return
+    }
     val scope = rememberCoroutineScope()
     var need by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
@@ -103,13 +145,6 @@ internal fun TeamBuilderDialog(
                     if (failed) {
                         Text(
                             text = stringResource(Res.string.agent_team_generate_failed),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error,
-                        )
-                    }
-                    if (leaders.isEmpty()) {
-                        Text(
-                            text = stringResource(Res.string.team_profile_no_leaders),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.error,
                         )

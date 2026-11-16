@@ -28,8 +28,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import com.kapp.tenon.core.protocol.TeamMemberDraft
 import com.kapp.tenon.generated.resources.Res
+import com.kapp.tenon.generated.resources.agent_empty_exit_title
 import com.kapp.tenon.generated.resources.common_cancel
-import com.kapp.tenon.generated.resources.group_auth_save
 import com.kapp.tenon.generated.resources.team_profile_dialog_title_edit
 import com.kapp.tenon.generated.resources.team_profile_dialog_title_new
 import com.kapp.tenon.generated.resources.team_profile_groups_hint
@@ -43,10 +43,13 @@ import com.kapp.tenon.generated.resources.team_profile_member_empty
 import com.kapp.tenon.generated.resources.team_profile_members_label
 import com.kapp.tenon.generated.resources.team_profile_name_hint
 import com.kapp.tenon.generated.resources.team_profile_name_label
+import com.kapp.tenon.generated.resources.team_profile_member_name_label
+import com.kapp.tenon.generated.resources.team_profile_member_role_label
 import com.kapp.tenon.generated.resources.team_profile_no_leaders
+import com.kapp.tenon.generated.resources.team_profile_prereq_body
+import com.kapp.tenon.generated.resources.team_profile_save_edit
+import com.kapp.tenon.generated.resources.team_profile_save_new
 import com.kapp.tenon.generated.resources.team_roster_add_member
-import com.kapp.tenon.generated.resources.team_roster_member_name_label
-import com.kapp.tenon.generated.resources.team_roster_member_role_label
 import com.kapp.tenon.generated.resources.team_roster_remove_member
 import com.kapp.tenon.ui.components.AppButtonSize
 import com.kapp.tenon.ui.components.AppTextButton
@@ -113,7 +116,8 @@ internal fun addableTeamGroups(options: List<TeamGroupOption>): List<TeamGroupOp
  * 编辑态不给「取消勾选已加入的群」：那会让「改个名字」顺手把一个群清空。
  * 移出某个群走那个群的席位操作。
  *
- * @param leaders 本机可当领队的 agent（空 = 本机还没有 agent，保存置灰并给出路）。
+ * @param leaders 本机可当领队的 agent。新建时为空 = 本机还没有 agent ⇒ **整张表单不展开**，
+ *   只画前置条件与「去看看节点」；不画一张永远存不下去的表单。
  * @param initialLeaderAgentId 编辑态的领队（新建时传 null ⇒ 取第一个候选）。
  */
 @Composable
@@ -126,8 +130,56 @@ internal fun TeamProfileDialog(
     groups: List<TeamGroupOption>,
     onSave: (name: String, leaderAgentId: String, members: List<TeamMemberDraft>, groupIds: List<String>) -> Unit,
     onDismiss: () -> Unit,
+    /**
+     * 前置条件不满足时的出路：去节点页确认宿主在线。
+     *
+     * null = 这个壳没有节点页（预览）⇒ 只保留「取消」。
+     */
+    onFindNodes: (() -> Unit)? = null,
 ) {
     val sp = LocalAppSpacing.current
+    // 新建团队但没有领队候选：**不展开整张表单**。
+    //
+    // 领队是团队唯一的执行入口，档案模型里它是必填（`TeamProfile.leaderAgentId`），
+    // 所以「先随便填、之后再补」在这里不是合法路径。此前这一支仍然把团队名、组员、
+    // 群选择全画出来，保存键却永远置灰 —— 用户填完一屏才发现做不了，是一次假操作。
+    // 这里只回答两件事：为什么不行、下一步去哪。
+    if (profileKey == null && leaders.isEmpty()) {
+        RelayDialog(
+            onDismissRequest = onDismiss,
+            title = { Text(stringResource(Res.string.team_profile_dialog_title_new)) },
+            content = {
+                Column(verticalArrangement = Arrangement.spacedBy(sp.sm6)) {
+                    Text(
+                        text = stringResource(Res.string.team_profile_prereq_body),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Text(
+                        text = stringResource(Res.string.team_profile_no_leaders),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            },
+            confirmButton = {
+                if (onFindNodes != null) {
+                    RelayDialogButton(
+                        text = stringResource(Res.string.agent_empty_exit_title),
+                        primary = true,
+                        onClick = {
+                            onDismiss()
+                            onFindNodes()
+                        },
+                    )
+                }
+            },
+            dismissButton = {
+                RelayDialogButton(text = stringResource(Res.string.common_cancel), onClick = onDismiss)
+            },
+        )
+        return
+    }
     var name by remember { mutableStateOf(initialName) }
     var leaderKey by remember(leaders) {
         mutableStateOf(
@@ -309,7 +361,15 @@ internal fun TeamProfileDialog(
         },
         confirmButton = {
             RelayDialogButton(
-                text = stringResource(Res.string.group_auth_save),
+                // 「保存并广播」是协议动作，不该出现在团队档案的表单上：新建就是
+                // 创建一支队伍，编辑就是保存改动。广播与否是写路径的实现细节。
+                text = stringResource(
+                    if (profileKey == null) {
+                        Res.string.team_profile_save_new
+                    } else {
+                        Res.string.team_profile_save_edit
+                    },
+                ),
                 primary = true,
                 enabled = canSave,
                 onClick = {
@@ -367,14 +427,17 @@ private fun MemberRow(
                 OutlinedTextField(
                     value = draft.name,
                     onValueChange = onNameChange,
-                    label = { Text(stringResource(Res.string.team_roster_member_name_label)) },
+                    // 这里填的是**组内名**（`TeamMemberDraft.name`），不是角色：
+                    // 借用编制对话框的「角色名称」会让 `member` 看起来像岗位，
+                    // 而它其实是这个人在这支队里的名字。
+                    label = { Text(stringResource(Res.string.team_profile_member_name_label)) },
                     singleLine = true,
                     modifier = Modifier.weight(1f),
                 )
                 OutlinedTextField(
                     value = draft.role,
                     onValueChange = onRoleChange,
-                    label = { Text(stringResource(Res.string.team_roster_member_role_label)) },
+                    label = { Text(stringResource(Res.string.team_profile_member_role_label)) },
                     singleLine = true,
                     modifier = Modifier.weight(1f),
                 )

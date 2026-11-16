@@ -147,6 +147,13 @@ internal fun AgentDirectorySection(
      * 与团队档案同一条纪律。空表而**有**团队时也不会多出一档空名录。
      */
     employeeProfiles: List<AgentEmployeeProfileUi> = emptyList(),
+    /**
+     * 本机节点 id：员工行上「编辑」键的宿主判据（[employeeProfileOf]）。
+     *
+     * 名录里**同时有别的设备的智能体**（跨设备是这一页存在的理由），而档案只住宿主本机。
+     * 空串 = 身份还在恢复 ⇒ 一颗编辑键都不画，宁缺不错配。
+     */
+    selfNodeId: String = "",
     /** 点档案行 = 编辑：null = 没有档案写通路 ⇒ 行不可点（点了弹不出表单）。 */
     onEditEmployeeProfile: ((AgentEmployeeProfileUi) -> Unit)? = null,
     /** 档案行的注销：null = 没有档案写通路 ⇒ 垃圾桶不画。 */
@@ -245,20 +252,26 @@ internal fun AgentDirectorySection(
             ExecutionConfigEntry(onClick = onOpenExecutionConfig)
         }
         // 员工卡上的档案编辑入口（编辑入口收进卡）：回调从「档案行」换成「员工行」，
-        // 卡 → 档案的解析用与投影同一条 sameAgent 规则（不能拿显示名定位 —— 名字会变）。
+        // 卡 → 档案的解析走 [employeeProfileOf]（宿主 + sameAgent 两段判据）——
+        // 只按名字会连**别人的**智能体一起认下来，而档案只住本机。
         val employeeRowEdit = onEditEmployeeProfile?.let { edit ->
             { card: AgentHubUi ->
-                val key = card.agentKey
-                if (key != null) {
-                    employeeProfiles.firstOrNull { sameAgent(it.agentId, null, key) }?.let(edit)
-                }
+                val hit = com.kapp.tenon.domain.employeeProfileOf(card, employeeProfiles, selfNodeId)
+                if (hit != null) edit(hit)
             }
         }
         // 与员工卡对不上号的档案 = 登记过但还没上线的人（孤儿档案）。匹配上的活在
         // 员工卡上（投影顶显示名 + 行上编辑），孤儿留在登记簿小节 —— 注销此前没有
         // 别的入口，整节按「能力缺失 = 不画」缺席（手机读不到档案且没有建档入口时）。
+        //
+        // 只与本机卡比：拿别人的卡来配对，会让一份本机档案「看起来在线」而从登记簿消失，
+        // 它名下的群与注销入口跟着一起不见（与编辑键同一个宿主判据）。
         val orphanProfiles = employeeProfiles.filter { profile ->
-            employees.none { card -> card.agentKey != null && sameAgent(profile.agentId, null, card.agentKey) }
+            employees.none { card ->
+                card.hostNodeId == selfNodeId &&
+                    card.agentKey != null &&
+                    sameAgent(profile.agentId, null, card.agentKey)
+            }
         }
         when (effectiveView) {
             AgentDirectoryView.EMPLOYEES -> Column(verticalArrangement = Arrangement.spacedBy(sp.md)) {
