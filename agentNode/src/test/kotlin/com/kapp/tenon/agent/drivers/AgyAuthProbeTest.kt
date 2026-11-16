@@ -92,6 +92,20 @@ class AgyAuthProbeTest {
     }
 
     @Test
+    fun missingCommandReturnsUnknownInsteadOfThrowing() {
+        // 本机没装 agy 时 ProcessBuilder.start() 抛 IOException(error=2)。
+        // 曾经的 bug：start() 在 try 外，异常冒到 UI 弹模态错误框、卡死配置页。
+        // 命令缺失与超时同级 = UNKNOWN 放行，绝不当成「确定未登录」也不抛出。
+        val probe = AgyAuthProbe(
+            command = listOf("/nonexistent/tenon-agy-probe-command-does-not-exist"),
+            timeoutMs = 5_000,
+        )
+        kotlinx.coroutines.runBlocking {
+            assertEquals(AgyAuthProbe.State.UNKNOWN, probe.probe())
+        }
+    }
+
+    @Test
     fun normalProcessIsAuthenticatedAndMemoized() {
         // 正常脚本退出 0 + 列表输出：AUTHENTICATED 且按会话记忆（第二次零执行）。
         val script = File.createTempFile("agy-probe-ok", ".sh").apply {

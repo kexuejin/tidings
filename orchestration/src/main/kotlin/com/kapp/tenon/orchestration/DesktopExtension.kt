@@ -547,6 +547,9 @@ class DesktopExtension(
                     } ?: true
                 },
             )
+            // 登录态只读探针：每家跑一次 status 子命令，5 秒超时；探针只在本机装配，
+            // 不进 domain / 手机端。失败一律 UNKNOWN，不弹错误框。
+            val cliAuthRunner = com.kapp.tenon.agent.drivers.CliAuthProbes.jvmRunner()
             // 团队执行档端口（§6.3）：UI 读写宿主本地执行配置的唯一通路（手机端为 null ⇒ 只读）。
             val execPort = DesktopTeamExecutionPort(
                 store = teamExecution,
@@ -558,6 +561,54 @@ class DesktopExtension(
                         com.kapp.tenon.agent.drivers.AgyAuthProbe.State.NOT_AUTHENTICATED -> false
                         com.kapp.tenon.agent.drivers.AgyAuthProbe.State.UNKNOWN -> null
                     }
+                },
+                // 逐底座登录态（v1 只读可见面）：复用同一只 agy 探针实例（结果在探针侧记忆，
+                // 不重复起子进程）。env 只在此处读一次，映射/判定是纯函数，见 DriverAuthStateMapping。
+                authStatesProbe = { inService ->
+                    DriverAuthStateMapping.map(
+                        inServiceDriverIds = inService,
+                        env = System.getenv(),
+                        zcodeSettingPath = com.kapp.tenon.agent.drivers.CliDiscovery
+                            .zcodeSettingPathOf(System.getenv()),
+                        agyState = {
+                            // 最后一层兜底：登录态是「只读可见面」，任何探针异常都只能
+                            // 降级成 UNKNOWN，绝不能冒到 UI 弹模态错误框把配置页卡死。
+                            // 探针自身已把命令缺失/超时降级为 UNKNOWN，这里防的是未来
+                            // 改动重新引入抛出（含 agy 未安装时 start() 的 IOException）。
+                            runCatching {
+                                when (agyAuthProbe.probe()) {
+                                    com.kapp.tenon.agent.drivers.AgyAuthProbe.State.AUTHENTICATED ->
+                                        com.kapp.tenon.agent.drivers.DriverAuthProbes.State.AUTHENTICATED
+                                    com.kapp.tenon.agent.drivers.AgyAuthProbe.State.NOT_AUTHENTICATED ->
+                                        com.kapp.tenon.agent.drivers.DriverAuthProbes.State.NOT_AUTHENTICATED
+                                    com.kapp.tenon.agent.drivers.AgyAuthProbe.State.UNKNOWN ->
+                                        com.kapp.tenon.agent.drivers.DriverAuthProbes.State.UNKNOWN
+                                }
+                            }.getOrDefault(com.kapp.tenon.agent.drivers.DriverAuthProbes.State.UNKNOWN)
+                        },
+                        // codex / claude / opencode：跑厂家自己的只读 status 子命令。
+                        // 路径与 driverCatalog 同源（都是 CliDiscovery 的 resolve 结果），
+                        // 探针拿不到路径就返回 null ⇒ 映射层降级 UNKNOWN，不冤枉成未登录。
+                        cliAuthState = { key ->
+                            val cliPath = when (key) {
+                                "codex" -> com.kapp.tenon.agent.drivers.CliDiscovery.resolveCodexCli()
+                                "claude" -> com.kapp.tenon.agent.drivers.CliDiscovery.resolveClaudeCli()
+                                "opencode" -> com.kapp.tenon.agent.drivers.CliDiscovery.resolveOpencodeCli()
+                                else -> null
+                            }
+                            when (
+                                com.kapp.tenon.agent.drivers.CliAuthProbes.probe(
+                                    key, cliPath, cliAuthRunner,
+                                )
+                            ) {
+                                com.kapp.tenon.agent.drivers.CliAuthProbes.Verdict.LOGGED_IN ->
+                                    com.kapp.tenon.agent.drivers.DriverAuthProbes.State.AUTHENTICATED
+                                com.kapp.tenon.agent.drivers.CliAuthProbes.Verdict.LOGGED_OUT ->
+                                    com.kapp.tenon.agent.drivers.DriverAuthProbes.State.NOT_AUTHENTICATED
+                                com.kapp.tenon.agent.drivers.CliAuthProbes.Verdict.UNKNOWN -> null
+                            }
+                        },
+                    )
                 },
             )
             controller.teamExecutionPort = execPort
@@ -731,6 +782,20 @@ class DesktopExtension(
                         controller.questStreamSettled(questId)
                         val ok = status == "finished"
                         val errorTail = QuestCliErrorTail.merge(error, lastErrorBody)
+                        // 席位 ID（`dsh-029bbbf3`）先归位到档案键（`dsh`），才能从唯一词表
+                        // 取到这家 CLI 确切的补凭证动作。仿 multica：不在配置页预检登录，
+                        // 只在真的等登录失败后，把「该敲哪条」写进失败提示。
+                        // 只在 auth 命中时算，避免给每次正常失败平白多一次名册查询。
+                        val (remediationDetail, remediationKind) = if (authWaitSeen && !ok) {
+                            val driverKey = AgentProfiles.resolveKey(
+                                agentKey,
+                                workerOrchestrator.availableAgentKeys().orEmpty(),
+                            ).orEmpty()
+                            DriverAuthStateMapping.remediationDetailOf(driverKey) to
+                                DriverAuthStateMapping.remediationOf(driverKey)
+                        } else {
+                            "" to com.kapp.tenon.domain.DriverAuthRemediationUi.NONE
+                        }
                         QuestRunner.CliTaskRun(
                             ok = ok,
                             patchPath = patchPath,
@@ -741,6 +806,8 @@ class DesktopExtension(
                                 authWaitSeen = authWaitSeen && !ok,
                                 errorTail = errorTail,
                                 fallback = status,
+                                remediationDetail = remediationDetail,
+                                remediationKind = remediationKind,
                             ),
                         )
                     },

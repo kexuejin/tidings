@@ -596,6 +596,8 @@ private fun SeatSelector(
 internal fun formatDriverName(key: String): String = when (key.trim().lowercase()) {
     "codex" -> "Codex CLI"
     "claude" -> "Claude CLI"
+    "agy" -> "Antigravity"
+    "dsh" -> "DeepSeek Harness"
     "opencode" -> "OpenCode"
     "codebuddy" -> "CodeBuddy CLI"
     "zcode" -> "ZCode CLI"

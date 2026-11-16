@@ -68,6 +68,48 @@ class QuestAuthWaitDetectorTest {
     }
 
     @Test
+    fun exactLoginCommandLandsInTheFailureHint() {
+        // 仿 multica「失败后只给一句该怎么修」：其实行动作来自唯一词表，
+        // 终端登录用 Run，用户可直接照着敲。
+        val decorated = QuestAuthWaitDetector.decorateError(
+            authWaitSeen = true,
+            errorTail = "exit code 1",
+            fallback = "error",
+            remediationDetail = "codex login",
+            remediationKind = com.kapp.tenon.domain.DriverAuthRemediationUi.TERMINAL_LOGIN,
+        )
+        assertTrue(decorated!!.contains("Run 'codex login'"), "确切命令必须出现在失败提示里")
+        assertTrue(decorated.endsWith(" · exit code 1"), "错误尾巴仍在最后")
+    }
+
+    @Test
+    fun envVarActionUsesSetNotRun() {
+        // dsh 的词表值是环境变量名（DEEPSEEK_API_KEY），措辞必须是 Set 而非 Run，
+        // 否则用户会去终端敲一个变量名。
+        val decorated = QuestAuthWaitDetector.decorateError(
+            authWaitSeen = true,
+            errorTail = null,
+            fallback = "error",
+            remediationDetail = "DEEPSEEK_API_KEY",
+            remediationKind = com.kapp.tenon.domain.DriverAuthRemediationUi.TOKEN_ENV,
+        )
+        assertTrue(decorated!!.contains("Set 'DEEPSEEK_API_KEY'"))
+        assertFalse(decorated.contains("Run '"))
+    }
+
+    @Test
+    fun emptyDetailFallsBackToGenericRemediation() {
+        val decorated = QuestAuthWaitDetector.decorateError(
+            authWaitSeen = true,
+            errorTail = null,
+            fallback = "error",
+            remediationDetail = "",
+        )
+        assertTrue(decorated!!.startsWith("Authentication required: the CLI was waiting for login."))
+        assertFalse(decorated.contains("Run '"))
+    }
+
+    @Test
     fun usesFallbackWhenThereIsNoTail() {
         val decorated = QuestAuthWaitDetector.decorateError(
             authWaitSeen = true,

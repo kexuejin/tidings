@@ -787,7 +787,26 @@ fun cliDriverRegistrations(
     val zcode = resolveZcode()
     if (zcode != null) {
         val (zcBin, zcPrefix) = CliDiscovery.launchOf(zcode)
-        val providerEnv = CliProviderEnv.forZcode(env)
+        val providerEnv = CliProviderEnv.forZcode(env).toMutableMap()
+        // cjs 由 node 直接启动时拿不到宿主应用注入的 provider 配置路径：不补这两只
+        // env，CLI 的 --help 能跑、实际派单却在第一条请求前退出，是典型的静默不可用。
+        if (zcPrefix.isNotEmpty()) {
+            CliDiscovery.zcodeBundledProviderConfigOf(zcode)?.let {
+                providerEnv.putIfAbsent(CliProviderEnv.ENV_ZCODE_BUILTIN_CONFIG, it)
+            }
+        }
+        CliDiscovery.zcodePersonalProviderConfigOf(env)?.let {
+            providerEnv.putIfAbsent(CliProviderEnv.ENV_ZCODE_PERSONAL_CONFIG, it)
+        }
+        if (providerEnv[CliProviderEnv.ENV_ZCODE_BUILTIN_CONFIG] == null ||
+            providerEnv[CliProviderEnv.ENV_ZCODE_PERSONAL_CONFIG] == null
+        ) {
+            hint(
+                "[drivers] zcode-cli has no provider config paths; the CLI will refuse to run a prompt " +
+                    "(install the desktop app or set ${CliProviderEnv.ENV_ZCODE_BUILTIN_CONFIG} / " +
+                    "${CliProviderEnv.ENV_ZCODE_PERSONAL_CONFIG})",
+            )
+        }
         announce(DriverKeys.cliDriverId("zcode"), providerEnv)
         drivers.add(
             if (sandbox != null) {

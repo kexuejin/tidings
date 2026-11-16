@@ -2,6 +2,8 @@
 
 package com.kapp.tenon.orchestration
 
+import com.kapp.tenon.domain.DriverAuthRemediationUi
+
 /**
  * 支线日志流里的「CLI 在等登录授权」检测（真机验收现场：quest 挂了 60 秒，
  * 机主只看到一句 Authentication required —— 卡片上没有任何解释，也不知道该干什么）。
@@ -45,15 +47,41 @@ internal object QuestAuthWaitDetector {
     /**
      * 检测命中时的 FAILED 摘要改写：补救指引在前（用户第一眼看到该干什么），
      * CLI 的原始错误尾巴在后（A1 的可追溯链路不丢）。
+     *
+     * [remediationDetail] 是该 CLI **确切**的补凭证动作（`codex login` / `DEEPSEEK_API_KEY`），
+     * 来自 [DriverAuthStateMapping.remediationDetailOf] 的同一份词表。仿 multica：它不在
+     * 配置页摆登录态表，而是失败后只给一句"该怎么修"——这里把那句话写实到可直接照做。
+     * 空串（识别不出驱动）时退回通用措辞，绝不印一条空命令。
+     *
+     * @param remediationKind 动作类别决定动词：终端命令用 "Run"，环境变量/应用内动作
+     *   用 "Set"。由 [DriverAuthRemediationUi] 归一，不在本文件按驱动名另写 if 链。
      */
-    fun decorateError(authWaitSeen: Boolean, errorTail: String?, fallback: String): String? =
-        if (!authWaitSeen) {
-            errorTail
+    fun decorateError(
+        authWaitSeen: Boolean,
+        errorTail: String?,
+        fallback: String,
+        remediationDetail: String = "",
+        remediationKind: DriverAuthRemediationUi = DriverAuthRemediationUi.NONE,
+    ): String? {
+        if (!authWaitSeen) return errorTail
+        val detail = remediationDetail.trim()
+        val remediation = if (detail.isEmpty()) {
+            REMEDIATION
         } else {
-            REMEDIATION + " · " + (errorTail ?: fallback)
+            val verb = when (remediationKind) {
+                DriverAuthRemediationUi.TERMINAL_LOGIN -> "Run"
+                // TOKEN_ENV / APP_MODEL 的值都是环境变量名，措辞只能是 Set。
+                DriverAuthRemediationUi.TOKEN_ENV, DriverAuthRemediationUi.APP_MODEL -> "Set"
+                DriverAuthRemediationUi.NONE -> "Run"
+            }
+            REMEDIATION_PREFIX + verb + " '" + detail + "' on the host machine, then retry."
         }
+        return remediation + " · " + (errorTail ?: fallback)
+    }
 
+    private const val REMEDIATION_PREFIX =
+        "Authentication required: the CLI was waiting for login. "
     private const val REMEDIATION =
-        "Authentication required: the CLI was waiting for login. " +
+        REMEDIATION_PREFIX +
             "Sign in with this CLI on the host machine, then retry this quest."
 }

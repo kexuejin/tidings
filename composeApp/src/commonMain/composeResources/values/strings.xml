@@ -511,11 +511,9 @@
     <!-- 执行配置（规范 §4.0）：一张「团队 × 员工」的矩阵。入口在智能体页目录卡上方，
          只有拿得到执行档端口（宿主本机）时才画。 -->
     <string name="exec_config_entry">执行配置</string>
-    <string name="exec_config_agy_login_label">agy 登录状态</string>
-    <string name="exec_config_agy_login_ok">已登录</string>
-    <string name="exec_config_agy_login_missing">未登录</string>
-    <string name="exec_config_agy_login_probing">检测中…</string>
-    <string name="exec_config_agy_login_hint">未登录时每条支线都会失败：在宿主终端运行一次 agy 并完成浏览器授权（一次性，凭据存钥匙串）。</string>
+    <string name="exec_config_catalog_title">本机底座</string>
+    <string name="exec_config_catalog_none">这台电脑上没有检测到可用底座</string>
+    <string name="exec_config_catalog_hint">登录由各家命令行工具自己管理；执行失败时会在会话里提示。</string>
     <string name="exec_config_title">执行配置</string>
     <string name="exec_config_subtitle_format">这台电脑 · %1$d 个底座在位</string>
     <string name="exec_config_driver_unassigned">未指派</string>
@@ -573,7 +571,8 @@
     <string name="agent_profile_new">新建档案</string>
     <string name="agent_profile_edit">编辑档案</string>
     <string name="agent_profile_new_hint">选一个本机智能体，给它起个员工名。可以先建档，之后再让它进群。</string>
-    <string name="agent_profile_new_empty">这台机器还没有上报身份的智能体，暂时无法建档。等它连上宿主再来。</string>
+    <string name="agent_profile_new_empty">档案必须挂在一个已上报的本机智能体上。这台机器现在还没有任何智能体上报身份，所以还没有可建档的对象。</string>
+    <string name="agent_profile_new_empty_hint">先确认宿主在线；智能体连上后会自动出现在这里，再回来建档。</string>
     <string name="agent_profile_new_meta_format">%1$s · %2$s</string>
     <string name="agent_profile_forget">注销档案</string>
     <string name="agent_profile_forget_body">「%1$s」的档案会被删除。</string>
@@ -619,12 +618,12 @@
 <string name="agent_empty_subtitle">%1$d 个项目目录</string>
     <!-- 空态（原型 relay.html:4563-4579 screenAgentsEmpty）：警告条 +「Agent（0）」段头 + 卡内说明 +「去看看节点」行。
          文案**不印 wire 键**：原型 relay.html:4562 注释写死「不印 `ag1` 这种 wire 键（R2）」。 -->
-    <string name="agent_empty_title">还没有任何智能体上报</string>
-    <string name="agent_empty_message">对方在线并运行智能体后，它的项目目录会出现在这里。</string>
+    <string name="agent_empty_title">还没有智能体在运行</string>
+    <string name="agent_empty_message">接好一个底座、创建第一个员工之后，它的项目目录会出现在这里。</string>
     <string name="agent_empty_section">智能体（0）</string>
-    <string name="agent_empty_card">还没有设备上报智能体与项目目录。对方在线后，卡片会自动出现在这里。</string>
+    <string name="agent_empty_card">这台电脑和已连上的设备上都还没有智能体在运行。接好底座、创建员工后，卡片会自动出现在这里。</string>
     <string name="agent_empty_exit_title">去看看节点</string>
-    <string name="agent_empty_exit_body">确认对方在线，再回来看这里</string>
+    <string name="agent_empty_exit_body">确认设备在线，再回来看这里</string>
     <!-- 新手冷启动引导卡（UX 规范 §2.6）：已经有项目目录、但一个都还没绑群时出现。
          它**不替代空态** —— 空态成立时一个目录都没有，那颗按钮会变成死按钮
          （判据见 domain/FirstProjectOnboarding.kt）。 -->
@@ -2189,7 +2188,10 @@
     <string name="team_profile_groups_none">还没有群。可以先存档案，之后建了群再从「添加团队」加进去。</string>
     <string name="team_profile_groups_in">已在</string>
     <string name="team_profile_groups_optional">不勾也可以：先存档，之后再从群信息的「添加团队」加进去。不进群的队伍在群里和手机上都看不到，@ 也到不了它。</string>
-    <string name="team_profile_no_leaders">本机还没有可上报的智能体，先去「项目目录」里让一个智能体跑起来。</string>
+    <string name="team_profile_prereq_body">团队必须有一个本机领队才能执行任务。领队只能从本机已上报的智能体里选，不能手填。</string>
+    <string name="team_profile_no_leaders">这台机器还没有任何智能体上报身份。先确认宿主在线，智能体连上后会自动出现在领队候选里。</string>
+    <string name="team_profile_save_new">创建团队</string>
+    <string name="team_profile_save_edit">保存团队</string>
     <string name="team_profile_group_section">添加团队</string>
     <string name="team_profile_group_section_hint">把一支已经建好的团队整体加进本群。</string>
     <string name="team_profile_group_add">加入本群</string>

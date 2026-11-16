@@ -40,9 +40,10 @@ object CliDiscovery {
     const val ENV_DSH_CLI = "TENON_DSH_CLI"
     const val DSH_BIN = "dsh"
 
-    /** CodeBuddy CLI：独立安装的 `codebuddy`，本机也随 WorkBuddy.app 内置。 */
+    /** CodeBuddy CLI：独立安装的 `codebuddy`，也随 WorkBuddy.app 内置。 */
     const val ENV_CODEBUDDY_CLI = "TENON_CODEBUDDY_CLI"
     const val CODEBUDDY_BIN = "codebuddy"
+    const val CODEBUDDY_APP_BIN_RELATIVE = "WorkBuddy.app/Contents/Resources/app.asar.unpacked/cli/bin/codebuddy"
 
     /** ZCode CLI：PATH 上的 `zcode`，或桌面应用包里的 [ZCODE_CJS_RELATIVE]。 */
     const val ENV_ZCODE_CLI = "TENON_ZCODE_CLI"
@@ -88,10 +89,25 @@ object CliDiscovery {
         pathDirs: List<String> = pathDirsOf(env),
     ): String? = resolve(env[ENV_DSH_CLI], DSH_BIN, pathDirs)
 
+    /**
+     * CodeBuddy 的桌面宿主自带一份 CLI，通常**不在 PATH 上**（从 Dock/Finder 启动的宿主
+     * 只拿到最小 PATH）。只按 PATH + 约定 bin 目录找，会出现「应用装了、驱动没注册」——
+     * 提示行还让用户去装一个本机已经有的东西。所以补应用包这条公开安装约定，顺序仍是
+     * 显式 env → PATH → 应用包，与 ZCode 同一纪律。
+     */
     fun resolveCodebuddyCli(
         env: Map<String, String> = System.getenv(),
         pathDirs: List<String> = pathDirsOf(env),
-    ): String? = resolve(env[ENV_CODEBUDDY_CLI], CODEBUDDY_BIN, pathDirs)
+    ): String? {
+        resolve(env[ENV_CODEBUDDY_CLI], CODEBUDDY_BIN, pathDirs)?.let { return it }
+        val candidates = listOfNotNull(
+            env["HOME"]?.takeIf { it.isNotBlank() }?.let { "$it/Applications/$CODEBUDDY_APP_BIN_RELATIVE" },
+            "/Applications/$CODEBUDDY_APP_BIN_RELATIVE",
+        )
+        return candidates.firstNotNullOfOrNull { path ->
+            File(path).takeIf { it.isFile && it.canExecute() }?.absolutePath
+        }
+    }
 
     /**
      * ZCode 的官方运行时落在桌面应用包里（`zcode.cjs`），PATH 上常常没有 `zcode` 命令。
@@ -120,6 +136,45 @@ object CliDiscovery {
         cliPath.endsWith(".cjs", ignoreCase = true) || cliPath.endsWith(".js", ignoreCase = true) ->
             "node" to listOf(cliPath)
         else -> cliPath to emptyList()
+    }
+
+    /**
+     * 直接 `node zcode.cjs` 时，CLI 不再从宿主应用进程继承内嵌的 provider 配置路径，
+     * 必须由环境显式给出两只文件路径，否则它在第一次提请求前就以非零码退出
+     * （帮助/info 命令反而能跑，所以「--help 通过」证明不了可派单）。
+     *
+     * 内嵌配置位于应用包 Resources 下的公开约定目录，按入口 cjs 的位置反推；
+     * 个人配置位于登录态目录。显式 env 由装配处的白名单先取，这里只补缺省值。
+     */
+    fun zcodeBundledProviderConfigOf(cliPath: String): String? {
+        if (!cliPath.endsWith(".cjs", ignoreCase = true)) return null
+        // absoluteFile（不 canonicalize）：macOS 的临时目录 canonical 后是 /private/var/...，
+        // 与装配期传进来的路径写法不同会让「同一份配置」被当成两份。
+        val entry = File(cliPath).absoluteFile
+        val resources = entry.parentFile?.parentFile ?: return null
+        val candidate = File(resources, "config/provider/zcode-builtin.json")
+        return candidate.takeIf { it.isFile }?.absolutePath
+    }
+
+    fun zcodePersonalProviderConfigOf(env: Map<String, String>): String? {
+        val home = env["HOME"]?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        val candidate = File(home, ".zcode/v2/provider_config.json")
+        return candidate.takeIf { it.isFile }?.absolutePath
+    }
+
+    /**
+     * zcode 应用 `setting.json` 路径（登录态判据用：里面记着选过哪个模型）。
+     *
+     * 与个人 provider 配置同一存储目录约定（`~/.zcode/v2`），保持单一来源；
+     * `ZCODE_STORAGE_DIR` 是 CLI 自己的覆盖位，显式给出时优先。只读判定用，
+     * 不要求文件必须存在——不存在由探针判「没选过」。
+     */
+    fun zcodeSettingPathOf(env: Map<String, String>): String {
+        env["ZCODE_STORAGE_DIR"]?.trim()?.takeIf { it.isNotEmpty() }?.let {
+            return File(it, "setting.json").absolutePath
+        }
+        val home = env["HOME"]?.trim()?.takeIf { it.isNotEmpty() } ?: return ""
+        return File(home, ".zcode/v2/setting.json").absolutePath
     }
 
     /** 探测目录：`$PATH` 全量 + 公开约定目录（去重，保序 = 优先级）。 */

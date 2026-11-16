@@ -427,11 +427,9 @@
     <string name="agent_detail_default_team_mark">Primary team</string>
     <string name="agent_detail_default_team_inferred">inferred</string>
     <string name="exec_config_entry">Execution</string>
-    <string name="exec_config_agy_login_label">agy sign-in state</string>
-    <string name="exec_config_agy_login_ok">Signed in</string>
-    <string name="exec_config_agy_login_missing">Not signed in</string>
-    <string name="exec_config_agy_login_probing">Checking…</string>
-    <string name="exec_config_agy_login_hint">While signed out every quest fails: run `agy` once in a terminal on the host machine and complete the browser sign-in (one time only; credentials persist in the keychain).</string>
+    <string name="exec_config_catalog_title">Tools on this machine</string>
+    <string name="exec_config_catalog_none">No available tool was detected on this machine</string>
+    <string name="exec_config_catalog_hint">Sign-in is managed by each command-line tool itself; you will be prompted in the chat if a run fails.</string>
     <string name="exec_config_title">Execution config</string>
     <string name="exec_config_subtitle_format">This computer · %1$d drivers available</string>
     <string name="exec_config_driver_unassigned">Unassigned</string>
@@ -485,7 +483,8 @@
     <string name="agent_profile_new">New profile</string>
     <string name="agent_profile_edit">Edit profile</string>
     <string name="agent_profile_new_hint">Pick a local agent and give it an employee name. You can register it first and add it to groups later.</string>
-    <string name="agent_profile_new_empty">No agent on this machine has reported an identity yet, so there is nothing to register. Try again once one connects to the host.</string>
+    <string name="agent_profile_new_empty">A profile must belong to a local agent that has reported an identity. No agent on this machine has reported one yet, so there is nothing to register.</string>
+    <string name="agent_profile_new_empty_hint">Check that the host is online; agents appear here automatically once connected, then come back to create the profile.</string>
     <string name="agent_profile_new_meta_format">%1$s · %2$s</string>
     <string name="agent_profile_forget">Remove record</string>
     <string name="agent_profile_forget_body">The record for "%1$s" will be deleted.</string>
@@ -513,12 +512,12 @@
 <string name="agent_empty_subtitle">%1$d project directories</string>
     <!-- Empty state (prototype relay.html:4563-4579): warn banner + "Agent (0)" head + card body + "check nodes" row.
          No wire key in the copy: prototype relay.html:4562 forbids printing `ag1`. -->
-    <string name="agent_empty_title">No Agent has reported yet</string>
-    <string name="agent_empty_message">A peer's project directories will show up here once it is online and running an Agent.</string>
+    <string name="agent_empty_title">No agent is running yet</string>
+    <string name="agent_empty_message">Connect a driver and create your first employee; its project directories will show up here.</string>
     <string name="agent_empty_section">Agent (0)</string>
-    <string name="agent_empty_card">No device has reported an Agent or project directory yet. Cards will appear here automatically once a peer comes online.</string>
+    <string name="agent_empty_card">No agent is running on this computer or on any connected device yet. Connect a driver and create an employee, and cards will appear here automatically.</string>
     <string name="agent_empty_exit_title">Check the Nodes page</string>
-    <string name="agent_empty_exit_body">Confirm the peer is online, then come back</string>
+    <string name="agent_empty_exit_body">Confirm the device is online, then come back</string>
     <!-- Warm onboarding card (UX spec §2.6): shown once project directories exist but none is
          bound to a group yet. It does NOT replace the empty state — when the empty state holds
          there is no directory to bind, so the button would be a dead end. -->
@@ -1991,7 +1990,10 @@ Collaboration channel connected; project directory events and progress will sync
     <string name="team_profile_groups_none">No groups yet. You can save the profile now and attach the team later.</string>
     <string name="team_profile_groups_in">Joined</string>
     <string name="team_profile_groups_optional">Leaving this empty is fine: save the profile now and attach the team later from a group's info sheet. A team in no group is invisible in groups and on phones, and @ cannot reach it.</string>
-    <string name="team_profile_no_leaders">No agent on this machine yet. Get one running under Project directories first.</string>
+    <string name="team_profile_prereq_body">A team needs a local leader before it can run tasks. The leader must be chosen from agents that have reported an identity on this machine; it cannot be typed in.</string>
+    <string name="team_profile_no_leaders">No agent on this machine has reported an identity yet. Check that the host is online; agents appear in the leader list automatically once connected.</string>
+    <string name="team_profile_save_new">Create team</string>
+    <string name="team_profile_save_edit">Save team</string>
     <string name="team_profile_group_section">Add a team</string>
     <string name="team_profile_group_section_hint">Add an existing team to this group in one step.</string>
     <string name="team_profile_group_add">Add to group</string>

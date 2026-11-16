@@ -28,6 +28,10 @@ package com.kapp.tenon.agent.drivers
  */
 object CliProviderEnv {
 
+    /** 直接以 node 启动 zcode.cjs 时必须显式给出的两只 provider 配置路径。 */
+    const val ENV_ZCODE_BUILTIN_CONFIG = "ZCODE_BUILTIN_PROVIDER_CONFIG_FILE"
+    const val ENV_ZCODE_PERSONAL_CONFIG = "ZCODE_PERSONAL_PROVIDER_CONFIG_FILE"
+
     /**
      * Claude Code：Anthropic 兼容面。
      *
@@ -133,6 +137,8 @@ object CliProviderEnv {
     private val ZCODE = listOf(
         "ZCODE_API_KEY",
         "ZHIPU_API_KEY",
+        ENV_ZCODE_BUILTIN_CONFIG,
+        ENV_ZCODE_PERSONAL_CONFIG,
         "ZCODE_HTTP_PROXY",
         "HTTPS_PROXY",
         "HTTP_PROXY",

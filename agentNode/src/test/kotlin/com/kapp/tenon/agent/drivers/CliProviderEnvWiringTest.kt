@@ -124,6 +124,68 @@ class CliProviderEnvWiringTest {
     }
 
     @Test
+    fun desktopBundledCodebuddyIsFoundWithoutPath() {
+        val home = tempDir()
+        val bundled = File(home, "Applications/" + CliDiscovery.CODEBUDDY_APP_BIN_RELATIVE).apply {
+            parentFile.mkdirs()
+            writeText("#!/bin/sh\nexit 0\n")
+            assertTrue(setExecutable(true), "假 CLI 必须可执行")
+        }
+        assertEquals(
+            bundled.absolutePath,
+            CliDiscovery.resolveCodebuddyCli(
+                env = mapOf("HOME" to home.absolutePath),
+                pathDirs = emptyList(),
+            ),
+            "宿主自带 CLI 不在 PATH 时也必须被发现，否则装了也注册不上",
+        )
+    }
+
+    @Test
+    fun zcodeProviderPathsDefaultFromAppBundleAndHomeAndExplicitEnvWins() {
+        val home = tempDir()
+        val cjs = File(home, "Applications/" + CliDiscovery.ZCODE_CJS_RELATIVE).apply {
+            parentFile.mkdirs()
+            writeText("// fake runtime\n")
+        }
+        val bundled = File(cjs.parentFile.parentFile, "config/provider/zcode-builtin.json").apply {
+            parentFile.mkdirs()
+            writeText("{}\n")
+        }
+        val personal = File(home, ".zcode/v2/provider_config.json").apply {
+            parentFile.mkdirs()
+            writeText("{}\n")
+        }
+        assertEquals(bundled.absolutePath, CliDiscovery.zcodeBundledProviderConfigOf(cjs.absolutePath))
+        assertEquals(personal.absolutePath, CliDiscovery.zcodePersonalProviderConfigOf(mapOf("HOME" to home.absolutePath)))
+
+        val env = mapOf(
+            "HOME" to home.absolutePath,
+            CliProviderEnv.ENV_ZCODE_BUILTIN_CONFIG to "/explicit/bundled.json",
+        )
+        val hints = mutableListOf<String>()
+        val drivers = cliDriverRegistrations(
+            resolveClaude = { null },
+            resolveCodex = { null },
+            resolveAgy = { null },
+            resolveOpencode = { null },
+            resolveDsh = { null },
+            resolveCodebuddy = { null },
+            resolveZcode = { cjs.absolutePath },
+            hint = { hints += it },
+            env = env,
+        )
+        assertEquals(listOf("zcode-cli"), drivers.map { it.driverId })
+        val announce = hints.single { it.contains("provider env") }
+        assertTrue(announce.contains(CliProviderEnv.ENV_ZCODE_BUILTIN_CONFIG), "内嵌配置环境变量必须进白名单：$announce")
+        assertTrue(announce.contains(CliProviderEnv.ENV_ZCODE_PERSONAL_CONFIG), "个人配置环境变量必须进白名单：$announce")
+        assertTrue(
+            CliProviderEnv.forZcode(env)[CliProviderEnv.ENV_ZCODE_BUILTIN_CONFIG] == "/explicit/bundled.json",
+            "显式配置路径优先，装配期的缺省推导不许覆盖",
+        )
+    }
+
+    @Test
     fun noProviderEnvConfiguredMeansNoInjectionAndNoHint() = runBlocking {
         val root = tempDir()
         val host = tempDir()

@@ -3,37 +3,35 @@
 package com.kapp.tenon.agent.drivers
 
 /**
- * 「哪些驱动能指定模型、参数长什么样」的**唯一词表**。
+ * 「哪些驱动能指定模型、参数长什么样」的查询面 —— 词表本身住在身份卡
+ * [CliDriverSpecs]，这里只按它派生出查询接口。
  *
  * 存在理由：岗位执行配置（`TeamExecutionMemberSpec.models`）里存了模型就必须真的生效。
  * 但各 CLI 的旗标形态不同，且**不是每个驱动都有**——dsh 的模型写在 profile 配置里
- * （`agent-default-model` 插件），命令行没有旗标；插件驱动由对方进程决定。若在这里
- * 用一个「大概都支持」的默认，症状是「配了模型、跑的还是默认模型」，而两边都编译通过、
- * 都不报错——正是本仓最贵的那类静默失效。
+ * （`agent-default-model` 插件），命令行没有旗标；zcode 只有会话内选模型；插件驱动
+ * 由对方进程决定。若用一个「大概都支持」的默认，症状是「配了模型、跑的还是默认模型」，
+ * 而两边都编译通过、都不报错——正是本仓最贵的那类静默失效。
  *
  * 因此：**缺席即不支持**。不支持却指定了模型，保存期就该拒（`TeamExecutionValidation`），
- * 驱动侧再兜一层响亮失败（[AgentDriver.withModel]）。
- *
- * 旗标形态来自各 CLI 自己的 `--help` 实测：
- * - claude `--model <model>`；
- * - codex `-m, --model <MODEL>`；
- * - agy `--model <model>`；
- * - opencode `--model, -m <provider/model#variant>`；
- * - codebuddy `--model <model>`（本机 2.176.0 的 --help 实测）。
- *
- * **zcode 刻意缺席**：本机 0.17.1 的 --help 没有按次选模型的参数（只有会话内 `/model`），
- * 缺席即「不支持」——配了模型就响亮拒绝，绝不静默跑默认。
+ * 驱动侧再兜一层响亮失败（[AgentDriver.withModel]）。旗标形态由身份卡的
+ * [CliDriverSpecs.Spec.modelFlag] 给出，实测依据随身份卡字段留存，不在此重复。
  */
 object DriverModelFlags {
 
-    /** 档案键 → 旗标拼装。键与 `AgentProfiles` 的内置档案同名（同一套键，不另造词表）。 */
-    private val flagsByProfileKey: Map<String, (String) -> List<String>> = mapOf(
-        "claude" to { model -> listOf("--model", model) },
-        "codex" to { model -> listOf("--model", model) },
-        "agy" to { model -> listOf("--model", model) },
-        "opencode" to { model -> listOf("--model", model) },
-        "codebuddy" to { model -> listOf("--model", model) },
-    )
+    /**
+     * 档案键 → 旗标拼装，从身份卡（[CliDriverSpecs]）派生。
+     *
+     * [CliDriverSpecs.Spec.supportsPerTaskModel] 为 false 的驱动（dsh / zcode）天然缺席本表，
+     * 「缺席即不支持」的语义由身份卡的构造约束保证 —— supports 与 flag 必须一致，
+     * 所以不会出现「声明支持却拼不出旗标」的静默降级。
+     */
+    private val flagsByProfileKey: Map<String, (String) -> List<String>> =
+        CliDriverSpecs.builtins
+            .filter { it.supportsPerTaskModel }
+            .associate { spec ->
+                val flag = requireNotNull(spec.modelFlag) { "supports=true but no modelFlag: ${spec.key}" }
+                spec.key to { model -> listOf(flag, model) }
+            }
 
     /** 该驱动能不能按本次任务指定模型。[rawKey] 收任意写法（`claude-cli` / `claude`）。 */
     fun supports(rawKey: String?): Boolean = builderOf(rawKey) != null

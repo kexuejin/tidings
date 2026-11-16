@@ -30,15 +30,21 @@ object AgentProfiles {
         val defaultRole: Role,
     )
 
-    private val known: Map<String, Profile> = listOf(
-        Profile("codex", "openai", "Codex", Role.WORKER),
-        Profile("claude", "anthropic", "Claude Code", Role.WORKER),
-        Profile("agy", "google", "Antigravity", Role.WORKER),
-        Profile("opencode", "opencode", "OpenCode", Role.BOTH),
-        Profile("dsh", "deepseek", "DeepSeek Harness", Role.BOTH),
-        Profile("codebuddy", "tencent", "CodeBuddy", Role.BOTH),
-        Profile("zcode", "zhipu", "ZCode", Role.BOTH),
-    ).associateBy { it.key }
+    // 内置档案从身份卡（:agent-contract 的 CliDriverSpecs）派生 —— vendor / displayName /
+    // 岗位只许有一份定义。新增一家时改身份卡即可，这里与 DriverModelFlags 同步跟上；
+    // 守卫 CliDriverCoverageGuardTest 会盯住发现/装配/凭证/UI 那几处没派生的消费面。
+    private val known: Map<String, Profile> = CliDriverSpecs.builtins.associate { spec ->
+        spec.key to Profile(
+            key = spec.key,
+            vendor = spec.vendor,
+            displayName = spec.displayName,
+            defaultRole = when (spec.role) {
+                CliDriverSpecs.Role.WORKER -> Role.WORKER
+                CliDriverSpecs.Role.REVIEWER -> Role.REVIEWER
+                CliDriverSpecs.Role.BOTH -> Role.BOTH
+            },
+        )
+    }
 
     /**
      * 外部插件共用的 vendor。不能用 pluginId 当 vendor：同一厂商的两个插件 ID
@@ -105,11 +111,11 @@ object AgentProfiles {
             .maxByOrNull { it.length }
     }
 
-    /** 自动组队的干活棒优先序（真机验证过的 dev(codex) 打头）。 */
-    private val workerPreference = listOf("codex", "claude", "opencode", "agy", "dsh", "codebuddy", "zcode")
+    /** 自动组队的干活棒优先序，来自身份卡（真机验证过的 dev(codex) 打头）。 */
+    private val workerPreference = CliDriverSpecs.workerKeys
 
-    /** 自动组队的审核棒优先序（qa(dsh) 真机验证过；默认与干活棒异厂商）。 */
-    private val reviewerPreference = listOf("dsh", "opencode", "claude", "agy", "codebuddy", "zcode")
+    /** 自动组队的审核棒优先序，来自身份卡（qa(dsh) 打头；默认与干活棒异厂商）。 */
+    private val reviewerPreference = CliDriverSpecs.reviewerKeys
 
     /** 在位集合里按优先序选默认干活棒；一个都不在 → null。 */
     fun defaultWorkerKey(availableKeys: Set<String>): String? =

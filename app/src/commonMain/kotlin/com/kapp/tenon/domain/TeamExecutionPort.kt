@@ -33,6 +33,27 @@ interface TeamExecutionPort {
     suspend fun agyLoginState(): Boolean? = null
 
     /**
+     * 逐底座的登录态快照：`driverKey → 快照`。
+     *
+     * **设计用途 = 配置页「检测」按钮的按需调用**（用户点一次才探，结果落在对应底座卡上并
+     * 给出解法：命令原文 / 打开应用 / 安装说明），让「没登录」在派单之前就暴露，而不是等
+     * 一轮白跑之后。三种形态必须分清：
+     *
+     * - 自动预检（启动即探 7 家）**不做** —— 冷启动多背十几秒，多数人当天用不上；
+     * - 按需检测（一个显式按钮调用本方法）**做** —— 这正是本方法存在的理由；
+     * - 常驻登录表（一页永远挂着的「未判定 × N」）**不做** —— 既吵，又没有下一个动作。
+     *
+     * 登录本身仍由各家 CLI 管：应用不给「一键登录」，只给命令 + 复制。卡上的解法与派单失败
+     * 时的内联提示取自同一份词表（编排层 `DriverAuthStateMapping.remediationDetailOf`），
+     * UI 不抄第二份。
+     *
+     * 口径仍守三态 + 证据强度：**null = 读不到**（这台机器没有执行面 / 探针没接），
+     * 空 map = 读到了但无需登录的底座；二者都不许冒充「全部已登录」。弱证据（配置文件/
+     * 环境在位）只表示"有凭证物、未验真"。任何"两集合都空即通过"的写法都是空集假绿。
+     */
+    suspend fun driverAuthStates(): Map<String, DriverAuthStateEntryUi>? = null
+
+    /**
      * 读该支队的执行档；null = 没配过（正常）。主键 = `(目录, 领队)`，**不含群** ——
      * 一支队进几个群都是同一份档（见 `TeamExecutionProfile` 的 KDoc）。
      */
@@ -58,6 +79,46 @@ interface TeamExecutionPort {
      */
     fun groupPointerDirId(groupId: String): String? = null
 }
+
+/** 底座登录态的三态（与探针侧同口径：只报确定未登录，其余放行）。 */
+enum class DriverAuthStateUi { AUTHENTICATED, NOT_AUTHENTICATED, UNKNOWN }
+
+/** 证据强度：真跑子命令 = STRONG；只看凭证文件/环境在位 = HINT（未验真）。 */
+enum class DriverAuthEvidenceUi { STRONG, HINT }
+
+/**
+ * 补凭证的引导类别（不是句子）：编排层按 driverKey 定这档，UI 按它选一条本地化文案。
+ * 两边各只认这份枚举，不在 UI 里按驱动名再写一遍 if 链（词表抄两处必错）。
+ */
+enum class DriverAuthRemediationUi {
+    /** 交互式 CLI：宿主终端跑一次登录命令（agy / codebuddy / claude / codex / opencode）。 */
+    TERMINAL_LOGIN,
+    /** 只认环境变量 key：配到宿主环境（dsh 出厂路由 / 通用兜底）。 */
+    TOKEN_ENV,
+    /** 登录态在桌面应用里：先在应用里选好默认模型（zcode）。 */
+    APP_MODEL,
+    /** 这条底座不需要单独登录（native / 无凭证面的驱动）。 */
+    NONE,
+}
+
+/**
+ * 一条底座登录态。字段全是 `String`/枚举，不携带任何驱动或平台类型 —— `:app` 零依赖边界。
+ */
+data class DriverAuthStateEntryUi(
+    val driverKey: String,
+    val state: DriverAuthStateUi,
+    val evidence: DriverAuthEvidenceUi,
+    val remediation: DriverAuthRemediationUi,
+    /**
+     * 这家驱动**确切**的补凭证动作：登录子命令 / 环境变量名（如 `codex login`、
+     * `DEEPSEEK_API_KEY`）。由编排层按 driverKey 唯一派生，UI 只把它填进
+     * [remediation] 对应的文案模板 —— 不许在 UI 里再写一遍驱动名 if 链。
+     *
+     * 空串 = 这家不需要单独动作（native / 无凭证面）。**不是**「没判定」的替代：
+     * 状态仍由 [state] 与 [evidence] 如实表达。
+     */
+    val remediationDetail: String = "",
+)
 
 /** 端口侧的执行档成员（UI 编辑形状；与编排层 TeamExecutionMemberSpec 逐字段对齐）。 */
 data class TeamExecutionMemberUi(

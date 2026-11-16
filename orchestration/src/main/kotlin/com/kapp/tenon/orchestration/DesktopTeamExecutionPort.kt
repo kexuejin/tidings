@@ -3,6 +3,7 @@
 package com.kapp.tenon.orchestration
 
 import com.kapp.tenon.agent.drivers.AgentProfiles
+import com.kapp.tenon.domain.DriverAuthStateEntryUi
 import com.kapp.tenon.domain.TeamExecutionKindsUi
 import com.kapp.tenon.domain.TeamExecutionMemberUi
 import com.kapp.tenon.domain.TeamExecutionPort
@@ -24,6 +25,12 @@ class DesktopTeamExecutionPort(
     private val pointerDirId: (groupId: String) -> String?,
     /** agy 登录态探针（DesktopExtension 的同一实例，结果记忆在探针侧）；null = 不接。 */
     private val agyLoginStateProbe: (suspend () -> Boolean?)? = null,
+    /**
+     * 逐底座登录态快照（新链，与 [agyLoginStateProbe] 并行、不替换 —— 后者还被 quest 快败用着）。
+     * 入参是在位驱动 id 集合，返回值按 driverKey 建键；null = 本机没接探针 ⇒ 端口答 null（UI 不画）。
+     * 映射为 domain 形状的逻辑住在 DesktopExtension 的装配处，这里只透传。
+     */
+    private val authStatesProbe: (suspend (Set<String>) -> Map<String, DriverAuthStateEntryUi>?)? = null,
 ) : TeamExecutionPort {
 
     override fun driverCatalog(): Set<String> =
@@ -34,6 +41,14 @@ class DesktopTeamExecutionPort(
         // 不给一台没装 agy 的机器画「未登录」（那是在报告不存在的东西）。
         if (com.kapp.tenon.agent.drivers.DriverKeys.cliDriverId("agy") !in driverCatalog()) return null
         return agyLoginStateProbe?.invoke()
+    }
+
+    override suspend fun driverAuthStates(): Map<String, DriverAuthStateEntryUi>? {
+        // 探针没接（手机壳 / 老装配）⇒ null，与 agy 单探针的降级口径一致：
+        // 读不到就说读不到，不用空 map 冒充「全都判过了」。空 map 只在探针明确
+        // 「在位驱动里没有需要登录态的」时由装配处给出，UI 据此画「不适用」。
+        val probe = authStatesProbe ?: return null
+        return probe.invoke(driverCatalog())
     }
 
     override fun profileOf(
