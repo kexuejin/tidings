@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package com.kapp.tenon.core.transport
 
+import com.kapp.tenon.core.net.isLanAddressLiteral
+import com.kapp.tenon.core.protocol.DeviceTrustPolicies
 import com.kapp.tenon.core.protocol.Profile
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -48,6 +50,20 @@ private data class FactoryStateJson(
     val pairSecret: String? = null,
     /** 发起侧:扫描到的对端 "host:port" → 它二维码里的 secret(base64)。 */
     val pairingSecrets: Map<String, String> = emptyMap(),
+    /**
+     * 设备接入信任模式（`verify` / `auto` / `whitelist`，见 `DeviceTrustPolicies`）。
+     *
+     * **与 agent 授权的三档不是一回事**：这一档决定「无密钥的入站配对要不要问人」，
+     * 那一档决定「配对之后能用我的哪些 agent」。null = 旧库没有这个字段 ⇒ `verify`。
+     */
+    val devicePolicy: String? = null,
+    /**
+     * 无密钥入站配对里**已经被人批过**的 nodeId（设备接入 `verify` 档）。
+     *
+     * 为什么必须落盘：手机会在几秒内重试，但人点「允许」可能晚得多；批过的结果要能对
+     * 后续每一次重试生效，否则批了也白批。批准本身是"这台设备可入"的事实，重启后仍成立。
+     */
+    val approvedNodes: List<String> = emptyList(),
 )
 
 /**
@@ -145,6 +161,21 @@ class LuciolaTransportFactory(
         ?.takeIf { it.size >= MIN_PAIR_SECRET_BYTES }
         ?: secureRandomBytes(DEFAULT_PAIR_SECRET_BYTES)
 
+    /**
+     * 设备接入信任模式（**已归一**）。默认 `verify`：旧库没有这个字段、取值认不出、
+     * 配置写坏，全都落在这里 —— 「读不出来当宽松」在本仓是明确禁止的。
+     */
+    private var devicePolicy: String = DeviceTrustPolicies.normalize(state.devicePolicy)
+
+    /** 已批准的 nodeId（落盘）。判据在 `decideSecretlessPairing` 的 `preApproved`。 */
+    private val approvedNodes = SharedSet<String>().apply { state.approvedNodes.forEach { add(it) } }
+
+    /**
+     * 等人批的申请：nodeId → "name|host"。**只在内存**：重启后没有人守在界面前，
+     * 把旧申请捞回来只会让"待处理"里躺一堆过期的请求。
+     */
+    private val pendingPairing = SharedMap<String, String>()
+
     init {
         if (state.pairSecret == null) persist()
     }
@@ -155,6 +186,25 @@ class LuciolaTransportFactory(
     /** 原始 secret(16 字节) —— 二维码构造器要字节形态。返回副本,调用方改不到内部状态。 */
     fun pairSecretBytes(): ByteArray = pairSecret.copyOf()
 
+    /** 当前设备接入信任模式（`verify` / `auto` / `whitelist`）。 */
+    fun deviceTrustPolicy(): String = stateLock.withLock { devicePolicy }
+
+    /**
+     * 切档。取值必须是 `DeviceTrustPolicies.VALUES` 之一 —— **不认识的直接拒**，
+     * 不静默归一：界面点的是 A、后端存成 B 是本仓栽过的那类静默
+     * （`byDevice ↔ bydevice`）。返回 false = 没写、档位没变。
+     */
+    fun setDeviceTrustPolicy(raw: String): Boolean {
+        val wanted = raw.trim()
+        if (wanted !in DeviceTrustPolicies.VALUES) return false
+        stateLock.withLock {
+            if (devicePolicy == wanted) return false
+            devicePolicy = wanted
+            persist()
+        }
+        return true
+    }
+
     /**
      * 主机的配对准入实现:三关(公钥指纹绑定会话、secret、落信任)由
      * [SecureChannelTransport] 校验,这里只提供期望的 secret 与落盘动作。
@@ -162,8 +212,40 @@ class LuciolaTransportFactory(
     fun pairingAdmission(): PairingAdmission = object : PairingAdmission {
         override fun expectedPairSecret(): ByteArray = pairSecret
 
+        /**
+         * 白名单档不接受无密钥自证：陌生连接在握手完成时就断开，连申请都不收。
+         * 另外两档要留窗口 —— `verify` 得先**收到**申请才能问人。
+         */
+        override fun acceptsSecretlessRequests(): Boolean =
+            deviceTrustPolicy() != DeviceTrustPolicies.WHITELIST
+
+        override fun decideSecretless(
+            nodeId: String,
+            publicKey: ByteArray,
+            remoteHost: String?,
+        ): SecretlessPairingVerdict = decideSecretlessPairing(
+            policy = deviceTrustPolicy(),
+            // 近似判据（私网地址段）；真网段比较需要本机地址表，见 `isLanAddressLiteral` 的 KDoc。
+            sameLan = isLanAddressLiteral(remoteHost),
+            alreadyTrusted = isTrustedFingerprint(identityFingerprint(publicKey)),
+            preApproved = approvedNodes.contains(nodeId),
+        )
+
+        override fun onPairingRequested(
+            nodeId: String,
+            publicKey: ByteArray,
+            name: String?,
+            remoteHost: String?,
+        ) {
+            pendingPairing[nodeId] = (name ?: nodeId) + "|" + (remoteHost ?: "")
+            println("[luciola] pairing requested node=" + nodeId + " host=" + remoteHost)
+        }
+
         override fun onPaired(nodeId: String, publicKey: ByteArray, name: String?) {
             trustDevice(nodeId = nodeId, name = name ?: nodeId, publicKey = publicKey, full = true)
+            // 信任已经落库：这条 pending 与那条批准都不再有意义，留着只会让"待处理"永远不清。
+            pendingPairing.remove(nodeId)
+            if (approvedNodes.remove(nodeId)) persist()
             // 真机/桌面排障:配对是"看不见结果"的一步,必须有可检索的一行日志。
             println("[luciola] paired node=" + nodeId + " fp=" + identityFingerprint(publicKey).take(18))
         }
@@ -172,6 +254,30 @@ class LuciolaTransportFactory(
             println("[luciola] pairing rejected node=" + nodeId + " reason=" + reason)
         }
     }
+
+    /**
+     * 批准一条无密钥配对申请（设备接入 `verify` 档）。返回 false = 没有这条申请。
+     *
+     * 批完只落一个 nodeId：真正的信任写入发生在**对端下一次重试**（`decideSecretless` 的
+     * `preApproved` 分支 → `onPaired`）。这样不需要在本机替对端"预置"公钥 —— 公钥必须来自
+     * 那条加密会话自己的握手，不能来自界面。
+     */
+    fun approveSecretlessPairing(nodeId: String): Boolean {
+        if (!pendingPairing.containsKey(nodeId)) return false
+        stateLock.withLock {
+            approvedNodes.add(nodeId)
+            // 决定已经做出：这条申请不该再挂在"待处理"里等人点第二次。
+            pendingPairing.remove(nodeId)
+            persist()
+        }
+        return true
+    }
+
+    /** 拒绝一条申请：只摘掉 pending（对端会在自己的重试窗口里放弃）。 */
+    fun rejectSecretlessPairing(nodeId: String): Boolean = pendingPairing.remove(nodeId) != null
+
+    /** 待处理的无密钥配对申请（nodeId → 展示名|来源地址），供设置页的「待处理设备申请」。 */
+    fun pendingPairingRequests(): Map<String, String> = pendingPairing.snapshot()
 
     // ------------------------------------------------------------------ 配对
 
@@ -199,6 +305,23 @@ class LuciolaTransportFactory(
             if (secret != null) pairingSecrets[endpointKey(key, port)] = secret.copyOf()
         }
         trustDevice(nodeId = endpointKey(host, port), name = name, publicKey = publicKey, full = full)
+    }
+
+    /**
+     * 发起侧 TOFU 的落盘动作：把首连**学到**的对端公钥写进端点钉存并登记信任。
+     *
+     * 与 [pairPeer] 的差别只在公钥来源——那里来自二维码（**已核对**），这里来自
+     * 握手消息 2（**首连学习**，首连路径上的中间人防不住，TOFU 的定义）。写的是
+     * 同一张 endpoints 表：学习落盘后，重连/心跳/发帧全部回到 deny-by-default 的
+     * 正常管线。幂等：同地址重复学习同 key 是无害写；学到**不同** key 说明对端换钥，
+     * 照写（ TrustStore 按公钥去重，旧条目仍在）。
+     */
+    fun learnEndpoint(host: String, port: Int, publicKey: ByteArray) = stateLock.withLock {
+        require(publicKey.size == ED25519_PUBLIC_KEY_SIZE) {
+            "Ed25519 public key must be $ED25519_PUBLIC_KEY_SIZE bytes, got ${publicKey.size}"
+        }
+        endpoints[endpointKey(host, port)] = publicKey
+        trustDevice(nodeId = endpointKey(host, port), name = host, publicKey = publicKey, full = true)
     }
 
     /** 只写 TrustStore(分级/账本),不绑定地址;一般用 [pairPeer]。 */
@@ -298,6 +421,7 @@ class LuciolaTransportFactory(
             pairingSecretOf = { host, port -> stateLock.withLock { pairingSecrets[endpointKey(host, port)] } },
             selfPublicKey = identity.publicKey,
             peerOfFingerprint = { fingerprint -> endpointOfFingerprint(fingerprint, registry) },
+            learnPeerKey = { host, port, key -> learnEndpoint(host, port, key) },
         )
 
     /**
@@ -433,6 +557,8 @@ class LuciolaTransportFactory(
             trustedFingerprints = trustedFingerprints.toList(),
             pairSecret = Base64.UrlSafe.encode(pairSecret),
             pairingSecrets = pairingSecrets.snapshot().mapValues { Base64.UrlSafe.encode(it.value) },
+            devicePolicy = devicePolicy,
+            approvedNodes = approvedNodes.toList(),
         )
         state = next
         runCatching { stateStore.save(json.encodeToString(FactoryStateJson.serializer(), next)) }

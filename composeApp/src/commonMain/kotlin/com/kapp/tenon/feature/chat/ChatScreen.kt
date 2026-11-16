@@ -920,9 +920,7 @@ fun ChatScreen(
             HorizontalDivider()
         }
 
-        chromeSlice.banner?.let {
-            AppBanner(it, onDismissBanner ?: {}, Modifier.padding(horizontal = sp.lg, vertical = sp.sm))
-        }
+        // 横幅由组合根的全局宿主统一画（见 App.kt 的 RelayApp）。
 
         // Workspace / Agent 待审批 Banner：作为 IM 插件的直接替代体验，在会话中直接展示待批复工具调用
         // 待批 = pending **且未过期**（领域层唯一判据）。修复前这里只按 status 过滤：

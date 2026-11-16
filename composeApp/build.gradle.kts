@@ -154,3 +154,19 @@ kotlin {
 //
 // 依赖坐标本身保留：`SqlDelightMessageStore` 持有 driver 与 queries 类型，
 // 而 iOS/JVM/Android 的 driver 工厂在 :app 里 —— 这里只是不需要再生成代码。
+
+// 源码级守卫会读**下游模块**的源码（`PairingEntryPointsGuardTest` 扫 `desktopApp/src/main`），
+// 而 Gradle 只按依赖方向推断输入：`desktopApp` 依赖 `composeApp`，反过来不成立 ⇒ 只改 desktopApp
+// 时 `:composeApp:jvmTest` 判 UP-TO-DATE，守卫**根本没重跑**。
+//
+// 实测（同一轮变异探针）：把「可信设备」页那两处 `luciola = luciolaQr` 删掉，
+// `./gradlew :composeApp:jvmTest --tests '*PairingEntryPointsGuardTest*'` 回
+// `BUILD SUCCESSFUL in 1s`（UP-TO-DATE 冒充全绿）；加 `--rerun-tasks` 才红。
+// 也就是说**不改这一行，那条守卫在不带 --rerun-tasks 的日常跑法里等于没接电**。
+//
+// 所以把被扫的目录声明成输入：改了下游源码，这道门就真的跑一遍。
+tasks.withType<Test>().configureEach {
+    inputs.dir(rootProject.file("desktopApp/src/main"))
+        .withPropertyName("guardedDesktopSources")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+}

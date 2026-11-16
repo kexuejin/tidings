@@ -82,6 +82,11 @@ class ControlPlane(
     internal val loadProbe: (() -> Double?)? = { com.kapp.tenon.agent.HostLoadGuard.systemCpuLoad() },
     /** CLI 驱动注册表（E1）：@claude/@codex/@antigravity 的群内派单执行桥。 */
     internal val cliDrivers: com.kapp.tenon.agent.drivers.DriverRegistry? = null,
+    /**
+     * 设备接入管理面（仅 `/v1/dev/pairing*` 用）。null = 这个宿主不暴露 ——
+     * 手机/测试没有这条面，路由也就不会出现在 `/` 的帮助清单里。
+     */
+    internal val devicePairing: DevicePairingAdmin? = null,
     internal val startedAt: Long = System.currentTimeMillis(),
     /**
      * 公网入口（隧道暴露的控制面地址），空串 = 没配 ⇒ 配对二维码不生成。
@@ -558,6 +563,9 @@ class ControlPlane(
                 // 集成测试）里完成「扫码后向对端发配对自证」这一步。前提是 pin 与
                 // pairingSecrets 已由扫码流程写进宿主状态 —— 它只负责发帧，不建立信任。
                 path == "/v1/dev/pair" && method == "POST" && devRoutesEnabled -> devPair(exchange)
+                path == "/v1/dev/pairing" && method == "GET" && devRoutesEnabled -> devPairingState(exchange)
+                path == "/v1/dev/pairing/decision" && method == "POST" && devRoutesEnabled ->
+                    devPairingDecision(exchange)
                 path == "/v1/agent/session" && method == "POST" -> agentSession(exchange)
                 path == "/v1/agent/event" && method == "POST" -> agentEvent(exchange)
                 path == "/v1/agent/approval" && method == "POST" -> agentApproval(exchange)

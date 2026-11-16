@@ -193,16 +193,7 @@ public fun CabinetScreen(
     Column(modifier.fillMaxSize()) {
         // 「最近有人放进来」「下载已开始」这类反馈的唯一出口（照 ConversationsScreen 的
         // 模式）：banner 数据一直在发，过去只是没有宿主画它。
-        chromeSlice.banner?.let {
-            AppBanner(
-                banner = it,
-                onDismiss = onDismissBanner,
-                modifier = Modifier.padding(
-                    horizontal = LocalAppSpacing.current.lg,
-                    vertical = LocalAppSpacing.current.sm,
-                ),
-            )
-        }
+        // 横幅由组合根的全局宿主统一画（见 App.kt 的 RelayApp）。
         if (cabinet.activePeerId != null) {
             // 浏览同事的文件柜
             PeerCabinetView(

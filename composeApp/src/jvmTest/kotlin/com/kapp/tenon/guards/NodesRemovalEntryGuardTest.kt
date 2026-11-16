@@ -164,43 +164,31 @@ class NodesRemovalEntryGuardTest {
     // ── 移除回执：横幅宿主只有一处，且在选择分支里 ───────────────────────────
 
     @Test
-    fun removalReceiptBannerHostIsInsideTheSelectedBranch() {
+    fun removalReceiptBannerHostIsCoveredOnBothTiers() {
         val pane = GuardSourceScan.stripComments(GuardSourceScan.read(desktopNodesPane))
-        // 一个宿主就够：两处都画 = 同一条提示两个 ✕，用户关掉一个还有一个。
+        // 一个宿主就够：两处都画 = 同一条提示两个 ✕。
         assertEquals(
             1,
             Regex("chromeSlice\\.banner\\?\\.let").findAll(pane).count(),
-            "节点页（宽档）只许有一条横幅宿主；多画一条就是「同一件事两个来源」。",
+            "节点面板只许有一条横幅宿主；多画一条就是「同一件事两个来源」。",
         )
+        // 宿主必须在档位 if **之上**：窄档委托给 NodesScreen（它已不自挂），宽档自建双栏，
+        // 只有放在分支之上才两档都覆盖。浮层不占位，所以这样做不再产生双横幅。
         val tierIf = "if (tier == DesktopWindowSizeClass.Compact)"
-        val compact = GuardSourceScan.bracedBlockAfter(pane, tierIf)
+        val hostAt = pane.indexOf("chromeSlice.banner?.let")
+        val tierAt = pane.indexOf(tierIf)
+        assertTrue(hostAt >= 0, "节点面板必须有一条横幅宿主（否则绑定失败/移除回执没有出口）。")
+        assertTrue(tierAt >= 0, "找不到档位分支 —— 结构变了，这条守卫要跟着改。")
         assertTrue(
-            compact.contains("NodesScreen("),
-            "窄档必须把整页委托给 NodesScreen —— 横幅归它画，本文件不重复画。",
+            hostAt < tierAt,
+            "横幅宿主必须在档位分支之上：写在 else 里，窄档（委托 NodesScreen）就整段没有横幅。",
+        )
+        val nodesScreen = GuardSourceScan.stripComments(
+            GuardSourceScan.read("composeApp/src/commonMain/kotlin/com/kapp/tenon/feature/nodes/NodesScreen.kt"),
         )
         assertFalse(
-            compact.contains("AppBanner("),
-            "窄档里再画一次横幅就是双横幅：NodesScreen 已经画了一条同源的。",
-        )
-        // 关键：宿主必须落在 `} else {` 之后（宽档分支里）。抬到 if 之上时，窄档会同时
-        // 显示本文件的一条与 NodesScreen 的一条。
-        val elseAt = pane.indexOf("} else {", pane.indexOf(tierIf))
-        val hostAt = pane.indexOf("chromeSlice.banner?.let")
-        assertTrue(
-            elseAt >= 0,
-            "找不到 tier if 的 else 分支 —— 结构变了，这条守卫需要跟着改。",
-        )
-        assertTrue(
-            hostAt > elseAt,
-            "横幅宿主必须写在宽档分支（else）里：抬到 if 之上，窄档就会与 NodesScreen 各画一条。",
-        )
-        // 另一个宿主：手机屏自己只画一条。
-        val screen = GuardSourceScan.stripComments(GuardSourceScan.read(nodesScreen))
-        // Phase 4：该屏横幅改读 chrome 切片（chromeSlice.banner），宿主数量不变。
-        assertEquals(
-            1,
-            Regex("chromeSlice\\.banner\\?\\.let").findAll(screen).count(),
-            "NodesScreen 只许有一条横幅宿主（手机壳与桌面窄档共用它）。",
+            nodesScreen.contains("AppBanner("),
+            "NodesScreen 不许自挂横幅：宿主在组合根与桌面面板，两处各一条，屏内再挂就叠了。",
         )
     }
 

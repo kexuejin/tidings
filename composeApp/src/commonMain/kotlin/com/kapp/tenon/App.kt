@@ -37,6 +37,8 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.kapp.tenon.domain.ControllerDeviceTrust
+import com.kapp.tenon.domain.DeviceTrustHandle
 import com.kapp.tenon.domain.QuestStreamState
 import com.kapp.tenon.domain.RelayController
 import com.kapp.tenon.feature.settings.RelayToolApprovalsSource
@@ -156,6 +158,12 @@ fun RelayApp(
     val chromeSlice by controller.chromeFlow.collectAsState()
     val avatarSlice by controller.avatarFlow.collectAsState()
     val transferSlice by controller.transferFlow.collectAsState()
+
+    // 设备接入那一档的窄口（五项，见 DeviceTrustHandle 的 KDoc）。
+    // 适配器住在领域层：`App.kt` 顶层不放 `override fun`，否则整屏守卫会按「最近一个 fun」
+    // 把归因打到它身上（TabChromeConsistencyGuardTest 的红就是这么来的）。
+    val deviceTrustHandle = remember(controller) { ControllerDeviceTrust(controller) }
+
     // 支线日志流快照（Phase 1）：收集只为驱动重组（行与状态经 controller 读侧取）。
     val questStreamSnapshot by controller.questStreamSnapshot.collectAsState()
 
@@ -218,6 +226,15 @@ fun RelayApp(
                     .windowInsetsPadding(WindowInsets.safeDrawing)
                     .background(MaterialTheme.colorScheme.surface),
             ) {
+                // ── 全局横幅宿主（**唯一一处**）──────────────────────────────
+                // `AppBanner` 是浮层（Popup），挂在这里就等于全树都有：任何屏、任何子页
+                // 触发的 `chromeSlice.banner` 都由它画。
+                //
+                // 以前是 14 个屏各挂一份：漏挂的那个屏失败就**完全静默**（设置子页、智能体
+                // 页都出过这种洞），而且每加一个屏就要多记一次「记得接横幅」。浮层之后
+                // 没有「接在谁下面」的问题，宿主也就没有理由分散。
+                chromeSlice.banner?.let { AppBanner(it, controller::dismissBanner) }
+
                 val layoutMode = resolveAppLayoutMode(maxWidth, maxHeight)
                 val twoPane = layoutMode == AppLayoutMode.MediumTwoPane ||
                     layoutMode == AppLayoutMode.ExpandedListDetail
@@ -710,11 +727,7 @@ fun RelayApp(
                     // 路复活）。这里给所有子页统一挂一个宿主；首页仍用它自己那一份，
                     // 两处互斥（同一时刻只画一棵子树），不会双画。
                     Column(settingsModifier) {
-                        if (settingsPage != null) {
-                            chromeSlice.banner?.let { banner ->
-                                AppBanner(banner = banner, onDismiss = controller::dismissBanner)
-                            }
-                        }
+                        // 横幅由组合根的全局宿主统一画（见 RelayApp 顶部），这里不再挂。
                         Box(Modifier.fillMaxWidth().weight(1f)) {
                     when (settingsPage) {
                         // 通知与能力声明这五个开关以前只改屏上的本地状态，没有后端 ——
@@ -761,6 +774,8 @@ fun RelayApp(
                             onToggleAssistantEnabled = controller::updateAssistantEnabled,
                             onToggleAllowExternalPrivateChat = controller::updateAllowExternalPrivateChat,
                             onToggleQuestPair = controller::setQuestPairNode,
+                            // 设备接入那一档：窄口，只暴露这五项（见 DeviceTrustHandle 的 KDoc）。
+                            deviceTrust = deviceTrustHandle,
                             onOpenAutomationConsole = { settingsPage = SETTINGS_PAGE_AUTOMATION },
                             modifier = Modifier.fillMaxSize(),
                         )
@@ -1053,17 +1068,8 @@ fun RelayApp(
                                     // 顶栏下有现成的同款接法，这里照同一模式补上（横幅画在 Agent 屏幕
                                     // 自己的顶栏之上 —— banner 槽在屏内，本文件够不到，组合根能给的
                                     // 位置就是这里）。
+                                    // 横幅由组合根的全局宿主统一画（见 RelayApp 顶部）。
                                     AppRoutes.AGENTS -> Column(Modifier.weight(1f)) {
-                                        chromeSlice.banner?.let {
-                                            AppBanner(
-                                                banner = it,
-                                                onDismiss = controller::dismissBanner,
-                                                modifier = Modifier.padding(
-                                                    horizontal = LocalAppSpacing.current.lg,
-                                                    vertical = LocalAppSpacing.current.sm,
-                                                ),
-                                            )
-                                        }
                                         AgentConsoleScreen(
                                             agentSlice = agentSlice,
                                             nodeSlice = nodeSlice,

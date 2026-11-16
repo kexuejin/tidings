@@ -22,12 +22,14 @@ import com.kapp.tenon.agent.AgentGrantStore
 import com.kapp.tenon.agent.AgentToolApprovalStore
 import com.kapp.tenon.agent.GrantReplyOutcome
 import com.kapp.tenon.domain.RelayController
+import com.kapp.tenon.domain.LuciolaQrInfo
 import com.kapp.tenon.domain.NodeSlice
 import com.kapp.tenon.domain.SettingsSlice
 import com.kapp.tenon.domain.peer
 import com.kapp.tenon.domain.pairingPayloadForAddresses
 import com.kapp.tenon.domain.qrPairingPayloadForAddresses
 import com.kapp.tenon.core.protocol.AgentGrantAccess
+import com.kapp.tenon.core.protocol.DeviceTrustPolicies
 import com.kapp.tenon.core.protocol.AgentGrantPolicies
 import com.kapp.tenon.core.protocol.AgentGrantScopes
 import com.kapp.tenon.core.protocol.AgentGrantStates
@@ -42,8 +44,11 @@ import com.kapp.tenon.ui.components.AppTextButton
 import com.kapp.tenon.ui.components.PeerAvatar
 import com.kapp.tenon.ui.components.QrCodeView
 import com.kapp.tenon.ui.theme.LocalAppSpacing
+import com.kapp.tenon.ui.theme.LocalCardShape
 import com.kapp.tenon.ui.theme.RelayShapes
 import com.kapp.tenon.ui.theme.accents
+import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
 
@@ -277,19 +282,44 @@ internal fun DesktopTrustedDevicesPanel(
     // 版本 10 / 等级 M 容量（213 字节）约束 —— 这台机器 12 个候选的全量载荷 763 字节，
     // 直接 `encode` 会抛异常 ⇒ 面板上**一张码都画不出来**（旧代码就是全量喂给编码器，
     // 只是当时候选只有 v4、超容量超得没那么明显）。链接不限长，仍然带全部候选。
-    val qrPayload = remember(settingsSlice.settings.nodeId, candidates, settingsSlice.settings.udpPort) {
+    //
+    // **信任根必须跟着码走**：这张码是「把这台设备加进来」的唯一手段，而 luciola 是唯一传输
+    // ⇒ 码里没有 `l` 段（公钥 + 配对密钥）时，对端扫完只会得到一串候选地址：配对帧发不出、
+    // 会话建不起来，界面却显示"添加成功"。实测现场就是 `manualPeers` 多了一条、pin 仍然为空。
+    // 与 `p`(pin) 互斥，所以传 `luciola` 时 builder 会写 `l` 而不是 `p`（见
+    // `multiCandidatePairingPayload` 的取值规则）—— 两者都传，由 builder 决定写哪一个。
+    val selfTlsPin = nodeSlice.network.selfTlsPin
+    val luciolaQr = nodeSlice.network.luciolaQr
+    val qrPayload = remember(
+        settingsSlice.settings.nodeId,
+        candidates,
+        settingsSlice.settings.udpPort,
+        selfTlsPin,
+        luciolaQr,
+    ) {
         qrPairingPayloadForAddresses(
             nodeId = settingsSlice.settings.nodeId,
             addresses = candidates,
             port = settingsSlice.settings.udpPort,
+            tlsPin = selfTlsPin,
+            luciola = luciolaQr,
         )
     }
-    val pairingPayload = remember(settingsSlice.settings.nodeId, settingsSlice.settings.nick, candidates, settingsSlice.settings.udpPort) {
+    val pairingPayload = remember(
+        settingsSlice.settings.nodeId,
+        settingsSlice.settings.nick,
+        candidates,
+        settingsSlice.settings.udpPort,
+        selfTlsPin,
+        luciolaQr,
+    ) {
         pairingPayloadForAddresses(
             nodeId = settingsSlice.settings.nodeId,
             nick = settingsSlice.settings.nick,
             addresses = candidates,
             port = settingsSlice.settings.udpPort,
+            tlsPin = selfTlsPin,
+            luciola = luciolaQr,
         ).orEmpty()
     }
     val qrCode = remember(qrPayload) {
@@ -337,6 +367,14 @@ internal fun DesktopTrustedDevicesPanel(
                 )
             }
         }
+
+        // 「设备接入」排在 agent 授权**之前**：用户来这里的第一件事通常是「让这台设备能聊天」，
+        // 而能聊天只看配对/接入档，不看 agent 授权。两段各有自己的标题，不再混成一个概念。
+        DeviceTrustSection(
+            controller = controller,
+            nodeSlice = nodeSlice,
+            settingsSlice = settingsSlice,
+        )
 
         Surface(
             color = MaterialTheme.colorScheme.surface,
@@ -720,3 +758,232 @@ private fun GrantReplyStatusLine(outcome: GrantReplyOutcome, peerLabel: String) 
     )
 }
 
+/**
+ * 「设备接入」：三档 + 待处理申请。
+ *
+ * ## 为什么与下面的 agent 授权分成两块
+ *
+ * 一度只有一个「可信设备」页，里面装的全是 agent 授权（ro/rw/admin/owner）。用户想
+ * 「让这两台设备能聊天」点进去，看到的是「谁能调用我的 agent」，而决定能不能聊天的
+ * 配对与接入档，那一页一个字都没提。两块标题分开写，是这条 IA 缺陷的最小修复。
+ *
+ * ## 为什么要轮询
+ *
+ * 申请是从网络来的，不在这页上点出来；这一页开着时每 1.5 秒读一次（页面关掉即停，
+ * `LaunchedEffect` 随组合销毁）。没有推送通道之前，这比「等用户重启应用才看见」诚实。
+ */
+@Composable
+private fun DeviceTrustSection(
+    controller: RelayController,
+    nodeSlice: NodeSlice,
+    settingsSlice: SettingsSlice,
+) {
+    val sp = LocalAppSpacing.current
+    val scope = rememberCoroutineScope()
+    var epoch by remember { mutableIntStateOf(0) }
+    LaunchedEffect(controller) {
+        while (true) {
+            delay(1_500)
+            epoch++
+        }
+    }
+    val policy = remember(epoch) { controller.deviceTrustPolicy() }
+    val pending = remember(epoch) { controller.pendingPairingRequests() }
+    val rows = listOf(
+        Triple(
+            DeviceTrustPolicies.VERIFY,
+            stringResource(Res.string.device_trust_verify),
+            stringResource(Res.string.device_trust_verify_desc),
+        ),
+        Triple(
+            DeviceTrustPolicies.AUTO,
+            stringResource(Res.string.device_trust_auto),
+            stringResource(Res.string.device_trust_auto_desc),
+        ),
+        Triple(
+            DeviceTrustPolicies.WHITELIST,
+            stringResource(Res.string.device_trust_whitelist),
+            stringResource(Res.string.device_trust_whitelist_desc),
+        ),
+    )
+    Surface(
+        color = MaterialTheme.colorScheme.surface,
+        shape = LocalCardShape.current,
+        modifier = Modifier.fillMaxWidth().border(1.dp, MaterialTheme.colorScheme.outlineVariant, LocalCardShape.current),
+    ) {
+        Column(modifier = Modifier.padding(sp.lg), verticalArrangement = Arrangement.spacedBy(sp.md)) {
+            Text(
+                text = stringResource(Res.string.device_trust_title),
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = stringResource(Res.string.device_trust_desc),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Column(verticalArrangement = Arrangement.spacedBy(sp.xs)) {
+                rows.forEach { (key, label, detail) ->
+                    val selected = key == policy
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(LocalCardShape.current)
+                            .clickable {
+                                controller.setDeviceTrustPolicy(key)
+                                epoch++
+                            }
+                            .padding(vertical = sp.xs, horizontal = sp.sm),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(sp.sm),
+                    ) {
+                        RadioButton(
+                            selected = selected,
+                            onClick = {
+                                controller.setDeviceTrustPolicy(key)
+                                epoch++
+                            },
+                        )
+                        Column(verticalArrangement = Arrangement.spacedBy(sp.xxs)) {
+                            Text(
+                                text = label,
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                            )
+                            Text(
+                                text = detail,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+            }
+            // 「邀请设备申请」：只带公钥的码。对方扫完**不会**直接进信任库 ——
+            // 它会先出现在上面的待处理列表里（`verify` 档），这正是这条流程的意义。
+            //
+            // 没有配对密钥不是缺陷，是把「谁能连进来」的裁决权从二维码挪回人手上。
+            val luciolaPub = nodeSlice.network.luciolaQr?.publicKey
+            val invitePayload = remember(luciolaPub, settingsSlice.settings.nodeId, settingsSlice.settings.udpPort) {
+                luciolaPub?.let { pub ->
+                    pairingPayloadForAddresses(
+                        nodeId = settingsSlice.settings.nodeId,
+                        nick = settingsSlice.settings.nick,
+                        addresses = nodeSlice.network.advertisedAddresses,
+                        port = settingsSlice.settings.udpPort,
+                        // 不带 pin：这条路上信任根是「人点了一下」，不是码里的密钥。
+                        tlsPin = null,
+                        luciola = LuciolaQrInfo(publicKey = pub, secret = ""),
+                    )
+                }
+            }
+            val inviteCode = remember(invitePayload) {
+                invitePayload?.let { runCatching { QrEncoder.encode(it) }.getOrNull() }
+            }
+            Text(
+                text = stringResource(Res.string.device_trust_invite_title),
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(sp.lg),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (inviteCode != null) {
+                    // 不投阴影：这里是白底画码，阴影对可扫性没有帮助，而 elevation 字面量
+                    // 会让 token 棘轮记一笔新债（`designTokenUsageGate`）。
+                    Surface(color = Color.White, shape = LocalCardShape.current) {
+                        QrCodeView(
+                            code = inviteCode,
+                            contentDescription = stringResource(Res.string.device_trust_invite_title),
+                            modifier = Modifier.padding(sp.sm).size(120.dp),
+                        )
+                    }
+                }
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(sp.xs)) {
+                    Text(
+                        text = stringResource(
+                            if (invitePayload == null) Res.string.device_trust_invite_unavailable
+                            else Res.string.device_trust_invite_hint,
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (invitePayload != null) {
+                        AppOutlinedButton(
+                            text = stringResource(Res.string.device_trust_invite_copy),
+                            size = AppButtonSize.Small,
+                            onClick = { putTextOnClipboard(invitePayload) },
+                        )
+                    }
+                }
+            }
+            Text(
+                text = stringResource(Res.string.device_trust_note),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = stringResource(Res.string.device_trust_pending),
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+            if (pending.isEmpty()) {
+                Text(
+                    text = stringResource(Res.string.device_trust_pending_empty),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                pending.forEach { (nodeId, detail) ->
+                    val name = detail.substringBefore('|').ifBlank { nodeId.take(8) }
+                    val host = detail.substringAfter('|', "")
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        shape = LocalCardShape.current,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(sp.md).fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(sp.md),
+                        ) {
+                            Column(
+                                modifier = Modifier.weight(1f),
+                                verticalArrangement = Arrangement.spacedBy(sp.xxs),
+                            ) {
+                                Text(text = name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    text = if (host.isBlank()) nodeId else host,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            AppButton(
+                                text = stringResource(Res.string.device_trust_approve),
+                                size = AppButtonSize.Small,
+                                onClick = {
+                                    scope.launch {
+                                        controller.approveSecretlessPairing(nodeId)
+                                        epoch++
+                                    }
+                                },
+                            )
+                            AppOutlinedButton(
+                                text = stringResource(Res.string.device_trust_reject),
+                                size = AppButtonSize.Small,
+                                onClick = {
+                                    scope.launch {
+                                        controller.rejectSecretlessPairing(nodeId)
+                                        epoch++
+                                    }
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

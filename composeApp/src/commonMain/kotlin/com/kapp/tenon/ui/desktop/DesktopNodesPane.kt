@@ -216,19 +216,16 @@ public fun NodesPane(
             if (externalAddNodeRequest > 0) addNodeOpen = true
         }
 
-        // 横幅宿主只有**一个**：整个节点页要么走窄档、要么走宽档，两条分支互斥
-        // （同一个 if/else 决定哪棵子树存在）。
-        //  - 窄档：把整页委托给 `NodesScreen`，横幅由它画（它自己的 `chromeSlice.banner?.let`）；
-        //  - 宽档：本文件自建双栏、不调 `NodesScreen`，所以横幅只能由下面那行画。
-        // 因此 `chromeSlice.banner?.let { AppBanner(...) }` **必须**留在 else 分支里：
-        // 抬到 if 之上就成了「窄档时本文件一条 + NodesScreen 一条」的双横幅，
-        // 且两条都带自己的关闭按钮（同一条提示两个 ✕）。
+        // 横幅宿主只有**一个**，而且现在可以放在档位 if **之上**。
+        //
+        // 旧约束（"必须留在 else 分支里，否则窄档双横幅"）是**布局占位**时代的产物：
+        // 那时横幅是普通 Surface，抬到 if 之上窄档就会有两条真的各占一行。`AppBanner`
+        // 改成浮层（Popup，父布局高度为 0）之后这个约束消失，而 `NodesScreen` 也不再自挂
+        // 横幅（统一由组合根 / 本文件画）—— 所以一行覆盖两档，窄档不会再漏。
+        chromeSlice.banner?.let { AppBanner(it, onDismiss = controller::dismissBanner) }
         if (tier == DesktopWindowSizeClass.Compact) {
             Column(Modifier.fillMaxSize()) {
-                // 这里**不要**再画一次 `chromeSlice.banner`：下面的 `NodesScreen` 自己就会画
-                // （`NodesScreen.kt` 的 `chromeSlice.banner?.let { AppBanner(...) }`），
-                // 两处都画会在桌面节点视图上把同一条横幅画两次、带两个「关闭」——
-                // `desk-nodes-banner-expanded` 那张参考图就是为钉住这一支才建的。
+                // 横幅已在档位 if 之上画过一次，这里不再挂（`NodesScreen` 也不再自挂）。
                 if (showNodeCountInPane) NodeCountLine(entries.size, onlineCount)
                 NodesScreen(
                     nodeSlice = nodeSlice,
@@ -249,12 +246,6 @@ public fun NodesPane(
             }
         } else {
             Column(Modifier.fillMaxSize()) {
-                // 横幅：Compact 那支调 `NodesScreen`，它自己会画（见上面那段注释）；
-                // 宽档走的是本文件的自建双栏、**不再**调 `NodesScreen`，所以要在这里补一次。
-                // 漏掉的后果是实打实的退化：节点起不来时宽窗上那条 `BindFailed` 横幅整条消失，
-                // `desk-nodes-banner-expanded` 与 `desk-nodes-expanded` 会变成逐字节相同的两张图
-                // （`render-preview.py --dup` 就是那样把它抓出来的）。
-                chromeSlice.banner?.let { AppBanner(it, onDismiss = controller::dismissBanner) }
                 Row(
                     modifier = Modifier
                         .weight(1f)

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package com.kapp.tenon.core.transport
 
+import com.kapp.tenon.core.nowMillis
 import com.kapp.tenon.core.protocol.Codec
 import com.kapp.tenon.core.protocol.MsgTypes
 import com.kapp.tenon.core.protocol.Profile
@@ -164,6 +165,67 @@ class LuciolaSecureChannelTest {
             val receivedByA = atA.await()
             assertContentEquals(reply, receivedByA.bytes)
             assertEquals(portB, receivedByA.port, "A 的外拨信道按拨号目标地址上报")
+        } finally {
+            transportA.stop()
+            transportB.stop()
+        }
+    }
+
+    /**
+     * 「手填地址、什么码都没有」的发起侧 TOFU：A 不带任何预先钉住的公钥，
+     * 靠首连**学习** B 的身份（`learnEndpoint` 落盘钉存），随后申请帧照常送出、
+     * B 的 `decideSecretless` 照常裁决（这里 verify 档 → AskHuman → 批准）。
+     * 学习落盘之后，A 对同一端点的后续发送必须回到 deny-by-default 的正常管线。
+     */
+    @Test
+    fun pairingByAddressTofuLearnsPeerKeyThenPairs() = runBlocking {
+        val portA = freeTcpPort()
+        val portB = freeTcpPort()
+        val a = factory(portA, 11)
+        val b = factory(portB, 12)
+
+        val transportA = a.createTransport(registryWith("node-a", "node-b", "127.0.0.1", portB))
+        val transportB = b.createTransport(registryWith("node-b", "node-a", "127.0.0.1", portA))
+        transportB.start()
+        try {
+            // 学习判据：pairPeer 没被调用（没有扫码），钉存里本不该有 B ——
+            // TOFU 请求之后必须**出现**且等于 B 的真实身份公钥。
+            assertEquals(null, transportA.pinnedKeyForTest("127.0.0.1", portB))
+
+            // TOFU 入口一次受理即排队（连接回调驱动学习 + 补发），与扫码路径同口径。
+            assertTrue(transportA.requestPairingByAddress("127.0.0.1", portB, "node-a"))
+
+            // awaitTrue 超时即抛（到达这里 = 学习已经落盘），再看一眼钉的确实是 B。
+            awaitTrue(timeoutMs = 30_000, pollMs = 100) {
+                transportA.pinnedKeyForTest("127.0.0.1", portB) != null
+            }
+            assertContentEquals(b.publicKey, transportA.pinnedKeyForTest("127.0.0.1", portB)!!)
+
+            // verify 档（默认）：主机问人。测试用 pairingAdmission 直批 —— 这里
+            // 模拟「那边的人点了批准」：pendingPairingRequests 里出现 B 的申请后批准。
+            awaitTrue(timeoutMs = 30_000, pollMs = 100) {
+                b.pendingPairingRequests().isNotEmpty()
+            }
+            val pendingNodeId = b.pendingPairingRequests().keys.single()
+            assertTrue(b.approveSecretlessPairing(pendingNodeId), "批准必须受理成功")
+
+            // 批准后对端下一次重试即放行（preApproved → onPaired）→ 应答 accepted。
+            // 与生产 awaitPairingDecision 同一条纪律：**轮询最新一条应答**，而不是订阅
+            // 第一条 —— 第一条是 awaiting-approval（accepted=false），订阅早了会把它
+            // 误当最终裁决（本测试第一版就栽在这里）。
+            val deadlineMs = nowMillis() + 30_000
+            var accepted = false
+            while (nowMillis() < deadlineMs) {
+                delay(100)
+                val latest = transportA.pairingResults.replayCache
+                    .lastOrNull { it.host == "127.0.0.1" && it.port == portB }
+                if (latest != null && latest.accepted) {
+                    accepted = true
+                    break
+                }
+                runCatching { transportA.requestPairingByAddress("127.0.0.1", portB, "node-a") }
+            }
+            assertTrue(accepted, "批准后必须收到 accepted 应答")
         } finally {
             transportA.stop()
             transportB.stop()

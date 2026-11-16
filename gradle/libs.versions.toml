@@ -1,11 +1,17 @@
 [versions]
-# luciola 0.11.0-local.1：尚未发到 Maven Central 的本地版本，构建要先
+# luciola 0.11.0-local.3（local.2 → local.3）：新增 `SecureSession.closeCurrentChannel()`
+# —— 只断**当前入站连接**、accept 循环与监听端口保留。此前入站清理（陌生会话超时 /
+# 拒绝配对 / 等批准超时）错用 `disconnect()`，把宿主的监听器整条带死：一条超期配对申请
+# 就能让桌面从此 TCP 连不上，直到重启（真机实测两次）。
+# local.1 → local.2：握手消息 2 携带响应方身份公钥，发起侧开放 TOFU 连接
+# （`connect_secure_raced_tofu` / `connect(pinned=null)`）——「手填地址、什么码都没有」
+# 的配对靠它。**线格式变了，两端必须同版**。构建照旧：
 # `cd <luciola 仓库> && scripts/publish-maven-local.sh`，再带 `LUCIOLA_LOCAL=1` 跑
 #（`settings.gradle.kts` 里那面开关会把 mavenLocal() 提到最前）。
 # 原生库与 bindings 必须同版：`desktopApp/resources/common/native/libluciola_uniffi.dylib`
 # 由 `copyLuciolaNative` 从 `RustBuild/cargo-target/release` 复制，
 # `:desktopApp:verifyLuciolaNative` 逐项比对 UniFFI checksum（83 项 + contract 29）。
-luciola = "0.11.0-local.1"
+luciola = "0.11.0-local.3"
 agp = "9.4.1"
 android-compileSdk = "37"
 android-buildToolsVersion = "36.1.0"

@@ -62,9 +62,9 @@ Team Folder 是**现有会话列表的分组视图**，不新增会话类型、�
 | 主题 | 现状（`[事实]`） | 本轮处置 | 状态 |
 |:--|:--|:--|:--|
 | 多棒责任链 | `DesktopStageChain` / `StageChainGate` / `TicketVerification` 已落地并有测试 | **沿用**，本轮零改动 | 现状 |
-| 异厂商守卫 | `StageChainGate` 四条规则：冷却、在位、单棒降级、异厂商审核（KDoc 与代码分支的 2/3 编号顺序相反，引用时不编号）；`AgentProfiles.vendorOf` 是**厂商级 5 值**，`reviewers = plan.stages.drop(1)` 遍历全部审查棒，无模型级校验 | **沿用**；不写"相同厂商模型" | 现状 |
+| 异厂商守卫 | `StageChainGate` 四条规则：冷却、在位、单棒降级、异厂商审核（KDoc 与代码分支的 2/3 编号顺序相反，引用时不编号）；`AgentProfiles.vendorOf` 是**厂商级 7 值**，`reviewers = plan.stages.drop(1)` 遍历全部审查棒，无模型级校验 | **沿用**；不写"相同厂商模型" | 现状 |
 | 验收门 | `TicketVerification.testCommandFor` 只认 `package.json` 的 `scripts.test`（`"scripts"` 后 2000 字符窗口子串粗判，非 JSON 解析），执行 `npm test --silent`；`skipped` 也返回 `passed=true` | **沿用 + 记为已知限制** | 现状 / 已知缺口 |
-| CLI 驱动 | `CliDiscovery` 五个硬编码 bin（`claude`/`codex`/`agy`/`opencode`/`dsh`）；`cliDriverRegistrations` 是**顶层函数**；`DriverEvent` 七型（`ThoughtDelta`/`TokenDelta`/`ToolCall`/`Card`/`Artifact`/`Finished`/`Error`），`CliLineEventMapper` 只产三型 | **沿用**；不称"自动发现"、不称"抹平为七型" | 现状 |
+| CLI 驱动 | `CliDiscovery` 七个硬编码 bin（`claude`/`codex`/`agy`/`opencode`/`dsh`/`codebuddy`/`zcode`，zcode 另认桌面应用包里的 cjs）；`cliDriverRegistrations` 是**顶层函数**；`DriverEvent` 七型（`ThoughtDelta`/`TokenDelta`/`ToolCall`/`Card`/`Artifact`/`Finished`/`Error`），`CliLineEventMapper` 只产三型 | **沿用**；不称"自动发现"、不称"抹平为七型" | 现状 |
 | 单卡槽卡片 | `(cardId, rev)` 严格递增；`AgentCards` 是追加式新行 + `latestRevCardMessageIds` UI 折叠；`CardStateTag` 映射 `aborted/blocked/prototype/merged/review_ready/working`，**无 `proposed` 专用档**（靠动作反推） | **沿用**；不新增卡片类型；不称"原位覆盖" | 现状 |
 | 审批分级 | `AgentRiskLevels` 常量是 `READONLY`/`MODIFYING`/`HIGH`，**值域**才是 `L1/L2/L3`；hook 超时/送达失败回 `decision=deny`，**无在线对端时回 HTTP 503 `no-phone`**；hook 键 `"agy-" + conversationId` 与派单侧 **无对齐键**；`agent-ack` 无签名字段 | **沿用**；L3 终审属后续演进 | 现状 / 演进目标 |
 | 沙箱 | `WorktreeSandboxExecutor` 的 `deleteArtifactsSafely()` 是 companion object 的 `internal fun`，`walkFileTree` 不 FOLLOW_LINKS；`SandboxIdleWatchdog` 在 **`DesktopWorkerWatchdog.kt`**，`DEFAULT_IDLE_TIMEOUT_MS = 180_000L`、`KILL_GRACE_MS = 5_000L`；进程树宽限由 `WorktreeSandboxExecutor.GRACE_MS = 3_000L` 决定；沙箱根可被 `TENON_SANDBOX_ROOT` 覆盖，产物 `artifacts/<taskId>/patch.diff`，链分支 `chain/<id>` | **沿用**；修正归属与 5s/3s 语义 | 现状 |

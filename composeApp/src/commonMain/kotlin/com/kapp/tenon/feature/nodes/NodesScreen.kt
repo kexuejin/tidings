@@ -298,7 +298,7 @@ fun NodesScreen(
         // 横幅在**两个分支之上**：手机壳与桌面窄档都只经过这一处（宽档由 `NodesPane` 自己画）。
         // 上一版把它画在列表分支里，于是用户停在节点详情时看不到任何失败/回执 ——
         // 绑定失败、握手提示、移除回执全都要退回列表才出现。
-        chromeSlice.banner?.let { AppBanner(it, onDismissBanner) }
+        // 横幅由组合根的全局宿主统一画（见 App.kt 的 RelayApp）。
 
         // 详情层与列表层是同一条屏的两个分支。原型 `m-nodedetail` 是**节点页签内部的一个分支**
         // （底栏照画、只多一个顶栏返回键，见 `AppNavState` 里 `detailPeerId` 的 KDoc），

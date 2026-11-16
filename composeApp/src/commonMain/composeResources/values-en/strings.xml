@@ -378,6 +378,11 @@
     <string name="disc_cleanup_none">No nodes need cleanup.</string>
     <string name="disc_cleanup_done">Cleaned up %1$d unreachable nodes.</string>
     <string name="banner_camera_denied">Camera permission denied. Please grant permission in system settings.</string>
+    <string name="banner_scan_camera_busy">The camera is busy — close other apps using it and try again.</string>
+    <string name="banner_pairing_not_sent">The pairing request could not be sent yet (peer offline or network down). It will retry automatically.</string>
+    <string name="banner_pairing_rejected">Could not establish the encrypted link. Ask the other device for a fresh pairing code.</string>
+    <string name="banner_pairing_not_ready">This device is not ready yet (secure channel not started). Restart the app and try again.</string>
+    <string name="banner_scan_generic">The scan did not go through. Try again — details are in diagnostics.</string>
     <string name="banner_scan_failed">Scan failed: %1$s</string>
     <!-- 权限给过了，但设备给不出画面：模拟器没相机、相机被别的应用占着、或者没有后摄。 -->
     <string name="banner_camera_unavailable">Camera is currently unavailable.</string>
@@ -640,6 +645,23 @@
     <string name="trusted_devices_qr_hint">Scan with mobile device in Nodes -> Scan QR Code to pair. Supports IPv4 &amp; IPv6 adaptive connection.</string>
     <string name="trusted_devices_copy_node_id">Copy Node ID</string>
     <string name="trusted_devices_copy_pairing_link">Copy Pairing Link</string>
+    <string name="device_trust_title">Device access</string>
+    <string name="device_trust_desc">Decides whether a device without a pairing code may connect. Separate from the agent permissions below.</string>
+    <string name="device_trust_verify">Require approval (recommended)</string>
+    <string name="device_trust_verify_desc">An unknown device needs one approval from you here</string>
+    <string name="device_trust_auto">Trust automatically</string>
+    <string name="device_trust_auto_desc">Allowed on the same LAN; other networks still need your approval</string>
+    <string name="device_trust_whitelist">Allow list</string>
+    <string name="device_trust_whitelist_desc">Only already-trusted devices; everyone else is refused</string>
+    <string name="device_trust_pending">Pending device requests</string>
+    <string name="device_trust_pending_empty">No pending device requests</string>
+    <string name="device_trust_approve">Approve access</string>
+    <string name="device_trust_reject">Reject</string>
+    <string name="device_trust_invite_title">Invite a device to request access</string>
+    <string name="device_trust_invite_hint">Let the other device scan this code: it carries this machine's public key only, no pairing secret, so the device appears under pending requests and you decide.</string>
+    <string name="device_trust_invite_copy">Copy invite link</string>
+    <string name="device_trust_invite_unavailable">The luciola identity is not ready yet, so no invite code can be drawn.</string>
+    <string name="device_trust_note">This only decides who can connect; which agents they may use is set by the permissions below.</string>
     <string name="trusted_devices_policy_title">Trust Policy</string>
     <string name="trusted_devices_policy_request">Require Approval (New devices require confirmation)</string>
     <string name="trusted_devices_policy_auto">Auto-Trust (Automatically trust discovered peers)</string>

@@ -182,7 +182,7 @@ fun ScanScreen(
             verticalArrangement = Arrangement.spacedBy(sp.sm),
         ) {
             // 真实原因：权限被拒、相机被占用、码不是我们的格式，各有各的横幅。
-            chromeSlice.banner?.let { AppBanner(it, onDismissBanner) }
+        // 横幅由组合根的全局宿主统一画（见 App.kt 的 RelayApp）。
             // 横幅把原因说清了，但「去系统设置」这一步过去没有出口：给一颗直达按钮。
             // 只在**相机权限被拒**这一档出现 —— 其它横幅（码不对、相机被占）没有可去的地方，
             // 多一颗按钮只会让人以为设置里能修。

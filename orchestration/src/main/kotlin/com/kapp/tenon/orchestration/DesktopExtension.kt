@@ -472,6 +472,18 @@ class DesktopExtension(
         )
         val created = ControlPlane(
             runtime, httpPort, token,
+            // 设备接入管理面：只在开发路由里用（`/v1/dev/pairing*`），让「批准」这一步
+            // 在无鼠标环境里也能被脚本触发 —— 否则这条链永远只有人点过、没人验过。
+            devicePairing = controller.platform.luciolaHost?.let { host ->
+                object : com.kapp.tenon.agent.DevicePairingAdmin {
+                    override fun deviceTrustPolicy(): String = host.deviceTrustPolicy()
+                    override fun pendingPairingRequests(): Map<String, String> = host.pendingPairingRequests()
+                    override fun approveSecretlessPairing(nodeId: String): Boolean =
+                        host.approveSecretlessPairing(nodeId)
+                    override fun rejectSecretlessPairing(nodeId: String): Boolean =
+                        host.rejectSecretlessPairing(nodeId)
+                }
+            },
             cliDrivers = driverRegistry,
             sessions = registry, workspaces = workspaces, grants = grants, execPolicies = execPolicies,
             hostDirectoryStore = hostDirs,

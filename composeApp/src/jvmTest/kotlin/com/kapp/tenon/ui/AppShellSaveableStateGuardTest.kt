@@ -64,17 +64,23 @@ class AppShellSaveableStateGuardTest {
      * 这个分支挪走，本条变红。
      */
     @Test
-    fun agentsRouteRendersTheStateBanner() {
+    fun theStateBannerIsHostedOnceAtTheCompositionRoot() {
         val text = src()
-        val agentsBranch = GuardSourceScan.bracedBlockAfter(text, "AppRoutes.AGENTS ->")
+        // 横幅宿主搬到了组合根（`AppBanner` 是浮层）：全应用只剩这一处。
+        val rootHosts = Regex("AppBanner\\(").findAll(text).count()
         assertTrue(
-            agentsBranch.contains("AppBanner("),
-            "AGENTS 路由分支没有接 AppBanner —— 建群失败（controller 发 banner）时" +
-                "用户点了「创建」不会有任何反馈",
+            rootHosts == 1,
+            "组合根必须**恰好**挂一处横幅宿主 —— 少了全应用静默（设置子页、智能体页都漏过），" +
+                "多了同一条提示叠两份。当前=$rootHosts",
         )
         assertTrue(
-            agentsBranch.contains("controller::dismissBanner"),
-            "AGENTS 分支的横幅没有接关闭回调 —— 横幅会赖在屏幕上关不掉",
+            text.contains("controller::dismissBanner"),
+            "横幅必须能关：onDismiss 接 controller。",
+        )
+        val agentsBranch = GuardSourceScan.bracedBlockAfter(text, "AppRoutes.AGENTS ->")
+        assertFalse(
+            agentsBranch.contains("AppBanner("),
+            "AGENTS 分支不许再自挂横幅：组合根已经画了一条，分支里再挂就是双横幅。",
         )
     }
 

@@ -95,6 +95,10 @@ public fun DesktopStatusBar(
         port = selfPort,
         // task-86：复制链接这条路也要带 pin —— 公网目标要求 pin != null（fail-closed）。
         tlsPin = nodeSlice.network.selfTlsPin,
+        // **本构建 luciola 是唯一传输**：信任根在 `l` 段（Ed25519 公钥 + 配对密钥），
+        // 只带 pin 的码在老 K2 链路上还有意义，在这里等于没有信任根 —— 对方扫完只能
+        // 得到地址，配不上。`p` 与 `l` 互斥，由 builder 取舍。
+        luciola = nodeSlice.network.luciolaQr,
     )
     Surface(color = MaterialTheme.colorScheme.surfaceContainer, tonalElevation = RelayElevations.Card) {
         Row(

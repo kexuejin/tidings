@@ -2,6 +2,15 @@
 
 package com.kapp.tenon.feature.settings
 
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.material3.RadioButton
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -32,6 +41,8 @@ import com.kapp.tenon.core.nowMillis
 import com.kapp.tenon.core.protocol.EventRouteReasons
 import com.kapp.tenon.core.protocol.InboxUnresolved
 import com.kapp.tenon.domain.AccessChannelPort
+import com.kapp.tenon.core.protocol.DeviceTrustPolicies
+import com.kapp.tenon.domain.DeviceTrustHandle
 import com.kapp.tenon.domain.AccessNodeRowUi
 import com.kapp.tenon.domain.BridgeBlockState
 import com.kapp.tenon.domain.NodeSlice
@@ -70,6 +81,19 @@ import com.kapp.tenon.generated.resources.set_access_online
 import com.kapp.tenon.generated.resources.set_access_paired
 import com.kapp.tenon.generated.resources.set_access_paired_count
 import com.kapp.tenon.generated.resources.set_access_paired_none
+import com.kapp.tenon.generated.resources.device_trust_title
+import com.kapp.tenon.generated.resources.device_trust_desc
+import com.kapp.tenon.generated.resources.device_trust_verify
+import com.kapp.tenon.generated.resources.device_trust_verify_desc
+import com.kapp.tenon.generated.resources.device_trust_auto
+import com.kapp.tenon.generated.resources.device_trust_auto_desc
+import com.kapp.tenon.generated.resources.device_trust_whitelist
+import com.kapp.tenon.generated.resources.device_trust_whitelist_desc
+import com.kapp.tenon.generated.resources.device_trust_pending
+import com.kapp.tenon.generated.resources.device_trust_pending_empty
+import com.kapp.tenon.generated.resources.device_trust_approve
+import com.kapp.tenon.generated.resources.device_trust_reject
+import com.kapp.tenon.generated.resources.device_trust_note
 import com.kapp.tenon.generated.resources.set_access_pairing_card
 import com.kapp.tenon.generated.resources.set_access_pairing_trusted
 import com.kapp.tenon.generated.resources.set_access_pairing_open
@@ -144,6 +168,13 @@ fun SettingsAccessChannelSubpage(
     onOpenAutomationConsole: (() -> Unit)? = null,
     /** 支线派单配对开关（Phase 2）：null = 本端没有执行体能力（手机未配对等），区块不画。 */
     onToggleQuestPair: ((nodeId: String, enabled: Boolean) -> Unit)? = null,
+    /**
+     * 设备接入这一档的读写口。null = 这台壳没接（预览/旧调用点）⇒ 整块不画。
+     *
+     * 与下面的「配对」卡是**两件事**：那张说的是「这台设备已经是我的」，这一块说的是
+     * 「**还没有配对的设备**能不能连进来」—— 三档策略 + 待处理申请。
+     */
+    deviceTrust: DeviceTrustHandle? = null,
     modifier: Modifier = Modifier,
 ) {
     val settings = settingsSlice.settings
@@ -388,6 +419,15 @@ fun SettingsAccessChannelSubpage(
                 }
             }
 
+            // ③.5 设备接入：三档 + 待处理申请。
+            //
+            // 为什么放在「配对」之前：用户在这一页最先问的是「别人能不能连上我」，
+            // 而那张卡只回答「已经连上了的都有谁」。两件事分开写，不并成一个开关
+            // （agent 授权是第三件事，在桌面设置窗里）。
+            if (deviceTrust != null) {
+                DeviceTrustSection(deviceTrust = deviceTrust, tick = tick)
+            }
+
             // ④ 配对（只有本端有信任设备页时才画 —— 手机走「添加节点」那条主路径）
             val openTrusted = onOpenTrustedDevices
             if (openTrusted != null) {
@@ -548,4 +588,149 @@ private fun routeCauseLabel(reason: String): String = when (reason) {
     EventRouteReasons.AMBIGUOUS_OWNER -> stringResource(Res.string.set_access_route_ambiguous_owner)
     EventRouteReasons.BOUND_TO_1TO1 -> stringResource(Res.string.set_access_route_bound_to_1to1)
     else -> stringResource(Res.string.set_access_route_unknown, reason)
+}
+
+/**
+ * 「设备接入」段：三档单选 + 待处理申请。
+ *
+ * 与桌面设置窗里同名那段是**同一套语义、各自的画法**（手机用 SectionCard，桌面用手写卡）。
+ * 读数跟着这一页已有的心跳走（[tick]）：申请是从网络来的，页面开着时它自己会变。
+ */
+@Composable
+private fun DeviceTrustSection(deviceTrust: DeviceTrustHandle, tick: Long) {
+    // **点下去要立刻变**：这一页的读数是跟着心跳（`tick`）刷的，若只从心跳读，
+    // 用户点完「自动信任」后要等下一次心跳才看到选中态（最长 5 秒），看起来像没生效 ——
+    // 而档位其实已经落盘了。所以本地先乐观置位，再让心跳把它校准回来。
+    var shownPolicy by remember(deviceTrust) { mutableStateOf(deviceTrust.deviceTrustPolicy()) }
+    LaunchedEffect(tick) { shownPolicy = deviceTrust.deviceTrustPolicy() }
+    val pending = remember(deviceTrust, tick) { deviceTrust.pendingPairingRequests() }
+    val rows = listOf(
+        Triple(
+            DeviceTrustPolicies.VERIFY,
+            stringResource(Res.string.device_trust_verify),
+            stringResource(Res.string.device_trust_verify_desc),
+        ),
+        Triple(
+            DeviceTrustPolicies.AUTO,
+            stringResource(Res.string.device_trust_auto),
+            stringResource(Res.string.device_trust_auto_desc),
+        ),
+        Triple(
+            DeviceTrustPolicies.WHITELIST,
+            stringResource(Res.string.device_trust_whitelist),
+            stringResource(Res.string.device_trust_whitelist_desc),
+        ),
+    )
+    SectionCard(
+        title = stringResource(Res.string.device_trust_title),
+        icon = Res.drawable.ic_shield,
+    ) {
+        Text(
+            text = stringResource(Res.string.device_trust_desc),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = LocalAppSpacing.current.md),
+        )
+        rows.forEach { (key, label, detail) ->
+            val selected = key == shownPolicy
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        deviceTrust.setDeviceTrustPolicy(key)
+                        shownPolicy = key
+                    }
+                    .padding(horizontal = LocalAppSpacing.current.md, vertical = LocalAppSpacing.current.xs),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.sm),
+            ) {
+                RadioButton(
+                    selected = selected,
+                    onClick = {
+                        deviceTrust.setDeviceTrustPolicy(key)
+                        shownPolicy = key
+                    },
+                )
+                Column(verticalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.xxs)) {
+                    Text(
+                        text = label,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                    )
+                    Text(
+                        text = detail,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+        Text(
+            text = stringResource(Res.string.device_trust_note),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(
+                start = LocalAppSpacing.current.md,
+                end = LocalAppSpacing.current.md,
+                top = LocalAppSpacing.current.sm,
+            ),
+        )
+        Text(
+            text = stringResource(Res.string.device_trust_pending),
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(
+                start = LocalAppSpacing.current.md,
+                end = LocalAppSpacing.current.md,
+                top = LocalAppSpacing.current.md,
+            ),
+        )
+        if (pending.isEmpty()) {
+            Text(
+                text = stringResource(Res.string.device_trust_pending_empty),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(
+                    start = LocalAppSpacing.current.md,
+                    end = LocalAppSpacing.current.md,
+                    top = LocalAppSpacing.current.xs,
+                    bottom = LocalAppSpacing.current.md,
+                ),
+            )
+        } else {
+            pending.forEach { (nodeId, detail) ->
+                val name = detail.substringBefore('|').ifBlank { nodeId.take(8) }
+                val host = detail.substringAfter('|', "")
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = LocalAppSpacing.current.md, vertical = LocalAppSpacing.current.xs),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.sm),
+                ) {
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.xxs),
+                    ) {
+                        Text(text = name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            text = if (host.isBlank()) nodeId else host,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    AppTextButton(
+                        text = stringResource(Res.string.device_trust_approve),
+                        size = AppButtonSize.Small,
+                        onClick = { deviceTrust.approveSecretlessPairing(nodeId) },
+                    )
+                    AppTextButton(
+                        text = stringResource(Res.string.device_trust_reject),
+                        size = AppButtonSize.Small,
+                        onClick = { deviceTrust.rejectSecretlessPairing(nodeId) },
+                    )
+                }
+            }
+        }
+    }
 }

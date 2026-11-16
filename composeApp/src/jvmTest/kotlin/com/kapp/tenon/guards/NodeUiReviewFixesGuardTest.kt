@@ -4,6 +4,7 @@ package com.kapp.tenon.guards
 
 import com.kapp.tenon.testsupport.GuardSourceScan
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -29,18 +30,26 @@ class NodeUiReviewFixesGuardTest {
 
     private fun live(path: String) = GuardSourceScan.stripComments(GuardSourceScan.read(path))
 
+    /**
+     * 横幅**只有组合根一处宿主**；屏幕自己不许再挂。
+     *
+     * 这条规矩是那条 P1（"用户停在节点详情就看不到绑定失败"）的一般化：以前靠「把宿主写在
+     * 详情/列表两个分支之上」来保证不漏，于是每加一个屏都要重复一次这个判断，还漏过（设置
+     * 子页、智能体页）。`AppBanner` 改成浮层之后，宿主搬到 `RelayApp`，屏幕里再挂一次就是
+     * **两条同样的提示叠在一起**。
+     */
     @Test
-    fun bannerHostSitsAboveTheDetailAndListBranches() {
+    fun screensDoNotMountTheirOwnBanner() {
         val text = live(nodesScreen)
-        // Phase 4：节点页横幅改读 chrome 切片（宿主位置不变）
-        val hostAt = text.indexOf("chromeSlice.banner?.let")
-        val branchAt = text.indexOf("if (detailItem != null)")
-        assertTrue(hostAt >= 0, "节点页必须有一个横幅宿主（否则失败/回执没有出口）。")
-        assertTrue(branchAt >= 0, "找不到详情/列表分支 —— 结构变了，这条守卫要跟着改。")
-        assertTrue(
-            hostAt < branchAt,
-            "横幅必须在详情/列表**两个分支之上**：画在列表分支里时，用户停在节点详情就看不到" +
-                "绑定失败、握手提示与移除回执 —— 那正是 review 报的 P1。",
+        assertFalse(
+            text.contains("AppBanner("),
+            "节点页不许自挂横幅：宿主在组合根（`App.kt` 的 RelayApp），屏幕里再挂就是双横幅。",
+        )
+        val app = live("composeApp/src/commonMain/kotlin/com/kapp/tenon/App.kt")
+        assertEquals(
+            1,
+            Regex("AppBanner\\(").findAll(app).count(),
+            "组合根必须**恰好**挂一处横幅宿主（少了全应用静默，多了叠两条）。",
         )
     }
 

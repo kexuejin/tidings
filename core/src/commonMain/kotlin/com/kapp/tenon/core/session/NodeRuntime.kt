@@ -31,6 +31,7 @@ import io.ktor.utils.io.ByteWriteChannel
 import com.kapp.tenon.core.transport.DIRECTION_IN
 import com.kapp.tenon.core.transport.DedupStore
 import com.kapp.tenon.core.transport.DatagramTransport
+import com.kapp.tenon.core.transport.PairingResult
 import com.kapp.tenon.core.transport.FileChannelRouter
 import com.kapp.tenon.core.transport.FileChannelNegotiation
 import com.kapp.tenon.core.transport.ChunkFileTarget
@@ -240,6 +241,16 @@ internal class SweepOnlyDiscoveryEngine(
         const val STALLED_ROUNDS_BEFORE_RESTART = 2
     }
 }
+
+/**
+ * 配对自证帧的发送尝试次数与间隔（见 [NodeRuntime.requestLuciolaPairing]）。
+ *
+ * 7 × 1.1 秒 ≈ 6.6 秒 —— **必须短于 `CarrierHold.SEND_MS`（8 秒）**：控制面的
+ * `/v1/dev/pair` 就是用那条 hold 包着这次调用的，重试窗口一旦越过它，那条路由会先报超时、
+ * 而帧其实还在后台重试（「失败」与「成功」同真，是比失败更糟的读数）。
+ */
+private const val PAIRING_SEND_ATTEMPTS = 7
+private const val PAIRING_SEND_INTERVAL_MS = 1_100L
 
 class NodeRuntime(
     /**
@@ -749,10 +760,57 @@ class NodeRuntime(
     val boundPort: Int get() = transport.boundPort
 
     /**
-     * 扫码后向对端发配对自证(luciola)。false = 本节点没跑加密信道/该对端码里没有密钥。
+     * 扫码后向对端发配对自证(luciola)。false = 退避重试用尽仍没发出去 / 本节点没跑加密信道。
+     *
+     * ## 为什么必须在这里重试（真机现场，2026-11）
+     *
+     * 扫码那一刻与对端的加密会话**通常还不存在**：`SecureChannelTransport.send` 在
+     * 「会话还没连上」时直接返回 false（它自己的 KDoc 就写着「调用方退避重试，与普通发送
+     * 同一套语义」），而 [requestPairing] 是新建会话后的**第一帧** —— 首发失败是常态而不是异常。
+     *
+     * 上一版这里是单发直通：手机上点完「允许配对」，主机的 `[luciola] paired` 一行日志都没有，
+     * 界面也没有任何说法。真机取证（`diag/pairing.json`）：
+     * `{"pairPeerOk":true,"frameSent":false,"stage":"frame-not-sent"}` —— 钉住密钥成功、
+     * 自证帧一次都没出去。**信任已经建立了一半，用户看到的是「什么都没发生」。**
+     *
+     * 所以重试放在这**唯一一处**（手机扫码与 `/v1/dev/pair` 共用它），不要在调用方各写一遍。
      */
-    suspend fun requestLuciolaPairing(host: String, port: Int): Boolean =
-        transport.requestPairing(host, port, profile.nodeId)
+    /** 配对结果（宿主的应答）；null = 本机这条传输不提供该读数。 */
+    val pairingResults: kotlinx.coroutines.flow.SharedFlow<PairingResult>?
+        get() = transport.pairingResults
+
+    suspend fun requestLuciolaPairing(
+        host: String,
+        port: Int,
+        attempts: Int = PAIRING_SEND_ATTEMPTS,
+        intervalMs: Long = PAIRING_SEND_INTERVAL_MS,
+    ): Boolean {
+        if (attempts <= 0) return false
+        for (i in 0 until attempts) {
+            if (transport.requestPairing(host, port, profile.nodeId)) return true
+            if (i != attempts - 1) delay(intervalMs)
+        }
+        return false
+    }
+
+    /**
+     * [requestLuciolaPairing] 的「手填地址」变体：**不预先钉对端公钥**（没有二维码可扫），
+     * 由传输层 TOFU 首连学习（见 [SecureChannelTransport.requestPairingByAddress]）。
+     * 学到即钉存（工厂 `learnEndpoint`），之后申请帧补发、主机的批准/拒绝与扫码路径同一条。
+     */
+    suspend fun requestLuciolaPairingByAddress(
+        host: String,
+        port: Int,
+        attempts: Int = PAIRING_SEND_ATTEMPTS,
+        intervalMs: Long = PAIRING_SEND_INTERVAL_MS,
+    ): Boolean {
+        if (attempts <= 0) return false
+        for (i in 0 until attempts) {
+            if (transport.requestPairingByAddress(host, port, profile.nodeId)) return true
+            if (i != attempts - 1) delay(intervalMs)
+        }
+        return false
+    }
 
     /**
      * 实际绑定的 **TCP** 端口（文件传输与可靠投递），[start] 之前为 null。

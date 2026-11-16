@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package com.kapp.tenon.desktop
 
+import com.kapp.tenon.core.protocol.DeviceTrustPolicies
 import com.kapp.tenon.core.protocol.Profile
 import com.kapp.tenon.core.transport.DatagramTransport
 import com.kapp.tenon.core.transport.DiscoveryEngine
@@ -36,12 +37,26 @@ class DesktopLuciolaHost(
 ) : LuciolaHost {
     private val lock = Any()
     private var factory: LuciolaTransportFactory? = null
-    private var configuredProfile: Profile? = null
+    /**
+     * 工厂是**按 (nodeId, udpPort) 复用**的，不按整个 Profile。
+     *
+     * ## 为什么（真机现场）
+     *
+     * `NodeRuntime` 启动后会把 `profile.tcpPort` 改写成真正绑上的端口 ⇒ Profile 变了；
+     * 若这里按「Profile 相等」判复用，就会**重建工厂**，而传输层还挂在上一个实例上。
+     * 表现：扫码/邀请配对明明写进了信任库（新实例已落盘），这一轮却仍然
+     * `[luciola] pin lookup … pinned=false` + `[xport] send refused … (no session / unpaired)`，
+     * 要等重启才好 —— 「配了但没生效」。
+     *
+     * 工厂真正用到的只有 nodeId（配对帧里的身份）与 udpPort（信道监听口），所以按这两项复用。
+     */
+    private var configuredKey: String? = null
 
     override fun configure(profile: Profile, udpPort: Int) {
         installNativeLibraryPath()
         synchronized(lock) {
-            if (factory != null && configuredProfile == profile) return
+            val key = profile.nodeId + "|" + udpPort
+            if (factory != null && configuredKey == key) return
             val dir = File(dataDirectory(), "luciola").apply { mkdirs() }
             val seedFile = File(dir, "ed25519-seed.hex")
             val stateFile = File(dir, "state.json")
@@ -56,7 +71,7 @@ class DesktopLuciolaHost(
                     }
                 },
             )
-            configuredProfile = profile
+            configuredKey = key
             // 启动证据:真实进程日志里能看到这一行,冒烟/排障据此判断实验信道到底有没有装配。
             println("[luciola] host configured port=" + udpPort + " fp=" + factory!!.fingerprint.take(12))
         }
@@ -72,6 +87,23 @@ class DesktopLuciolaHost(
         val secret = runCatching { Base64.getUrlDecoder().decode(info.secret) }.getOrNull() ?: return false
         return runCatching { f.pairPeer(host, port, publicKey, secret = secret) }.isSuccess
     }
+
+    private fun currentFactory(): LuciolaTransportFactory? = synchronized(lock) { factory }
+
+    override fun deviceTrustPolicy(): String =
+        currentFactory()?.deviceTrustPolicy() ?: DeviceTrustPolicies.VERIFY
+
+    override fun setDeviceTrustPolicy(raw: String): Boolean =
+        currentFactory()?.setDeviceTrustPolicy(raw) ?: false
+
+    override fun pendingPairingRequests(): Map<String, String> =
+        currentFactory()?.pendingPairingRequests().orEmpty()
+
+    override fun approveSecretlessPairing(nodeId: String): Boolean =
+        currentFactory()?.approveSecretlessPairing(nodeId) ?: false
+
+    override fun rejectSecretlessPairing(nodeId: String): Boolean =
+        currentFactory()?.rejectSecretlessPairing(nodeId) ?: false
 
     override fun transportFactory(): ((PeerRegistry) -> DatagramTransport)? =
         factory?.let { f -> ({ registry: PeerRegistry -> f.createTransport(registry) }) }

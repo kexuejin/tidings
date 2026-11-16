@@ -11,6 +11,8 @@ import com.kapp.tenon.core.transport.LocalFile
 import com.kapp.tenon.core.transport.SendOutcome
 import com.sun.net.httpserver.HttpExchange
 import kotlinx.serialization.json.addJsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
@@ -437,4 +439,65 @@ private fun ControlPlane.resolveNodeIdOrRespond(exchange: HttpExchange, to: Stri
         )
     }
     return nodeId
+}
+
+/**
+ * `GET /v1/dev/pairing` —— 仅开发可用：读设备接入档位与待处理申请。
+ *
+ * 与 `/v1/dev/pair` 同一条纪律：只在 `TENON_DEV_ROUTES=1` 时注册，
+ * 而且**只读**（不改变任何信任）。
+ */
+internal fun ControlPlane.devPairingState(exchange: HttpExchange) {
+    val admin = devicePairing
+    if (admin == null) {
+        respond(exchange, 503, errorJson("pairing-admin-unavailable", "这个宿主没有接设备接入管理面"))
+        return
+    }
+    respond(
+        exchange,
+        200,
+        buildJsonObject {
+            put("policy", admin.deviceTrustPolicy())
+            put(
+                "pending",
+                buildJsonObject {
+                    admin.pendingPairingRequests().forEach { (nodeId, detail) ->
+                        put(nodeId, JsonPrimitive(detail))
+                    }
+                },
+            )
+        },
+    )
+}
+
+/**
+ * `POST /v1/dev/pairing/decision {nodeId, approve}` —— 仅开发可用：代替人点一下批准/拒绝。
+ *
+ * 存在的理由：这条链有一半在人手上（点批准）。没有它，无鼠标环境（自动化、CI、真机排障）
+ * 永远验不到「批准之后对端真的被放行」。**它不改写信任本身** —— 批准只落一个 nodeId，
+ * 对端下一次自证仍要过公钥指纹那关（见 `LuciolaTransportFactory.approveSecretlessPairing`）。
+ */
+internal fun ControlPlane.devPairingDecision(exchange: HttpExchange) {
+    val admin = devicePairing
+    if (admin == null) {
+        respond(exchange, 503, errorJson("pairing-admin-unavailable", "这个宿主没有接设备接入管理面"))
+        return
+    }
+    val obj = readJsonObject(exchange) ?: return
+    val nodeId = obj["nodeId"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
+    val approve = obj["approve"]?.jsonPrimitive?.booleanOrNull
+    if (nodeId.isEmpty() || approve == null) {
+        respond(exchange, 400, errorJson("bad-request", "需要 nodeId 与 approve(true/false)"))
+        return
+    }
+    val done = if (approve) admin.approveSecretlessPairing(nodeId) else admin.rejectSecretlessPairing(nodeId)
+    respond(
+        exchange,
+        200,
+        buildJsonObject {
+            put("ok", done)
+            put("nodeId", nodeId)
+            put("approve", approve)
+        },
+    )
 }

@@ -16,6 +16,7 @@ import kotlinx.coroutines.launch
 import com.kapp.tenon.core.protocol.Codec
 import com.kapp.tenon.core.protocol.DecodeResult
 import kotlinx.coroutines.flow.MutableSharedFlow
+import uniffi.luciola_uniffi.identityFingerprint
 import kotlinx.coroutines.flow.SharedFlow
 import uniffi.luciola_uniffi.SecureSession
 import uniffi.luciola_uniffi.SecureSessionListener
@@ -74,6 +75,15 @@ class SecureChannelTransport(
     private val pairingSecretOf: (String, Int) -> ByteArray? = { _, _ -> null },
     /** 本端 Ed25519 公钥(配对帧自证用;由工厂传入)。 */
     private val selfPublicKey: ByteArray = ByteArray(0),
+    /**
+     * 发起侧 TOFU：把首连**学到**的对端公钥写进钉存（`pairPeer` 的 endpoints 同一张表）。
+     *
+     * 「手填地址、什么码都没有」的配对走这条路：没有二维码可扫，发起方没有第二把 key 可
+     * 钉，只能从握手消息 2 里学（[requestPairingByAddress]）。**必须**由调用方落盘——
+     * 不落盘的话学到等于没学，重连退回 deny-by-default。默认 null = 不开放该入口
+     * （deny-by-default 的延伸：没接学习回调的宿主不该悄悄放行无凭据拨号）。
+     */
+    private val learnPeerKey: ((String, Int, ByteArray) -> Unit)? = null,
     /**
      * 会话指纹 → 对端在 registry 里的地址。二进制数据帧(FileChunkFrame)没有 Envelope,
      * 不能靠帧里的 from 归属;只能靠握手出来的指纹反查(TrustStore → nodeId → registry)。
@@ -194,6 +204,9 @@ class SecureChannelTransport(
         /** 入站异步队列的上限帧数：超过它说明下游真的卡死了，如实丢弃并记账。 */
         const val MAX_PENDING_INBOUND = 4096
 
+        /** 「等你批准」时把会话留多久：防的是「人永远不来」把一条会话与接受位永久占住。 */
+        const val PAIRING_APPROVAL_HOLD_MS: Long = 120_000
+
         /**
          * 解析 Rust 引擎在 onMessage 里给出的 socket 来源（"ip:port"）。
          * IPv6 是方括号形式（"[fe80::1]:8080"），去掉括号；解析失败返回 null
@@ -300,7 +313,7 @@ class SecureChannelTransport(
     private val _pairingResults = MutableSharedFlow<PairingResult>(replay = 1, extraBufferCapacity = 16)
 
     /** 发起侧:主机对配对请求的应答(控制帧**不进** Messenger)。 */
-    val pairingResults: SharedFlow<PairingResult> = _pairingResults
+    override val pairingResults: SharedFlow<PairingResult> = _pairingResults
 
     private val listenLock = com.kapp.tenon.core.createCoreLock()
 
@@ -372,12 +385,107 @@ class SecureChannelTransport(
      * 或信道还没连上(调用方退避重试,与普通发送同一套语义)。
      */
     override suspend fun requestPairing(host: String, port: Int, selfNodeId: String): Boolean {
-        val secret = pairingSecretOf(host, port) ?: return false
+        // **没有密钥也要能发**：设备接入 `auto` / `verify` 档走的正是「有公钥、没密钥」这条路，
+        // 帧里 secret 留空，由主机的 `decideSecretless` 裁决（放行 / 问人 / 拒）。
+        //
+        // 旧写法是 `?: return false` —— 那条判断把整条策略路径堵死在发起侧，主机侧做得再全
+        // 也永远收不到申请（现场：`pairPeer` 成功、`frameSent=false`）。
+        val secret = pairingSecretOf(host, port) ?: ByteArray(0)
         if (selfPublicKey.size != PairingFrame.ED25519_PUBLIC_KEY_SIZE) return false
         val frame = PairingFrame.encodeRequest(selfNodeId, selfPublicKey, secret)
         pendingPairing[endpointKey(host, port)] = frame
-        return send(frame, host, port)
+        val sentNow = send(frame, host, port)
+        // 「排队」只有在对端**有公钥**时才算数：没有公钥时 `send` 是在 channelFor 里被
+        // deny-by-default 拒掉的，那种情况下报 true 等于把「未配对」伪装成「已发出」
+        // （旧契约就是靠这条挡住陌生对端的，`initiatorWithoutSecretCannotPair` 钉着它）。
+        val queuedForKnownPeer = pendingPairing.containsKey(endpointKey(host, port)) &&
+            runCatching { peerKey(host, port) != null }.getOrDefault(false)
+        // **排队也算发出去了**：`send` 在会话还没连上时返回 false，而帧已经进了
+        // [pendingPairing]，会话 `connected` 时会被补发一次（见 `channelFor` 的监听器）。
+        // 真机读数：首次拨号到 connected 用了 ~30 秒，而调用方的重试窗口只有几秒 ⇒
+        // 旧写法把「已排队、随后必然送达」报成 `frameSent=false`，界面上看起来像配对失败
+        // （`diag/pairing.json` 与横幅都这么说），而实际上 30 秒后配对是成功的。
+        return sentNow || queuedForKnownPeer
     }
+
+    /**
+     * 「手填地址、什么码都没有」的发起侧入口：**不带**任何预先钉住的公钥拨号（TOFU）。
+     *
+     * 与 [requestPairing] 的差别只在凭据来源——那里从二维码拿对端公钥（`pairPeer` 先钉
+     * 后拨），这里从握手消息 2 **学习**（连接回调里经 [learnPeerKey] 落盘）。帧的排队、
+     * 补发、主机的 `decideSecretless` 裁决（auto 直放 / verify 问人 / whitelist 拒）
+     * 与扫码路径完全同一条。
+     *
+     * 返回值语义与 [requestPairing] 相同：`true` = 帧已排队（对端 key 学习完成前它只能
+     * 排着；`channelForTofu` 的连接回调会在学习落盘后补发）。
+     */
+    override suspend fun requestPairingByAddress(host: String, port: Int, selfNodeId: String): Boolean {
+        if (selfPublicKey.size != PairingFrame.ED25519_PUBLIC_KEY_SIZE) return false
+        if (learnPeerKey == null) return false
+        val key = endpointKey(host, port)
+        val frame = PairingFrame.encodeRequest(selfNodeId, selfPublicKey, ByteArray(0))
+        pendingPairing[key] = frame
+        channelForTofu(host, port, key)
+        // **立即尝试一次真发送**（与 [requestPairing] 相同的口径）：会话已在（重试轮回、
+        // 或学习回调刚连上）时排队帧不会被「connected」事件补发——补发只挂在状态变迁上。
+        // 没有这一次 send，批准后的重试就会一直排队、永远到不了主机。
+        send(frame, host, port)
+        // TOFU 下「排队即受理」：会话由连接回调驱动的学习 + 补发接管（autoReconnect=true
+        // 会一直拨到通为止），与扫码路径「排队也算发出」同一口径。
+        return true
+    }
+
+    /** 供同模块测试观察钉存（TOFU 学习是否落盘）；产品代码请走 [pairPeer] 侧的账本。 */
+    internal fun pinnedKeyForTest(host: String, port: Int): ByteArray? = peerKey(host, port)
+
+    /** [channelFor] 的 TOFU 变体：不带钉住 key 建**外拨**会话，连上后学习对端身份。 */
+    private fun channelForTofu(host: String, port: Int, key: String): SecureSession =
+        outbound.computeIfAbsent(key) {
+            val learn = learnPeerKey
+                ?: throw IllegalStateException("TOFU dial requires learnPeerKey — deny by default")
+            SecureSession(identitySeed).also { session ->
+                session.connect(
+                    listOf(host), port.toUShort(), /*pinned=*/null, /*autoReconnect=*/true,
+                    object : SecureSessionListener {
+                        override fun onState(state: String, detail: String?) {
+                            recordState("tofu", key, state, detail)
+                            println("[xport] tofu " + key + " state=" + state + " detail=" + detail)
+                            if (state == "connected") {
+                                // **先落盘、后补发**：帧到达主机时本端必须已经能回答
+                                // 「我认识它」（否则重连循环里每一次都重新学习一遍）。
+                                session.peerPublicKey()?.let { learned ->
+                                    if (learned.size == PairingFrame.ED25519_PUBLIC_KEY_SIZE) {
+                                        learn(host, port, learned)
+                                    }
+                                }
+                                pendingPairing.remove(key)?.let { queued ->
+                                    runCatching { session.send(queued) }
+                                }
+                            }
+                            // 与 [channelFor] 同一条纪律：不把会话摘掉。autoReconnect 自己
+                            // 会退避重连；摘掉会造第二条会话顶替（见 channelFor 的长注释）。
+                        }
+
+                        override fun onMessage(
+                            message: ByteArray,
+                            peerFingerprint: String,
+                            remoteAddr: String?,
+                        ) {
+                            // 与 [channelFor] 的 onMessage 同一份语义：配对应答走
+                            // [pairingResults]，其余照常进 Messenger。抄成两份没办法——
+                            // 两处各持一个不同的 host/port 局部量（kotlin 闭包捕获）。
+                            if (PairingFrame.looksLikePairingFrame(message)) {
+                                PairingFrame.decodeReply(message)?.let { (ok, reason) ->
+                                    _pairingResults.tryEmit(PairingResult(ok, reason, host, port))
+                                }
+                                return
+                            }
+                            emitOrBlock(ReceivedDatagram(message, host, port))
+                        }
+                    },
+                )
+            }
+        }
 
     /** 诊断：send 内那两次 JNA 调用各自的耗时（us），每 10s 一行。 */
     private var probeCalls = 0
@@ -538,6 +646,10 @@ class SecureChannelTransport(
         @Volatile
         private var sessionFingerprint: String? = null
 
+        /** 这条入站会话正在「等本机的人批准」（[holdForApproval] 置位）。 */
+        @Volatile
+        private var awaitingApproval: Boolean = false
+
         /** 该会话已解析出的对端地址(二进制帧与 Envelope 帧共用,解析一次缓存)。 */
         @Volatile
         private var inboundPeer: PeerEndpoint? = null
@@ -551,9 +663,13 @@ class SecureChannelTransport(
                     trusted = detail != null && isTrustedFingerprint(detail)
                     println("[xport] in trusted=" + trusted + " fp=" + detail + " pairing=" + (pairing != null))
                     if (!trusted) {
-                        if (pairing?.expectedPairSecret() == null) {
+                        // 两道门：有二维码密钥 ⇒ 走三关；没有密钥但宿主接受无密钥自证
+                        // （设备接入 auto/verify 档）⇒ 也要留窗口，否则那条申请帧根本到不了。
+                        val secretPathOpen = pairing?.expectedPairSecret() != null
+                        val policyPathOpen = pairing?.acceptsSecretlessRequests() == true
+                        if (!secretPathOpen && !policyPathOpen) {
                             rejectedInbound += 1
-                            runCatching { session.disconnect() }
+                            runCatching { session.closeCurrentChannel() }
                         } else {
                             // 陌生对端:给它一个窗口用配对帧自证;窗口内不许进应用层。
                             armPendingDeadline()
@@ -576,7 +692,7 @@ class SecureChannelTransport(
             remoteAddr: String?,
         ) {
             if (PairingFrame.looksLikePairingFrame(message)) {
-                handlePairingFrame(message)
+                handlePairingFrame(message, remoteAddr)
                 return
             }
             // 未通过信任手续的对端,一帧业务数据都不许进入应用层。
@@ -626,13 +742,68 @@ class SecureChannelTransport(
             emitOrBlock(ReceivedDatagram(message, endpoint.host, endpoint.port))
         }
 
-        /** 配对帧的三关校验:会话指纹绑定公钥、二维码里的 secret、再落信任。 */
-        private fun handlePairingFrame(bytes: ByteArray) {
+        /**
+         * 配对帧校验。**两条路，一条判据**：
+         *
+         *  - 带密钥（二维码里那一枚）⇒ 三关：公钥指纹钉住会话、密钥常量时间比对、落信任；
+         *  - 不带密钥（设备接入 `auto` / `verify` 档）⇒ 公钥指纹照旧必须与会话一致（这条
+         *    是自证的地基，两条路都做），再交给 `decideSecretless` 裁决：放行 / 问人 / 拒。
+         *
+         * 第二条路默认**不存在**（`acceptsSecretlessRequests()` 默认 false）：没接这一层的
+         * 宿主不会因为传输层多了分支就悄悄放宽。
+         */
+        private fun handlePairingFrame(bytes: ByteArray, remoteHost: String?) {
             val admission = pairing ?: return
-            val expected = admission.expectedPairSecret() ?: return
             val request = PairingFrame.decodeRequest(bytes) ?: return
             val fingerprint = sessionFingerprint ?: return
 
+            // 自证的地基：帧里的公钥必须就是这条加密会话握手出来的那一枚。
+            val actual = runCatching { identityFingerprint(request.publicKey) }.getOrNull()
+            if (actual == null || actual != fingerprint) {
+                deny(request.nodeId, if (actual == null) "bad_public_key" else "fingerprint_mismatch")
+                return
+            }
+
+            if (request.secret.isEmpty()) {
+                if (!admission.acceptsSecretlessRequests()) {
+                    deny(request.nodeId, "secretless-not-accepted")
+                    return
+                }
+                when (val verdict = admission.decideSecretless(request.nodeId, request.publicKey, remoteHost)) {
+                    is SecretlessPairingVerdict.Trust -> {
+                        val accepted = runCatching {
+                            admission.onPaired(request.nodeId, request.publicKey, request.name)
+                        }
+                        if (accepted.isFailure) {
+                            deny(request.nodeId, "trust_persist_failed")
+                            return
+                        }
+                        trusted = true
+                        runCatching { session.send(PairingFrame.encodeReply(true)) }
+                    }
+                    is SecretlessPairingVerdict.AskHuman -> {
+                        runCatching {
+                            admission.onPairingRequested(
+                                request.nodeId,
+                                request.publicKey,
+                                request.name,
+                                remoteHost,
+                            )
+                        }
+                        // 回一条带理由码的应答，但**不断开会话**（与 [deny] 的区别就在这）。
+                        //
+                        // 为什么不能断：人可能要看几秒才点「批准」。断开之后对端每次重试都要
+                        // 重新建链，而本机的接受循环一次只收一条（上一条还挂着 pending 期限），
+                        // 于是「重试」全被自己的旧会话挡住 —— 真机读数：25 秒里宿主只收到 1 次申请。
+                        // 留着会话，对端每 3 秒重发的那一帧会走同一条链，批准之后立刻生效。
+                        holdForApproval(request.nodeId, "awaiting-approval")
+                    }
+                    is SecretlessPairingVerdict.Refuse -> deny(request.nodeId, verdict.reason)
+                }
+                return
+            }
+
+            val expected = admission.expectedPairSecret() ?: return
             val failure = PairingFrame.validate(request, fingerprint, expected)
             if (failure != null) {
                 deny(request.nodeId, failure)
@@ -647,6 +818,24 @@ class SecureChannelTransport(
             runCatching { session.send(PairingFrame.encodeReply(true)) }
         }
 
+        /**
+         * 「等你批准」：回一帧应答但**保持会话**，并重挂一个更长的期限。
+         *
+         * 期限不是防对端，而是防「人永远不来」把一条会话和接受位永久占住。
+         */
+        private fun holdForApproval(nodeId: String?, reason: String) {
+            awaitingApproval = true
+            runCatching { session.send(PairingFrame.encodeReply(false, reason)) }
+            drainerScope.launch {
+                delay(PAIRING_APPROVAL_HOLD_MS)
+                if (!trusted) {
+                    rejectedInbound += 1
+                    runCatching { pairing?.onPairingRejected(nodeId, "pairing_approval_timeout") }
+                    runCatching { session.closeCurrentChannel() }
+                }
+            }
+        }
+
         private fun deny(nodeId: String?, reason: String) {
             rejectedInbound += 1
             runCatching { pairing?.onPairingRejected(nodeId, reason) }
@@ -654,7 +843,7 @@ class SecureChannelTransport(
             // 先让应答出队再断:立刻 disconnect 会把排队中的 deny 帧丢掉,对端只能看到"超时"。
             drainerScope.launch {
                 delay(200)
-                runCatching { session.disconnect() }
+                runCatching { session.closeCurrentChannel() }
             }
         }
 
@@ -665,7 +854,7 @@ class SecureChannelTransport(
                 if (!trusted) {
                     rejectedInbound += 1
                     runCatching { pairing?.onPairingRejected(null, "pairing_timeout") }
-                    runCatching { session.disconnect() }
+                    runCatching { session.closeCurrentChannel() }
                 }
             }
         }

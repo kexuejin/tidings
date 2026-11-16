@@ -6,6 +6,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -34,6 +37,8 @@ import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.Image
@@ -91,6 +96,11 @@ import com.kapp.tenon.generated.resources.banner_remote_relay_cleared
 import com.kapp.tenon.generated.resources.banner_remote_relay_configured
 import com.kapp.tenon.generated.resources.banner_agent_ack_not_confirmed
 import com.kapp.tenon.generated.resources.banner_agent_ack_send_failed
+import com.kapp.tenon.generated.resources.banner_scan_camera_busy
+import com.kapp.tenon.generated.resources.banner_pairing_not_sent
+import com.kapp.tenon.generated.resources.banner_pairing_rejected
+import com.kapp.tenon.generated.resources.banner_pairing_not_ready
+import com.kapp.tenon.generated.resources.banner_scan_generic
 import com.kapp.tenon.generated.resources.banner_scan_failed
 import com.kapp.tenon.generated.resources.banner_scan_range_added
 import com.kapp.tenon.generated.resources.banner_scan_range_invalid
@@ -375,6 +385,22 @@ fun SectionHeader(text: String, modifier: Modifier = Modifier, action: (@Composa
  * 控制器只说"发生了什么"（`BindFailed(port, reason)`），文案在这里落地 ——
  * 这样控制器不必、也不能去碰 `stringResource`。
  */
+/**
+ * 扫码失败的用户可见文案。
+ *
+ * **不印内部码**：`pairing-frame-not-sent` / `luciola-pair-rejected` 这类字符串是给我们排障用的，
+ * 印在界面上等于让用户读日志（真机截图就是「扫描失败: pairing-frame-not-sent」）。
+ * 码本身仍然落在 `diag/pairing.json` 里，需要时读得到。
+ */
+@Composable
+private fun scanFailureText(detail: String): String = when (detail) {
+    "camera is busy", "decoder is busy" -> stringResource(Res.string.banner_scan_camera_busy)
+    "pairing-frame-not-sent" -> stringResource(Res.string.banner_pairing_not_sent)
+    "luciola-pair-rejected" -> stringResource(Res.string.banner_pairing_rejected)
+    "luciola-host-missing", "runtime-not-started" -> stringResource(Res.string.banner_pairing_not_ready)
+    else -> stringResource(Res.string.banner_scan_generic)
+}
+
 @Composable
 fun bannerText(message: BannerMessage): String = when (message) {
     BannerMessage.EmptyHost -> stringResource(Res.string.disc_invalid_host)
@@ -407,7 +433,7 @@ fun bannerText(message: BannerMessage): String = when (message) {
     BannerMessage.CameraPermissionDenied -> stringResource(Res.string.banner_camera_denied)
     BannerMessage.NotificationPermissionDenied -> stringResource(Res.string.banner_notification_denied)
     BannerMessage.CameraUnavailable -> stringResource(Res.string.banner_camera_unavailable)
-    is BannerMessage.ScanFailed -> stringResource(Res.string.banner_scan_failed, message.detail)
+    is BannerMessage.ScanFailed -> scanFailureText(message.detail)
     BannerMessage.InvalidQrCode -> stringResource(Res.string.banner_invalid_qr)
     BannerMessage.NoQrInImage -> stringResource(Res.string.banner_no_qr_in_image)
     BannerMessage.UnknownError -> stringResource(Res.string.error_unknown)
@@ -576,9 +602,37 @@ fun screenReasonText(reason: String): String = when (reason) {
  * 顶部横幅：离线积压、绑定失败、保存结果都走这里。
  *
  * 三种色调都给了明确的"下一步"，因为一个只说"出错了"的横幅在移动端等于没有出路。
+ *
+ * ## 它是**浮层**，不是布局里的一行
+ *
+ * 以前它是一张普通 Surface：调用点把它塞在标题与列表之间，横幅一出现，下面的内容整体
+ * 被顶下去（真机截图：消息页扫出一次失败，筛选条与会话列表一起跳了一格）。横幅是
+ * **临时反馈**，不该改变页面结构 —— 所以这里用 [Popup] 浮在内容之上，父布局拿到的
+ * 高度是 0，列表不动。
+ *
+ * 代价与边界：Popup 是独立窗口，点击不会穿透（这是想要的）；它也不参与父级滚动，
+ * 所以横幅始终贴在顶部安全区下方。
  */
 @Composable
 fun AppBanner(banner: BannerUi, onDismiss: () -> Unit, modifier: Modifier = Modifier) {
+    // 贴**底部**而不是顶部：顶部浮层会压住页面标题（真机第一版就是这样，「消息」被盖掉半行），
+    // 而底部是 snackbar 的惯用位置 —— 临时反馈盖住导航条几秒，比盖住页面身份更容易接受。
+    Popup(
+        alignment = Alignment.BottomCenter,
+        properties = PopupProperties(focusable = false),
+    ) {
+        AppBannerSurface(
+            banner = banner,
+            onDismiss = onDismiss,
+            modifier = modifier
+                .windowInsetsPadding(WindowInsets.navigationBars)
+                .padding(LocalAppSpacing.current.md),
+        )
+    }
+}
+
+@Composable
+private fun AppBannerSurface(banner: BannerUi, onDismiss: () -> Unit, modifier: Modifier = Modifier) {
     val sp = LocalAppSpacing.current
     val container = when (banner.tone) {
         // Info 横幅是"一块次级表面"，不是小控件 → `--surface-2`。

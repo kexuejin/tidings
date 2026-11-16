@@ -50,27 +50,50 @@ public data class LuciolaQrInfo(
             return LuciolaQrInfo(base64UrlEncode(publicKey), base64UrlEncode(secret))
         }
 
+        /**
+         * 只带公钥的码（没有配对密钥）。
+         *
+         * 用途是设备接入的 `auto` / `verify` 档：扫码方拿到公钥就能建加密会话，
+         * 但没有密钥 ⇒ 走宿主策略判定，而不是「扫过码就自动全信」。
+         */
+        public fun ofPublicKeyOnly(publicKey: ByteArray): LuciolaQrInfo? {
+            if (publicKey.size != ED25519_PUBLIC_KEY_SIZE) return null
+            return LuciolaQrInfo(base64UrlEncode(publicKey), "")
+        }
+
         internal const val ED25519_PUBLIC_KEY_SIZE = 32
         internal const val PAIR_SECRET_BYTES = 16
     }
 }
 
-/** 编成线上的 `"<公钥 b64url>:<配对密钥 b64url>"`;非法长度返回 null（宁可不写）。 */
+/**
+ * 编成线上的 `"<公钥 b64url>:<配对密钥 b64url>"`；非法长度返回 null（宁可不写）。
+ *
+ * **只带公钥**（`secret` 为空）是合法形态：那是「设备接入 auto/verify 档」的码 ——
+ * 对端拿到公钥就能拨号，密钥留空 ⇒ 自证帧里不带密钥 ⇒ 由主机的 `decideSecretless` 裁决
+ * （同网段自动放行 / 问人 / 白名单拒）。写成一个裸公钥段，不带冒号。
+ */
 internal fun encodeLuciolaQrInfo(info: LuciolaQrInfo): String? {
     val publicKey = base64UrlDecode(info.publicKey) ?: return null
-    val secret = base64UrlDecode(info.secret) ?: return null
     if (publicKey.size != LuciolaQrInfo.ED25519_PUBLIC_KEY_SIZE) return null
+    if (info.secret.isEmpty()) return info.publicKey
+    val secret = base64UrlDecode(info.secret) ?: return null
     if (secret.size != LuciolaQrInfo.PAIR_SECRET_BYTES) return null
     return info.publicKey + ":" + info.secret
 }
 
-/** [encodeLuciolaQrInfo] 的逆;任何一段解不出来就返回 null（只丢这一段,不废整张码）。 */
+/**
+ * [encodeLuciolaQrInfo] 的逆；任何一段解不出来就返回 null（只丢这一段，不废整张码）。
+ *
+ * 一段（无冒号）= 只带公钥，`secret` 归一成空串。
+ */
 internal fun decodeLuciolaQrInfo(raw: String): LuciolaQrInfo? {
     val parts = raw.split(':')
-    if (parts.size != 2) return null
+    if (parts.size !in 1..2) return null
     val publicKey = base64UrlDecode(parts[0]) ?: return null
-    val secret = base64UrlDecode(parts[1]) ?: return null
     if (publicKey.size != LuciolaQrInfo.ED25519_PUBLIC_KEY_SIZE) return null
+    if (parts.size == 1) return LuciolaQrInfo(base64UrlEncode(publicKey), "")
+    val secret = base64UrlDecode(parts[1]) ?: return null
     if (secret.size != LuciolaQrInfo.PAIR_SECRET_BYTES) return null
     return LuciolaQrInfo(base64UrlEncode(publicKey), base64UrlEncode(secret))
 }

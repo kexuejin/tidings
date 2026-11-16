@@ -5,6 +5,7 @@ import com.kapp.tenon.core.transport.DatagramTransport
 import com.kapp.tenon.core.transport.DiscoveryEngine
 import com.kapp.tenon.core.transport.PeerRegistry
 import com.kapp.tenon.core.transport.ScreenChannelHost
+import com.kapp.tenon.core.protocol.DeviceTrustPolicies
 import com.kapp.tenon.core.protocol.Profile
 import com.kapp.tenon.domain.LuciolaQrInfo
 import kotlinx.coroutines.CoroutineScope
@@ -36,6 +37,26 @@ interface LuciolaHost {
      * 宿主据此 lazily 建工厂（身份与信任库在宿主自己的目录里）。
      */
     fun configure(profile: Profile, udpPort: Int)
+
+    /**
+     * 设备接入信任模式：`verify`（默认）/ `auto` / `whitelist`。见 `DeviceTrustPolicies`。
+     *
+     * 它回答的是「**没有二维码密钥的入站配对**该怎么办」，与「这台设备能用我的哪些 agent」
+     * （`AgentGrantPolicies`）是两套。默认实现给最严档：没接这一层的宿主不该被默认放宽。
+     */
+    fun deviceTrustPolicy(): String = DeviceTrustPolicies.VERIFY
+
+    /** 切档。取值不在三档之内返回 false（**不静默归一**：界面点 A、判据读 B 是本仓栽过的静默）。 */
+    fun setDeviceTrustPolicy(raw: String): Boolean = false
+
+    /** 待处理的「无密钥配对申请」：nodeId → `展示名|来源地址`。空 = 没人申请。 */
+    fun pendingPairingRequests(): Map<String, String> = emptyMap()
+
+    /** 批准一条申请。只记 nodeId —— 公钥必须来自对端自己那次握手，界面不能替它预置。 */
+    fun approveSecretlessPairing(nodeId: String): Boolean = false
+
+    /** 拒绝一条申请（对端会在自己的重试窗口里放弃）。 */
+    fun rejectSecretlessPairing(nodeId: String): Boolean = false
 
     /** 传输面装配（NodeRuntime 注入用）。 */
     fun transportFactory(): ((PeerRegistry) -> DatagramTransport)?

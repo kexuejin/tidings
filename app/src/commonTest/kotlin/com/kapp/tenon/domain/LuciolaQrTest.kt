@@ -83,4 +83,33 @@ class LuciolaQrTest {
         assertTrue(parsed.candidates.isNotEmpty())
         assertEquals(info.publicKey, parsed.luciola?.publicKey)
     }
+
+    // ---------------------------------------------------------------- 只带公钥的码
+
+    @Test
+    fun publicKeyOnlyCodeRoundTripsWithoutASecret() {
+        val only = assertNotNull(LuciolaQrInfo.ofPublicKeyOnly(publicKey))
+        assertEquals("", only.secret)
+
+        val encoded = assertNotNull(encodeLuciolaQrInfo(only))
+        assertEquals(only.publicKey, encoded, "只带公钥时不写冒号，省一个字节也少一种歧义")
+
+        val decoded = assertNotNull(decodeLuciolaQrInfo(encoded))
+        assertEquals(only.publicKey, decoded.publicKey)
+        assertEquals("", decoded.secret, "没有密钥就是空串，不许编一个出来")
+
+        // 走一遍整张码：解析出来仍是「有公钥、无密钥」。
+        val text = assertNotNull(payload(luciola = only))
+        val parsed = assertNotNull(parseQr(text) as? ParsedQr.LanPeer)
+        assertEquals(only.publicKey, parsed.luciola?.publicKey)
+        assertEquals("", parsed.luciola?.secret)
+    }
+
+    @Test
+    fun publicKeyOnlyRejectsBadShapes() {
+        assertNull(LuciolaQrInfo.ofPublicKeyOnly(ByteArray(31)))
+        assertNull(decodeLuciolaQrInfo(info.publicKey + ":"), "空密钥段不是合法编码")
+        assertNull(decodeLuciolaQrInfo(info.publicKey + ":" + info.secret + ":extra"))
+        assertNull(decodeLuciolaQrInfo("!!!not-base64!!!"))
+    }
 }

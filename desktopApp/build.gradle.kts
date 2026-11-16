@@ -174,6 +174,22 @@ compose.desktop {
             "-XX:MaxMetaspaceSize=128m",
         )
 
+        // **安装包里的 flavor 必须显式写进 java-options。**
+        //
+        // 下面 `tasks.withType<JavaExec>` 只覆盖 `:desktopApp:run` 这一条路径；jpackage
+        // 产物的启动参数来自本块的 `jvmArgs`，那条注入到不了它。于是 `Tenon-Debug.app`
+        // 会以 **release** 身份启动 —— 打包名/bundle id/Dock 名都带 Debug，运行时却用
+        // 8788 + 17878 + `_relay._udp` 和正式版同一个数据目录。后果有两级：
+        //
+        //   1. 正式版在跑时，debug 包拿到同一个单实例锁，直接「转交意图后退出」——
+        //      表现是「点了没反应」；
+        //   2. 正式版没跑时，debug 包会**写正式版的库**，debug 沙箱形同虚设。
+        //
+        // 两者都不会有任何报错，正是本仓最贵的那一类（发送侧正常、隔离静默失效）。
+        if (isDesktopDebug) {
+            jvmArgs += "-Dtenon.flavor=debug"
+        }
+
         nativeDistributions {
             // luciola 的 uniffi 原生库随安装包分发:运行时从
             // compose.application.resources.dir/native 找到它(见 DesktopLuciolaHost)。

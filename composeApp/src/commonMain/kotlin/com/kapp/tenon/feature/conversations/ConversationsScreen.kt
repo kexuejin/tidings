@@ -368,20 +368,7 @@ fun ConversationsScreen(
         )
         TitleBarDivider()
 
-        chromeSlice.banner?.let {
-            // 顶距 14 = 原型 `.pad{padding:14px 16px 16px}`（relay.html:780）；底距 14 =
-            // 原型横幅的内联 `margin-bottom:14px`（screenAgents 同款手法）。
-            AppBanner(
-                it,
-                onDismissBanner,
-                Modifier.padding(
-                    start = LocalAppSpacing.current.lg,
-                    top = LocalAppSpacing.current.lg14,
-                    end = LocalAppSpacing.current.lg,
-                    bottom = LocalAppSpacing.current.lg14,
-                ),
-            )
-        }
+        // 横幅由组合根的全局宿主统一画（见 App.kt 的 RelayApp）。
 
         // 未读轴上**整条不画**待发横幅：原型 `m01c-home-unread` 里没有它。
         // 不是"画了但被折叠"—— 那一屏要钉的就是"只看未读时，屏幕纵向空间全给列表"，

@@ -53,6 +53,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.kapp.tenon.domain.LuciolaQrInfo
 import com.kapp.tenon.domain.PeerCandidateTypes
 import com.kapp.tenon.domain.model.WorkspaceUi
 import com.kapp.tenon.domain.qrCandidatesFor
@@ -298,6 +299,8 @@ public fun ConversationsPane(
             nodeId = settingsSlice.settings.nodeId,
             // task-86：直通码也必须带 pin，否则手机建不出公网 TLS 目标。
             tlsPin = nodeSlice.network.selfTlsPin,
+            // 本构建信任根在 luciola 段（与 pin 互斥，builder 取舍）。
+            luciola = nodeSlice.network.luciolaQr,
             // 带昵称：扫完立刻是真名，不是 node-a1b2c3d4。
             nick = settingsSlice.settings.nick,
             onDismiss = { showWsQrFor = null },
@@ -383,6 +386,7 @@ public fun ConversationsPane(
     ) {
         DesktopEmptyOnboarding(
             selfTlsPin = nodeSlice.network.selfTlsPin,
+            luciolaQr = nodeSlice.network.luciolaQr,
             nodeId = settingsSlice.settings.nodeId,
             nick = settingsSlice.settings.nick,
             // **用「宣告」那份，不是「本地」那份**：后者刻意过滤掉 utun / feth / tailscale
@@ -630,6 +634,13 @@ private fun DesktopEmptyOnboarding(
     port: Int,
     /** 本机 TLS pin：必须印进码里（task-86），否则手机建不出公网 TLS 目标。 */
     selfTlsPin: String?,
+    /**
+     * luciola 配对段（公钥 + 配对密钥）。
+     *
+     * 本构建 luciola 是**唯一传输**，信任根就在这一段；漏了它这张码只剩地址与（可选的）pin，
+     * 对端扫完只能"登记地址"，配对帧发不出去。与 [selfTlsPin] 互斥，builder 负责取舍。
+     */
+    luciolaQr: LuciolaQrInfo? = null,
     onPair: () -> Unit,
     onOpenAgentConsole: (() -> Unit)?,
     modifier: Modifier = Modifier,
@@ -643,11 +654,19 @@ private fun DesktopEmptyOnboarding(
         port = port,
         tlsPin = selfTlsPin,
         nick = nick,
+        luciola = luciolaQr,
     )
     // 有公网 v6 才提示"要放行入站"：没有公网地址时提示它只会变成一句无用的噪声。
-    // 判据取**二维码里真的带着**的那一份：预算必须与上面那次生成**同一组参数**（含 pin 与昵称），
-    // 否则裁剪结果会不一样，提示就会指着一个已经被裁掉的候选说"要放行它"。
-    val hasPublicV6 = qrCandidatesFor(addresses, port, nodeId, tlsPin = selfTlsPin, nick = nick)
+    // 判据取**二维码里真的带着**的那一份：预算必须与上面那次生成**同一组参数**（含 pin、
+    // 昵称与 luciola 段），否则裁剪结果会不一样，提示就会指着一个已经被裁掉的候选说"要放行它"。
+    val hasPublicV6 = qrCandidatesFor(
+        addresses,
+        port,
+        nodeId,
+        tlsPin = selfTlsPin,
+        nick = nick,
+        luciola = luciolaQr,
+    )
         .any { it.type == PeerCandidateTypes.PUBLIC_V6 }
     // 编码器对超长内容抛异常（它拒绝截断），地址为空时 payload 也是 null：两种情况都不画码。
     val code = payload?.let { runCatching { QrEncoder.encode(it) }.getOrNull() }

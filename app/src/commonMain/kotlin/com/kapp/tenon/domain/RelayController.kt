@@ -10,6 +10,7 @@ import com.kapp.tenon.core.fs.use
 import com.kapp.tenon.core.ioDispatcher
 import com.kapp.tenon.core.nowMillis
 import com.kapp.tenon.core.protocol.AssistantNoticeClamper
+import com.kapp.tenon.core.protocol.DeviceTrustPolicies
 import com.kapp.tenon.core.protocol.AssistantQuestNotice
 import com.kapp.tenon.core.protocol.toProtocolAgentState
 import com.kapp.tenon.core.protocol.CodecWire
@@ -101,6 +102,15 @@ const val APP_VERSION: String = "relay-0.1.0"
  *   确认框至少能说出「要与哪一条地址配对」，而不是一句含糊的"某个节点"；
  * - [kind]：`lan-peer` / `remote-relay`；null = 解析不出（确认框如实说解析不出）。
  */
+/** 等宿主裁决的上限（人可能不在屏幕前；超过就不再空转）。 */
+private const val PAIRING_APPROVAL_WAIT_MS: Long = 90_000
+
+/** 「等你批准」期间的重试间隔。取 3 秒：人点完到下一次重发，用户感知在"立刻就通"的范围内。 */
+private const val PAIRING_RETRY_INTERVAL_MS: Long = 3_000
+
+/** 宿主侧「无密钥申请已登记，等你批准」的理由码（与 `SecureChannelTransport` 的一致）。 */
+private const val PAIRING_AWAITING_APPROVAL: String = "awaiting-approval"
+
 data class ExternalPairingPreview(
     val nodeId: String?,
     val nick: String?,
@@ -360,6 +370,18 @@ class RelayController(
      * 供 `adb shell run-as com.kapp.tenon cat files/relay/diag/link.json` 读取。
      */
     val linkDiagnosticsPath: String get() = pathJoin(dataDirectory, "diag", "link.json")
+
+    /**
+     * 手机侧**配对**诊断文件的路径：`<dataDir>/diag/pairing.json`（整份重写，最后一次结果）。
+     *
+     * 为什么单独一份、而不是并进 `link.json`：配对发生在「扫完码那一刻」，与长连接拨号是两条
+     * 独立的阶段；掺在链路读数里会让「到底钉住了没有」永远要靠时间顺序去猜。真机现场是
+     * **点了「允许配对」之后界面什么都不发生** —— 没有这一份，只能靠翻日志猜是哪一步断的。
+     *
+     * 只写事实（谁、哪一步、成没成），不写凭据：不含公钥、不含配对密钥。
+     * 读法：`adb shell run-as com.kapp.tenon.debug cat files/relay/diag/pairing.json`
+     */
+    val pairingDiagnosticsPath: String get() = pathJoin(dataDirectory, "diag", "pairing.json")
     val cacheDirectory: String = platform.dataDirectory.cacheDirectory()
 
     fun activeRuntime(): NodeRuntime? = runtime
@@ -2442,6 +2464,46 @@ class RelayController(
         }
     }
 
+    /**
+     * 落一次配对结果（整份重写，只留最后一次）。
+     *
+     * 形状见 [pairingDiagnosticsPath] 的 KDoc：三阶段各自一个布尔，不再塌成一句
+     * 「配对被拒」。**不写凭据** —— 公钥与配对密钥都不进这个文件。
+     */
+    private fun recordPairingOutcome(
+        nodeId: String?,
+        host: String,
+        port: Int,
+        pairOk: Boolean,
+        frameSent: Boolean,
+    ) {
+        runCatching {
+            val stage = when {
+                !pairOk -> "pin-rejected"
+                !frameSent -> "frame-not-sent"
+                else -> "frame-sent"
+            }
+            val text = buildString {
+                append("{\"at\":").append(nowMillis())
+                append(",\"peer\":\"").append(nodeId.orEmpty()).append('"')
+                append(",\"host\":\"").append(host).append('"')
+                append(",\"port\":").append(port)
+                append(",\"pairPeerOk\":").append(pairOk)
+                append(",\"frameSent\":").append(frameSent)
+                append(",\"stage\":\"").append(stage).append('"')
+                append('}')
+            }
+            val directory = pathJoin(dataDirectory, "diag")
+            makeDirectories(directory)
+            // 与 link.json 同一条纪律：整份重写要**先删再建**（append 句柄 + unlink 的坑）。
+            deleteFile(pairingDiagnosticsPath)
+            openRandomAccess(pairingDiagnosticsPath, forWrite = true).use { file ->
+                val bytes = text.encodeToByteArray()
+                file.append(bytes, bytes.size)
+            }
+        }
+    }
+
     private fun onNetworkChanged(snapshot: NetworkSnapshot) {
         _state.update {
             it.copy(
@@ -2686,6 +2748,68 @@ class RelayController(
     fun previewExternalPairing(raw: String): ExternalPairingPreview? =
         parseExternalPairingPreview(raw, _state.value.network.localAddresses)
 
+    /**
+     * 等宿主的配对裁决，并在「等你批准」期间**持续重试**（最多 [PAIRING_APPROVAL_WAIT_MS]）。
+     *
+     * 三种结局分开处理：
+     *  - `accepted` ⇒ 落一条成功读数，结束；
+     *  - `awaiting-approval` ⇒ 隔 [PAIRING_RETRY_INTERVAL_MS] 重发一次自证帧（人一批准，
+     *    下一次重发就会被放行）；
+     *  - 其它理由（密钥错 / 白名单拒） ⇒ 记一条失败读数后结束，不再空转。
+     *
+     * 不在这里读秒表等结果流的原因：`pairingResults` 是 replay=1 的 SharedFlow，
+     * 宿主可能在我们订阅之前就回了 —— 所以循环里「先看一次当前值，再退避重试」，
+     * 而不是死等下一个事件。
+     */
+    private suspend fun awaitPairingDecision(
+        rt: NodeRuntime,
+        nodeId: String?,
+        host: String,
+        port: Int,
+        /** 等待上限；手填地址（无码）配对传更长的值 —— 那边的人点批准天然比扫码慢。 */
+        waitMs: Long = PAIRING_APPROVAL_WAIT_MS,
+    ) {
+        val results = rt.pairingResults ?: return
+        println("[pair] waiting for the host decision (up to " + waitMs + "ms)")
+        val deadline = nowMillis() + waitMs
+        while (nowMillis() < deadline) {
+            delay(PAIRING_RETRY_INTERVAL_MS)
+            val latest = results.replayCache.lastOrNull()
+            if (latest != null && latest.host == host && latest.port == port) {
+                if (latest.accepted) {
+                    recordPairingOutcome(nodeId, host, port, pairOk = true, frameSent = true)
+                    println("[pair] host accepted")
+                    return
+                }
+                if (latest.reason != PAIRING_AWAITING_APPROVAL) return
+            }
+            runCatching { rt.requestLuciolaPairing(host, port) }
+        }
+    }
+
+    // ------------------------------------------------------- 设备接入信任模式
+
+    /**
+     * 设备接入信任模式（`verify` / `auto` / `whitelist`）—— **与 agent 授权的三档是两套**。
+     * 这一档决定「没有二维码密钥的入站配对该怎么办」，那一档决定「配对之后能用哪些 agent」。
+     */
+    fun deviceTrustPolicy(): String =
+        platform.luciolaHost?.deviceTrustPolicy() ?: DeviceTrustPolicies.VERIFY
+
+    /** 切档；认不出的取值返回 false（不静默归一）。 */
+    fun setDeviceTrustPolicy(raw: String): Boolean =
+        platform.luciolaHost?.setDeviceTrustPolicy(raw) ?: false
+
+    /** 待处理的无密钥配对申请：nodeId → `展示名|来源地址`。 */
+    fun pendingPairingRequests(): Map<String, String> =
+        platform.luciolaHost?.pendingPairingRequests().orEmpty()
+
+    fun approveSecretlessPairing(nodeId: String): Boolean =
+        platform.luciolaHost?.approveSecretlessPairing(nodeId) ?: false
+
+    fun rejectSecretlessPairing(nodeId: String): Boolean =
+        platform.luciolaHost?.rejectSecretlessPairing(nodeId) ?: false
+
     internal suspend fun handleQrCode(raw: String): Boolean {
         // 本机地址表只用来决定"多候选码里先打哪个"（同网段优先 lan、跨网选 public_v6）；
         // 单地址码与手填那条路不看它。
@@ -2737,18 +2861,41 @@ class RelayController(
                 }
                 // luciola 段：把扫码得到的 Ed25519 公钥 + 配对密钥钉进宿主信任库。
                 // 传输面读工厂实时状态，不需要重启节点；失败必须让用户看见（不能静默）。
+                //
+                // **三步各自如实上报**（真机现场：点了「允许配对」，界面什么都没发生）：
+                //   ① 宿主没有 luciola 工厂 → 钉不住；
+                //   ② 钉住了但自证帧发不出去（信道没连上 / secret 没落进工厂）；
+                //   ③ 发出去了，等主机放行。
+                // 以前 ①②合并成一句 `luciola-pair-rejected`，而发帧那一步还被
+                // `runCatching` 连异常一起吞掉 —— 三种不同的故障在界面上长得一模一样。
                 parsed.luciola?.let { info ->
                     val host = platform.luciolaHost
-                    val ok = host != null && host.pairPeer(parsed.host, parsed.port, info)
-                    if (!ok) {
-                        warn(BannerMessage.ScanFailed("luciola-pair-rejected"))
+                    val pairOk = host != null && host.pairPeer(parsed.host, parsed.port, info)
+                    if (!pairOk) {
+                        warn(
+                            BannerMessage.ScanFailed(
+                                if (host == null) "luciola-host-missing" else "luciola-pair-rejected",
+                            ),
+                        )
+                        recordPairingOutcome(parsed.nodeId, parsed.host, parsed.port, pairOk = false, frameSent = false)
                     } else {
-                        // 记住 pin/secret 只是"愿意信它";还要把自证发过去,主机才放行本机。
-                        // 配对帧里的 nodeId 必须是**本机**(发送方)的;拿扫码结果里的对端 id
-                        // 会把主机的信任库记成本机 id(真机实测过一次,entry 全是自己的 id)。
-                        runtime?.let { rt ->
+                        val rt = runtime
+                        if (rt == null) {
+                            warn(BannerMessage.ScanFailed("runtime-not-started"))
+                            recordPairingOutcome(parsed.nodeId, parsed.host, parsed.port, pairOk = true, frameSent = false)
+                        } else {
+                            // 记住 pin/secret 只是"愿意信它";还要把自证发过去,主机才放行本机。
+                            // 配对帧里的 nodeId 必须是**本机**(发送方)的;拿扫码结果里的对端 id
+                            // 会把主机的信任库记成本机 id(真机实测过一次,entry 全是自己的 id)。
                             scope.launch {
-                                runCatching { rt.requestLuciolaPairing(parsed.host, parsed.port) }
+                                val sent = runCatching { rt.requestLuciolaPairing(parsed.host, parsed.port) }
+                                    .getOrElse { false }
+                                recordPairingOutcome(parsed.nodeId, parsed.host, parsed.port, pairOk = true, frameSent = sent)
+                                if (!sent) warn(BannerMessage.ScanFailed("pairing-frame-not-sent"))
+                                // 宿主要么直接放行、要么等它那边的人点一下。**等着的这段时间必须继续重试**：
+                                // 只发一次的话，人点得慢一点就白批（真机：宿主回 `awaiting-approval`，
+                                // 之后双方都没有下一个动作，界面永远停在「没有回应」）。
+                                awaitPairingDecision(rt, parsed.nodeId, parsed.host, parsed.port)
                             }
                         }
                     }
@@ -2862,6 +3009,40 @@ class RelayController(
         runtime?.let { rt -> scope.launch { runCatching { rt.announceTo(host, port) } } }
         _state.update { it.copy(banner = BannerUi(BannerMessage.Handshaking("$host:$port"), BannerTone.Info)) }
         expireHandshakingBanner("$host:$port")
+        // **手填地址 = 无码配对**：能填进来这一笔，用户意图就是"跟这台机器配对"——
+        // 没有二维码可扫（地址是打出来的，不是扫出来的），公钥只能靠首连学习（TOFU）。
+        // 发起侧学到对端身份后，申请帧、主机的批准/拒绝与扫码路径**完全同一条**：
+        // `verify` 档照样要那边的人点一次批准，fail-closed 不因入口不同而放松。
+        scope.launch { pairByAddress(host, port) }
+    }
+
+    /**
+     * 无码配对（发起侧 TOFU）的用户可见反馈：与扫码路径同一组诊断与横幅通道。
+     *
+     * 与扫码路径的差别**只有一处**：没有 `pairPeer`（没有二维码公钥可钉）——学习
+     * 发生在传输层首连回调里（`learnEndpoint`），这里只管"帧发出去没有、批没批"。
+     */
+    private fun pairByAddress(host: String, port: Int) {
+        val rt = runtime
+        if (rt == null) {
+            warn(BannerMessage.ScanFailed("runtime-not-started"))
+            return
+        }
+        scope.launch {
+            val sent = runCatching { rt.requestLuciolaPairingByAddress(host, port) }
+                .getOrElse { false }
+            if (!sent) {
+                warn(BannerMessage.ScanFailed("pairing-frame-not-sent"))
+                return@launch
+            }
+            recordPairingOutcome(nodeId = null, host, port, pairOk = true, frameSent = true)
+            // 对端要么直接放行（auto 档/已批过/早前批过）、要么等它那边的人点一下。
+            // 等待窗口放宽到 10 分钟：**批准落盘后的任何一次重试都会立即放行**
+            // （decideSecretless 的 preApproved 分支），人点得慢一点也不至于让本次
+            // 手填白费 —— 90 秒的扫码窗口对「对面要起身走过去点一下」的场景太短
+            // （真机实测：人点在 90s+35s，手机已停发，批准落了盘却永远等不到重试）。
+            awaitPairingDecision(rt, nodeId = null, host = host, port = port, waitMs = 10 * 60_000)
+        }
     }
 
     /**

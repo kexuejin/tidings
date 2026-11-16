@@ -154,10 +154,14 @@ internal fun SettingsHomeScreen(
                 ),
             verticalArrangement = Arrangement.spacedBy(LocalAppSpacing.current.md),
         ) {
-            chromeSlice.banner?.let { AppBanner(it, onDismissBanner) }
-            chromeSlice.settingsNote?.let { note ->
-                AppBanner(banner = BannerUi(note, BannerTone.Info), onDismiss = onClearNote)
-            }
+        // 失败/告警横幅由组合根的全局宿主统一画（见 App.kt 的 RelayApp）；
+        // 这里只剩「保存回执」这一条 note。**同一时刻最多一条提示**：两条同时出现会在
+        // 屏幕同一位置叠成两层浮层（`AppBanner` 是 Popup），谁也读不全。
+        if (chromeSlice.banner == null) {
+                chromeSlice.settingsNote?.let { note ->
+                    AppBanner(banner = BannerUi(note, BannerTone.Info), onDismiss = onClearNote)
+                }
+        }
 
             // 资料卡入口
             Card(

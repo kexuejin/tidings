@@ -597,6 +597,8 @@ internal fun formatDriverName(key: String): String = when (key.trim().lowercase(
     "codex" -> "Codex CLI"
     "claude" -> "Claude CLI"
     "opencode" -> "OpenCode"
+    "codebuddy" -> "CodeBuddy CLI"
+    "zcode" -> "ZCode CLI"
     "gemini" -> "Gemini CLI"
     else -> key.ifBlank { "" }
 }

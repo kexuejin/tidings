@@ -289,6 +289,9 @@ fun SettingsConnectionSubpage(
                     nodeId = settingsSlice.settings.nodeId,
                     // task-86：**必须**带 pin（公网目标要求 pin != null，fail-closed）。
                     tlsPin = nodeSlice.network.selfTlsPin,
+                    // 本构建 luciola 是唯一传输：信任根在 `l` 段。只带 pin 的码在它上面
+                    // 等于没有信任根（扫完只登记地址）。`p` 与 `l` 互斥，builder 取舍。
+                    luciola = nodeSlice.network.luciolaQr,
                     // 带昵称：对方扫完立刻看见真名，而不是 node-a1b2c3d4。
                     nick = settingsSlice.settings.nick,
                 )

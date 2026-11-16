@@ -3,6 +3,7 @@ package com.kapp.tenon.core.transport
 
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import com.kapp.tenon.core.protocol.DeviceTrustPolicies
 import uniffi.luciola_uniffi.identityFingerprint
 import kotlin.io.encoding.Base64
 import kotlin.io.encoding.ExperimentalEncodingApi
@@ -43,6 +44,32 @@ interface PairingAdmission {
      * 诊断与限流由宿主决定，传输层只保证拒绝。
      */
     fun onPairingRejected(nodeId: String?, reason: String) {}
+
+    /**
+     * 是否接受**不带密钥**的配对请求（设备接入 `auto` / `verify` 档的那一半）。
+     *
+     * 默认 false ⇒ 陌生对端在握手完成时就被断开（今天的 fail-closed 行为，一字不变）。
+     * 返回 true 时传输层留一个窗口收那条自证帧，再由 [decideSecretless] 裁决。
+     */
+    fun acceptsSecretlessRequests(): Boolean = false
+
+    /**
+     * 无密钥自证帧的唯一判据（纯决策，不写状态）。默认直接拒 —— 没接这一层的宿主
+     * 不该因为传输层多了一个分支就悄悄放宽。
+     */
+    fun decideSecretless(
+        nodeId: String,
+        publicKey: ByteArray,
+        remoteHost: String?,
+    ): SecretlessPairingVerdict = SecretlessPairingVerdict.Refuse("secretless-unsupported")
+
+    /** 记录一条「等人批」的申请（`verify` 档）。默认忽略。 */
+    fun onPairingRequested(
+        nodeId: String,
+        publicKey: ByteArray,
+        name: String?,
+        remoteHost: String?,
+    ) {}
 }
 
 /** 发起侧收到的配对结果(主机对 PairingRequest 的应答)。 */
@@ -158,4 +185,52 @@ internal fun constantTimeEquals(a: ByteArray, b: ByteArray): Boolean {
     var diff = 0
     for (i in a.indices) diff = diff or (a[i].toInt() xor b[i].toInt())
     return diff == 0
+}
+
+/**
+ * 无配对密钥的入站配对（TOFU / 自动信任）该怎么处置。
+ *
+ * 只有三档能表达的东西，不要塞第三个数：`AskHuman` 之后是"批准并落信任"，
+ * `Refuse` 之后是"回一条 deny 并断开"，两条结局在传输层是分开的。
+ */
+sealed interface SecretlessPairingVerdict {
+    /** 交给用户点一下（桌面/手机的「待处理设备申请」）。 */
+    data object AskHuman : SecretlessPairingVerdict
+
+    /** 按策略直接放行并落信任（TOFU 首次固定）。 */
+    data object Trust : SecretlessPairingVerdict
+
+    /** 直接拒，理由进 deny 帧与诊断（取值域是英文码，不是句子）。 */
+    data class Refuse(val reason: String) : SecretlessPairingVerdict
+}
+
+/**
+ * 无密钥入站配对的**唯一判据**（纯函数，界面与传输层都只认它）。
+ *
+ * 顺序是刻意的：
+ *  1. **已经信任过** ⇒ 直接放行。重连不该再走一遍审批，否则每次重连都要点一次。
+ *  2. **已经被人批过**（pending 表里的 approve 结果）⇒ 放行。手机的重试窗口只有几秒，
+ *     人点得慢一点时这条才是"批了就能连上"的保证。
+ *  3. 再看策略：
+ *     - [DeviceTrustPolicies.WHITELIST] ⇒ 拒（前两条都没命中，说明它不在名单里）；
+ *     - [DeviceTrustPolicies.AUTO] ⇒ **同网段**放行，跨网段回到「问人」；
+ *     - [DeviceTrustPolicies.VERIFY]（含一切认不出的取值）⇒ 问人。
+ *
+ * `sameLan` 必须是**真的算出来的**（同一 /24 或 /64，见 `isSameLanAddress`），
+ * 不要传"它是局域网候选"这种来自对端自述的标签 —— 那是被审对象自己说的话。
+ */
+fun decideSecretlessPairing(
+    policy: String?,
+    sameLan: Boolean,
+    alreadyTrusted: Boolean,
+    preApproved: Boolean,
+): SecretlessPairingVerdict {
+    if (alreadyTrusted) return SecretlessPairingVerdict.Trust
+    if (preApproved) return SecretlessPairingVerdict.Trust
+    return when (DeviceTrustPolicies.normalize(policy)) {
+        DeviceTrustPolicies.WHITELIST -> SecretlessPairingVerdict.Refuse("policy-whitelist")
+        DeviceTrustPolicies.AUTO ->
+            if (sameLan) SecretlessPairingVerdict.Trust else SecretlessPairingVerdict.AskHuman
+        else -> SecretlessPairingVerdict.AskHuman
+    }
 }

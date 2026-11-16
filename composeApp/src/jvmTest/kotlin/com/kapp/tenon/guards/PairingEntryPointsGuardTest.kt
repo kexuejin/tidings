@@ -163,6 +163,46 @@ class PairingEntryPointsGuardTest {
             "这些印码文件没有把昵称带上：" + offenders + " —— 对方扫完只会看到 node-xxxx 合成名。",
         )
     }
+    /**
+     * 守卫第四件静默的事：**出码点必须把信任根交进去**。
+     *
+     * 本构建 luciola 是唯一传输，信任根在 `l` 段（Ed25519 公钥 + 配对密钥）。而
+     * `pairingPayloadForAddresses` / `qrPairingPayloadForAddresses` / `pairingQrPayloadFor`
+     * 的 `luciola` 是**可选参数** —— 不传照样编得出一张码，只是码里只剩地址（与可选的 pin）。
+     * 对端扫完只会得到候选地址：界面显示"添加成功"，配对帧却发不出去，也不会有任何报错。
+     *
+     * 现场就是这条（2026-11 真机）：桌面「可信设备」页两处调用**既没 `tlsPin` 也没 `luciola`**，
+     * 手机扫码后 `manualPeers` 多了一条、`skipReason` 仍然 `no-pin`、一次都没拨。
+     * 这些调用点全在 Composable 里，单测够不到，所以钉源码：任何一处的参数块里都必须出现
+     * `luciola`（定义处也算 —— 声明里本来就有这个参数，正则因此不会误报）。
+     */
+    @Test
+    fun everyPairingPayloadCallCarriesTheLuciolaRoot() {
+        val call = Regex(
+            "(pairingPayloadForAddresses|qrPairingPayloadForAddresses|pairingQrPayloadFor)\\s*" +
+                "\\((?:[^()]|\\([^()]*\\))*\\)",
+            RegexOption.DOT_MATCHES_ALL,
+        )
+        val offenders = mutableListOf<String>()
+        for (path in GuardSourceScan.kotlinFiles(
+            "app/src/commonMain",
+            "composeApp/src/commonMain",
+            "desktopApp/src/main",
+        )) {
+            val text = GuardSourceScan.stripComments(GuardSourceScan.read(path))
+            call.findAll(text).forEach { match ->
+                if (!match.value.contains("luciola")) {
+                    offenders += path + " → " + match.value.replace('\n', ' ').take(88)
+                }
+            }
+        }
+        assertTrue(
+            offenders.isEmpty(),
+            "这些出码点没把 luciola 信任根交进去（" + offenders + "）—— " +
+                "当前构建 luciola 是唯一传输，码里没有 `l` 段时对端只能登记地址、配不上，且不报错。",
+        )
+    }
+
     /** 从 Gradle 的测试工作目录向上找 settings.gradle.kts，避免写死相对层级。 */
 
 }

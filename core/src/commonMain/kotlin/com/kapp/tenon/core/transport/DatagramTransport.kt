@@ -23,6 +23,15 @@ interface DatagramTransport {
     /** 自愈:socket 疑似失联时重建(UdpTransport:stop+start;纯外拨:加密信道自动重连,no-op)。 */
     suspend fun restart()
 
+    /**
+     * 配对结果流（只有加密信道提供；其余传输返回 null = **这条传输没有这个读数**）。
+     *
+     * 存在的理由：发起侧发完自证帧就不知道该等什么了 —— 宿主的三种应答
+     * （已放行 / 等你批准 / 直接拒）在界面上必须分开，否则「点了允许、什么都没发生」
+     * 这类反馈缺失会一直存在（真机：`awaiting-approval` 之后手机只能等到超时）。
+     */
+    val pairingResults: SharedFlow<PairingResult>? get() = null
+
     suspend fun send(bytes: ByteArray, host: String, port: Int): Boolean
 
     /**
@@ -58,6 +67,13 @@ interface DatagramTransport {
      * (legacy UDP);宿主据此不宣称"已配对"。
      */
     suspend fun requestPairing(host: String, port: Int, selfNodeId: String): Boolean = false
+
+    /**
+     * 「手填地址、什么码都没有」的发起侧入口：不带预先钉住的公钥拨号（TOFU），
+     * 从握手学习对端身份后走与 [requestPairing] 完全相同的裁决管线。
+     * 默认 false = 这条传输不开放该入口（deny-by-default 的延伸）。
+     */
+    suspend fun requestPairingByAddress(host: String, port: Int, selfNodeId: String): Boolean = false
 }
 
 /**
