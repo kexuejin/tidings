@@ -539,6 +539,7 @@ filter-repo 会**顺手删掉 `origin` remote**（防误推），跑完要重新
 | 团队创建（声明）最终方案：入口、写路径复用、裁决、验收 | `docs/team-creation-final-plan.md` |
 | 多席位 / 多群 / 会话工作区一致性修正（C1–C5 细则、反向验证、真机判据） | `docs/seat-workspace-consistency-fix-plan.md` |
 | 主支线（Quest）详细设计：会话矩阵、状态机、沙箱生命周期、守卫测试矩阵 | `docs/tenon-main-side-quest-detailed-spec-2026-11-14.md` |
+| 智能体全链路（基座 → 员工 → 团队 → 派单 → 结果）方案：口径、界面规格、异常矩阵、分期与验收 | `docs/agent-lifecycle-end-to-end-plan.md` |
 | 真机证据（文字） | `design/runtime-evidence/` |
 
 ---
