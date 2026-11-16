@@ -37,14 +37,27 @@ object CliLineEventMapper {
         val obj = runCatching { Json.parseToJsonElement(trimmed) }.getOrNull() as? JsonObject ?: return null
         // agy 信封（形态 A）：event 键与 claude/codex 的 type 键无交集，先分流。
         (obj["event"] as? JsonPrimitive)?.contentOrNull?.let { return mapAgyEvent(obj, it) }
-        val type = (obj["type"] as? JsonPrimitive)?.contentOrNull ?: return textOf(obj)?.let { DriverEvent.TokenDelta(it) }
+        // ZCode 的一次性 JSON 信封（--json）：没有 type 键，以 sessionId + stopReason 认。
+        // 必须放在无 type 的兜底之前——否则那句 return 会把整行先吞掉（静默只出文本）。
+        if ((obj["sessionId"] != null || obj["session_id"] != null) &&
+            (obj["stopReason"] != null || obj["finishReason"] != null || obj["runMode"] != null)
+        ) {
+            return mapZcodeEnvelope(obj)
+        }
+        val type = (obj["type"] as? JsonPrimitive)?.contentOrNull
+            ?: return ((textOf(obj) ?: (obj["response"] as? JsonPrimitive)?.contentOrNull)
+                ?.takeIf { it.isNotBlank() }
+                ?.let { DriverEvent.TokenDelta(it) })
         // opencode 信封（形态 B）：`{"type":…,"sessionID":…,"part":{…}}`。判据是 **part 对象**
         // —— 与 claude/codex 的 `{"type":…}` 顶层形状区分得开，认错行型也不会误判。
         // agy 已在上面的 `event` 键分流走，三者互不干扰。
         (obj["part"] as? JsonObject)?.let { part -> return mapOpenCode(type, part) }
         return when (type) {
             "error" -> DriverEvent.Error(errorMessageOf(obj))
-            "result", "done" -> null
+            // claude/codebuddy 的 result 行：退出码可能是 0，但 is_error=true 说明这次任务失败。
+            // 直接跳过会让驱动报 Finished —— 「为没发生的活报完成」，必须挖出错误正文。
+            "result" -> errorResultOf(obj)
+            "done" -> null
             // dsh（DeepSeek Harness headless --json）：工具调用行。callId/tool 都是顶层键
             // （与 claude 的 assistant.content 块、opencode 的 part 信封都不同形）。
             "tool_call" -> {
@@ -111,6 +124,42 @@ object CliLineEventMapper {
         }
 
         else -> null
+    }
+
+    /**
+     * claude/codebuddy 的 `result` 行：成功是 null（裁决仍归退出码），
+     * 失败要从 `errors[]` / `result` / `message` 里挖正文，不能只剩一句「cli exit=0」。
+     */
+    private fun errorResultOf(obj: JsonObject): DriverEvent? {
+        val subtype = (obj["subtype"] as? JsonPrimitive)?.contentOrNull.orEmpty()
+        val isError = (obj["is_error"] as? JsonPrimitive)?.contentOrNull?.toBooleanStrictOrNull() == true ||
+            subtype.startsWith("error")
+        if (!isError) return null
+        val firstError = (obj["errors"] as? JsonArray)?.firstNotNullOfOrNull { element ->
+            (element as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
+        }
+        val message = firstError
+            ?: (obj["result"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
+            ?: errorMessageOf(obj)
+        return DriverEvent.Error(message)
+    }
+
+    /**
+     * ZCode `--json` 信封：一行装下整次任务的 text / toolCalls / usage / stopReason。
+     * 每行只产一个事件，优先报失败与正文；工具调用明细留在日志泵里（不伪造 ToolCall）。
+     * `stopReason` 是护栏停止（max_turns / budget_exceeded）时，text 是真实的部分进展，
+     * 按原文上报，不把它说成失败。
+     */
+    private fun mapZcodeEnvelope(obj: JsonObject): DriverEvent? {
+        val stopReason = (obj["stopReason"] as? JsonPrimitive)?.contentOrNull
+            ?: (obj["finishReason"] as? JsonPrimitive)?.contentOrNull
+        if (stopReason == "error" || stopReason == "aborted") {
+            return DriverEvent.Error(errorMessageOf(obj))
+        }
+        return ((obj["text"] as? JsonPrimitive)?.contentOrNull
+            ?: (obj["response"] as? JsonPrimitive)?.contentOrNull)
+            ?.takeIf { it.isNotBlank() }
+            ?.let { DriverEvent.TokenDelta(it) }
     }
 
     /**

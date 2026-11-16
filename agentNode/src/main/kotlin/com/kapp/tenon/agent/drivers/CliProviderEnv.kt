@@ -107,6 +107,43 @@ object CliProviderEnv {
         "no_proxy",
     )
 
+    /**
+     * CodeBuddy CLI：两种认证形态（API Key / Auth Token）都认；`CODEBUDDY_INTERNET_ENVIRONMENT`
+     * 决定连哪个端点，中国版漏了它只会报「认证失败」而不是「没装」，必须一并递进去。
+     * `CODEBUDDY_IS_SANDBOX` 是 HIGH/CRITICAL 工具整档放开的开关——**不主动设值**，
+     * 只让宿主显式配置时通过白名单，避免静默放宽安全面。
+     */
+    private val CODEBUDDY = listOf(
+        "CODEBUDDY_API_KEY",
+        "CODEBUDDY_AUTH_TOKEN",
+        "CODEBUDDY_INTERNET_ENVIRONMENT",
+        "CODEBUDDY_BASE_URL",
+        "CODEBUDDY_IS_SANDBOX",
+        "HTTPS_PROXY",
+        "HTTP_PROXY",
+        "ALL_PROXY",
+        "NO_PROXY",
+        "https_proxy",
+        "http_proxy",
+        "all_proxy",
+        "no_proxy",
+    )
+
+    /** ZCode CLI：登录态在 `~/.zcode/v2`，自定义 provider 走 env / 配置文件；代理带 `ZCODE_` 前缀。 */
+    private val ZCODE = listOf(
+        "ZCODE_API_KEY",
+        "ZHIPU_API_KEY",
+        "ZCODE_HTTP_PROXY",
+        "HTTPS_PROXY",
+        "HTTP_PROXY",
+        "ALL_PROXY",
+        "NO_PROXY",
+        "https_proxy",
+        "http_proxy",
+        "all_proxy",
+        "no_proxy",
+    )
+
     fun forClaude(env: Map<String, String> = System.getenv()): Map<String, String> = pick(CLAUDE, env)
 
     fun forCodex(env: Map<String, String> = System.getenv()): Map<String, String> = pick(CODEX, env)
@@ -117,6 +154,10 @@ object CliProviderEnv {
 
     fun forDsh(env: Map<String, String> = System.getenv()): Map<String, String> = pick(DSH, env)
 
+    fun forCodebuddy(env: Map<String, String> = System.getenv()): Map<String, String> = pick(CODEBUDDY, env)
+
+    fun forZcode(env: Map<String, String> = System.getenv()): Map<String, String> = pick(ZCODE, env)
+
     /** 按 driverId 取该 CLI 的凭证；认不出的 driverId = 空集（不猜、不乱给）。 */
     fun forDriver(driverId: String, env: Map<String, String> = System.getenv()): Map<String, String> =
         when (driverId) {
@@ -125,6 +166,8 @@ object CliProviderEnv {
             DriverKeys.cliDriverId("opencode") -> forOpencode(env)
             DriverKeys.cliDriverId("agy") -> forAgy(env)
             DriverKeys.cliDriverId("dsh") -> forDsh(env)
+            DriverKeys.cliDriverId("codebuddy") -> forCodebuddy(env)
+            DriverKeys.cliDriverId("zcode") -> forZcode(env)
             else -> emptyMap()
         }
 

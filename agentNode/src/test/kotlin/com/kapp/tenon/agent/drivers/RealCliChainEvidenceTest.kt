@@ -109,6 +109,8 @@ class RealCliChainEvidenceTest {
             // （AGENTS.md §2.7：测试结论不许依赖这台机器）。这里只要合成的那一根 claude。
             resolveOpencode = { null },
             resolveDsh = { null },
+            resolveCodebuddy = { null },
+            resolveZcode = { null },
             hint = { println(it) },
             sandbox = WorktreeSandboxExecutor(sandboxRoot = root),
         ).single()

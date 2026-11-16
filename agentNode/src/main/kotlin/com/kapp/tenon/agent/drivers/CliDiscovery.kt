@@ -40,6 +40,15 @@ object CliDiscovery {
     const val ENV_DSH_CLI = "TENON_DSH_CLI"
     const val DSH_BIN = "dsh"
 
+    /** CodeBuddy CLI：独立安装的 `codebuddy`，本机也随 WorkBuddy.app 内置。 */
+    const val ENV_CODEBUDDY_CLI = "TENON_CODEBUDDY_CLI"
+    const val CODEBUDDY_BIN = "codebuddy"
+
+    /** ZCode CLI：PATH 上的 `zcode`，或桌面应用包里的 [ZCODE_CJS_RELATIVE]。 */
+    const val ENV_ZCODE_CLI = "TENON_ZCODE_CLI"
+    const val ZCODE_BIN = "zcode"
+    const val ZCODE_CJS_RELATIVE = "ZCode.app/Contents/Resources/glm/zcode.cjs"
+
     fun resolveClaudeCli(
         env: Map<String, String> = System.getenv(),
         pathDirs: List<String> = pathDirsOf(env),
@@ -78,6 +87,40 @@ object CliDiscovery {
         env: Map<String, String> = System.getenv(),
         pathDirs: List<String> = pathDirsOf(env),
     ): String? = resolve(env[ENV_DSH_CLI], DSH_BIN, pathDirs)
+
+    fun resolveCodebuddyCli(
+        env: Map<String, String> = System.getenv(),
+        pathDirs: List<String> = pathDirsOf(env),
+    ): String? = resolve(env[ENV_CODEBUDDY_CLI], CODEBUDDY_BIN, pathDirs)
+
+    /**
+     * ZCode 的官方运行时落在桌面应用包里（`zcode.cjs`），PATH 上常常没有 `zcode` 命令。
+     * 这里按「显式 env → PATH → 应用包约定目录」的顺序找，找不到就 null 并让装配方提示。
+     * 显式 env 指向 `.cjs` 也认（它本来就不是可执行文件，按文件路径判存在即可）。
+     */
+    fun resolveZcodeCli(
+        env: Map<String, String> = System.getenv(),
+        pathDirs: List<String> = pathDirsOf(env),
+    ): String? {
+        val explicit = env[ENV_ZCODE_CLI]?.trim().takeUnless { it.isNullOrEmpty() }
+        if (explicit != null) return File(explicit).takeIf { it.isFile }?.absolutePath
+        resolve(null, ZCODE_BIN, pathDirs)?.let { return it }
+        val candidates = listOfNotNull(
+            env["HOME"]?.takeIf { it.isNotBlank() }?.let { "$it/Applications/$ZCODE_CJS_RELATIVE" },
+            "/Applications/$ZCODE_CJS_RELATIVE",
+        )
+        return candidates.firstNotNullOfOrNull { path -> File(path).takeIf { it.isFile }?.absolutePath }
+    }
+
+    /**
+     * 启动形态：`.cjs` / `.js` 运行时不能自己执行，要交给 `node`；
+     * 普通 bin 原样返回。调用方把前缀插在参数最前面（prompt 之前）。
+     */
+    fun launchOf(cliPath: String): Pair<String, List<String>> = when {
+        cliPath.endsWith(".cjs", ignoreCase = true) || cliPath.endsWith(".js", ignoreCase = true) ->
+            "node" to listOf(cliPath)
+        else -> cliPath to emptyList()
+    }
 
     /** 探测目录：`$PATH` 全量 + 公开约定目录（去重，保序 = 优先级）。 */
     fun pathDirsOf(env: Map<String, String>): List<String> {

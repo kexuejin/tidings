@@ -20,16 +20,16 @@ import kotlin.test.assertTrue
  * ## 反向探针
  *
  * 把 `"dsh"` 加进 `flagsByProfileKey`，`dshCannotSelectModelPerTask` 必须变红；
- * 把 `"agy"` 删掉，`supportedKeysAreExactlyTheFour` 必须变红。
+ * 把 `"agy"` 删掉，`supportedKeysAreExplicitlyListed` 必须变红。
  */
 class DriverModelFlagsTest {
 
     @Test
-    fun supportedKeysAreExactlyTheFour() {
-        // 出厂的五个 CLI 里，只有 dsh 没有模型旗标（模型写在 profile 的 agent-default-model）。
+    fun supportedKeysAreExplicitlyListed() {
+        // dsh 的模型写在 profile 里；zcode 没有按次选模型的命令行参数（本机 --help 实测）。
         // 增删这一行都必须同时确认「argv 里真的会出现」与「执行配置页的置灰逻辑」。
         assertEquals(
-            setOf("claude", "codex", "agy", "opencode"),
+            setOf("claude", "codex", "agy", "opencode", "codebuddy"),
             DriverModelFlags.supportedKeys,
             "能按次指定模型的驱动集合变了：执行配置页的可用性与保存校验都读它",
         )
@@ -45,7 +45,7 @@ class DriverModelFlagsTest {
 
     @Test
     fun unknownDriverIsNotSupported() {
-        listOf(null, "", "   ", "native", "no-such-cli").forEach { raw ->
+        listOf(null, "", "   ", "native", "no-such-cli", "dsh", "zcode").forEach { raw ->
             assertTrue(
                 !DriverModelFlags.supports(raw),
                 "未知驱动被当成支持模型（$raw）：缺席即不支持，不许有默认值",
@@ -55,7 +55,7 @@ class DriverModelFlagsTest {
 
     @Test
     fun flagsAreAppendedForTheFourSupportedDrivers() {
-        listOf("claude", "codex", "agy", "opencode").forEach { key ->
+        listOf("claude", "codex", "agy", "opencode", "codebuddy").forEach { key ->
             assertEquals(
                 listOf("--model", "claude-opus-4-1"),
                 DriverModelFlags.flagsFor(key, "claude-opus-4-1"),

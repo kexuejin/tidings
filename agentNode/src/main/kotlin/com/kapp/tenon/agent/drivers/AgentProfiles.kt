@@ -36,6 +36,8 @@ object AgentProfiles {
         Profile("agy", "google", "Antigravity", Role.WORKER),
         Profile("opencode", "opencode", "OpenCode", Role.BOTH),
         Profile("dsh", "deepseek", "DeepSeek Harness", Role.BOTH),
+        Profile("codebuddy", "tencent", "CodeBuddy", Role.BOTH),
+        Profile("zcode", "zhipu", "ZCode", Role.BOTH),
     ).associateBy { it.key }
 
     /**
@@ -104,10 +106,10 @@ object AgentProfiles {
     }
 
     /** 自动组队的干活棒优先序（真机验证过的 dev(codex) 打头）。 */
-    private val workerPreference = listOf("codex", "claude", "opencode", "agy", "dsh")
+    private val workerPreference = listOf("codex", "claude", "opencode", "agy", "dsh", "codebuddy", "zcode")
 
     /** 自动组队的审核棒优先序（qa(dsh) 真机验证过；默认与干活棒异厂商）。 */
-    private val reviewerPreference = listOf("dsh", "opencode", "claude", "agy")
+    private val reviewerPreference = listOf("dsh", "opencode", "claude", "agy", "codebuddy", "zcode")
 
     /** 在位集合里按优先序选默认干活棒；一个都不在 → null。 */
     fun defaultWorkerKey(availableKeys: Set<String>): String? =

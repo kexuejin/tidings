@@ -102,6 +102,8 @@ class AgyCliDriverTest {
             resolveAgy = { "/bin/true" },
             resolveOpencode = { null },
             resolveDsh = { null },
+            resolveCodebuddy = { null },
+            resolveZcode = { null },
             hint = {},
         )
         assertEquals(listOf("agy-cli"), drivers.map { it.driverId }, "只装了 agy 的宿主只有 agy-cli")

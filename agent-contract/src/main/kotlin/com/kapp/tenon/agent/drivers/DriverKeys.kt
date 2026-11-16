@@ -26,7 +26,7 @@ package com.kapp.tenon.agent.drivers
  *
  * ## 取值域（逐条对齐既有实现，行为零变更）
  *
- * - 档案键：`codex` / `claude` / `agy` / `opencode` / `dsh`；
+ * - 档案键：`codex` / `claude` / `agy` / `opencode` / `dsh` / `codebuddy` / `zcode`；
  * - CLI 驱动 id：`<键>-cli`（`native` 是宿主本地驱动，不走 CLI 发现）；
  * - 别名：`antigravity` 与 `agy` 是同一厂商的两种写法。
  *

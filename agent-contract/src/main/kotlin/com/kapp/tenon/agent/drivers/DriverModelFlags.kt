@@ -18,7 +18,11 @@ package com.kapp.tenon.agent.drivers
  * - claude `--model <model>`；
  * - codex `-m, --model <MODEL>`；
  * - agy `--model <model>`；
- * - opencode `--model, -m <provider/model#variant>`。
+ * - opencode `--model, -m <provider/model#variant>`；
+ * - codebuddy `--model <model>`（本机 2.176.0 的 --help 实测）。
+ *
+ * **zcode 刻意缺席**：本机 0.17.1 的 --help 没有按次选模型的参数（只有会话内 `/model`），
+ * 缺席即「不支持」——配了模型就响亮拒绝，绝不静默跑默认。
  */
 object DriverModelFlags {
 
@@ -28,6 +32,7 @@ object DriverModelFlags {
         "codex" to { model -> listOf("--model", model) },
         "agy" to { model -> listOf("--model", model) },
         "opencode" to { model -> listOf("--model", model) },
+        "codebuddy" to { model -> listOf("--model", model) },
     )
 
     /** 该驱动能不能按本次任务指定模型。[rawKey] 收任意写法（`claude-cli` / `claude`）。 */

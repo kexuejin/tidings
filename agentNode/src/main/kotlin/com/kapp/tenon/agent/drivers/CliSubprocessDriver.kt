@@ -431,6 +431,39 @@ class CliSubprocessDriver(
             listOf("--profile", "headless", "--json", prompt)
 
         /**
+         * CodeBuddy CLI（本机 2.176.0 实测）：与 Claude Code 同形，prompt 是 `-p` 的**选项值**，
+         * 模型旗标追加在后面安全（与 codex/opencode 的 trailing 位置参数不同）。
+         * `-y` 是 -p 模式下工具授权的前提；HIGH/CRITICAL 工具仍会再问，
+         * 宿主可用 CODEBUDDY_IS_SANDBOX=1 显式整档放开（只在自己的隔离面内才该这么做）。
+         */
+        fun codebuddyArgs(prompt: String, model: String? = null, autoApprove: Boolean = true): List<String> =
+            listOf("-p", prompt, "--output-format", "stream-json", "--verbose") +
+                (if (autoApprove) listOf("-y") else emptyList()) +
+                DriverModelFlags.flagsFor("codebuddy", model)
+
+        /** CodeBuddy 的重试跳：从首行 `session_id` 续跑，不把上一跳的 stdout 塞进 prompt。 */
+        fun codebuddyResumeArgs(cliSessionId: String, prompt: String): List<String> =
+            listOf("--resume", cliSessionId) + codebuddyArgs(prompt)
+
+        val CODEBUDDY_RESUME = CliResumeSpec(
+            sessionIdFromLine = { line -> CODEBUDDY_SESSION_LINE.find(line)?.groupValues?.getOrNull(1) },
+            args = { cliSessionId, prompt -> codebuddyResumeArgs(cliSessionId, prompt) },
+        )
+
+        private val CODEBUDDY_SESSION_LINE =
+            Regex("\"session_id\"\\s*:\\s*\"([^\"]+)\"")
+
+        /**
+         * ZCode CLI（本机 0.17.1 实测）：`--prompt` 单次执行、`--json` 机读输出、
+         * `--mode yolo` 无人值守（帮助里写明 --prompt 默认就是 yolo，这里显式固定，不赌默认值）。
+         * **不拼模型旗标**：该 CLI 没有按次选模型的参数，`DriverModelFlags` 里也不收它；
+         * 执行档里配了模型会在保存期与驱动执行期两处响亮拒绝，不会静默跑默认模型。
+         */
+        fun zcodeArgs(prompt: String, model: String? = null): List<String> =
+            listOf("-p", prompt, "--mode", "yolo", "--json", "--no-color") +
+                DriverModelFlags.flagsFor("zcode", model)
+
+        /**
          * codex 自己的沙箱模式，默认 `workspace-write`。
          *
          * 唯一需要改的理由是**嵌不进**：宿主进程本身已经在 seatbelt 里跑时（例如集成测试
@@ -482,6 +515,8 @@ fun cliDriverRegistrations(
     env: Map<String, String> = System.getenv(),
     resolveOpencode: () -> String? = { CliDiscovery.resolveOpencodeCli() },
     resolveDsh: () -> String? = { CliDiscovery.resolveDshCli() },
+    resolveCodebuddy: () -> String? = { CliDiscovery.resolveCodebuddyCli() },
+    resolveZcode: () -> String? = { CliDiscovery.resolveZcodeCli() },
 ): List<AgentDriver> {
     val drivers = mutableListOf<AgentDriver>()
 
@@ -701,6 +736,84 @@ fun cliDriverRegistrations(
         hint(
             "[drivers] dsh CLI not found; skipping dsh-cli driver " +
                 "(install it or set ${CliDiscovery.ENV_DSH_CLI})",
+        )
+    }
+
+    // CodeBuddy CLI：`-p` 形态与 claude 同源；行信封里的 assistant 文本现有映射器已能吃，
+    // 但 result 行的 is_error 必须挖出来（退出码 0 也可能是一次失败，见 CliLineEventMapper）。
+    val codebuddy = resolveCodebuddy()
+    if (codebuddy != null) {
+        val (cbBin, cbPrefix) = CliDiscovery.launchOf(codebuddy)
+        val providerEnv = CliProviderEnv.forCodebuddy(env)
+        announce(DriverKeys.cliDriverId("codebuddy"), providerEnv)
+        if (providerEnv["CODEBUDDY_API_KEY"] == null && providerEnv["CODEBUDDY_AUTH_TOKEN"] == null) {
+            hint(
+                "[drivers] codebuddy-cli has no CODEBUDDY_API_KEY / CODEBUDDY_AUTH_TOKEN; " +
+                    "it will use the CLI login state (CN edition also needs CODEBUDDY_INTERNET_ENVIRONMENT=internal)",
+            )
+        }
+        drivers.add(
+            if (sandbox != null) {
+                SandboxedCliDriver(
+                    driverId = DriverKeys.cliDriverId("codebuddy"),
+                    displayName = "CodeBuddy (CLI)",
+                    cliPath = cbBin,
+                    argSpec = { prompt, model -> cbPrefix + CliSubprocessDriver.codebuddyArgs(prompt, model, true) },
+                    sandbox = sandbox,
+                    envOverrides = providerEnv,
+                    networkPolicy = OsSandboxGuard.NetworkPolicy.OPEN,
+                    resumeSpec = CliSubprocessDriver.CODEBUDDY_RESUME,
+                )
+            } else {
+                CliSubprocessDriver(
+                    driverId = DriverKeys.cliDriverId("codebuddy"),
+                    displayName = "CodeBuddy (CLI)",
+                    cliPath = cbBin,
+                    argSpec = { prompt, model -> cbPrefix + CliSubprocessDriver.codebuddyArgs(prompt, model, false) },
+                    envOverrides = providerEnv,
+                    resumeSpec = CliSubprocessDriver.CODEBUDDY_RESUME,
+                )
+            },
+        )
+    } else {
+        hint(
+            "[drivers] codebuddy CLI not found; skipping codebuddy-cli driver " +
+                "(install it or set ${CliDiscovery.ENV_CODEBUDDY_CLI})",
+        )
+    }
+
+    // ZCode CLI：桌面应用包里是 `zcode.cjs`（需 node 启动），PATH 上可能只有包装脚本；
+    // launchOf 把这两种形态归一成「可执行文件 + 参数前缀」，下游 argSpec 不必分叉。
+    val zcode = resolveZcode()
+    if (zcode != null) {
+        val (zcBin, zcPrefix) = CliDiscovery.launchOf(zcode)
+        val providerEnv = CliProviderEnv.forZcode(env)
+        announce(DriverKeys.cliDriverId("zcode"), providerEnv)
+        drivers.add(
+            if (sandbox != null) {
+                SandboxedCliDriver(
+                    driverId = DriverKeys.cliDriverId("zcode"),
+                    displayName = "ZCode (CLI)",
+                    cliPath = zcBin,
+                    argSpec = { prompt, _ -> zcPrefix + CliSubprocessDriver.zcodeArgs(prompt) },
+                    sandbox = sandbox,
+                    envOverrides = providerEnv,
+                    networkPolicy = OsSandboxGuard.NetworkPolicy.OPEN,
+                )
+            } else {
+                CliSubprocessDriver(
+                    driverId = DriverKeys.cliDriverId("zcode"),
+                    displayName = "ZCode (CLI)",
+                    cliPath = zcBin,
+                    argSpec = { prompt, _ -> zcPrefix + CliSubprocessDriver.zcodeArgs(prompt) },
+                    envOverrides = providerEnv,
+                )
+            },
+        )
+    } else {
+        hint(
+            "[drivers] zcode CLI not found; skipping zcode-cli driver " +
+                "(install ZCode.app or set ${CliDiscovery.ENV_ZCODE_CLI})",
         )
     }
     return drivers

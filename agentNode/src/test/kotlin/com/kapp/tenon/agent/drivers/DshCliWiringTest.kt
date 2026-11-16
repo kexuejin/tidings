@@ -85,6 +85,8 @@ class DshCliWiringTest {
             resolveAgy = { null },
             resolveOpencode = { null },
             resolveDsh = { cli },
+            resolveCodebuddy = { null },
+            resolveZcode = { null },
             hint = { hints.add(it) },
             env = mapOf("HOME" to home.absolutePath),
         )

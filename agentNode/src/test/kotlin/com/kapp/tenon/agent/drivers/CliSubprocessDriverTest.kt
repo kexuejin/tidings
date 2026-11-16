@@ -189,10 +189,12 @@ class CliSubprocessDriverTest {
             resolveAgy = { null },
             resolveOpencode = { null },
             resolveDsh = { null },
+            resolveCodebuddy = { null },
+            resolveZcode = { null },
             hint = { hints.add(it) },
         )
         assertTrue(drivers.isEmpty(), "没装就不注册")
-        assertEquals(5, hints.size, "每个没装的 CLI 一条提示（claude/codex/agy/opencode/dsh）")
+        assertEquals(7, hints.size, "每个没装的 CLI 一条提示（七个内置 CLI）")
         assertTrue(hints[0].contains(CliDiscovery.ENV_CLAUDE_CLI), "提示必须可操作：写清 env 名")
     }
 
@@ -204,8 +206,16 @@ class CliSubprocessDriverTest {
             resolveAgy = { "/bin/true" },
             resolveOpencode = { "/bin/true" },
             resolveDsh = { "/bin/true" },
+            resolveCodebuddy = { "/bin/true" },
+            resolveZcode = { "/bin/true" },
             hint = {},
         )
-        assertEquals(listOf("claude-cli", "codex-cli", "agy-cli", "opencode-cli", "dsh-cli"), drivers.map { it.driverId })
+        assertEquals(
+            listOf(
+                "claude-cli", "codex-cli", "agy-cli", "opencode-cli", "dsh-cli",
+                "codebuddy-cli", "zcode-cli",
+            ),
+            drivers.map { it.driverId },
+        )
     }
 }

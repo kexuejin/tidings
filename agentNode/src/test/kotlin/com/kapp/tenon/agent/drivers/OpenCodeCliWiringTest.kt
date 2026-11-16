@@ -121,6 +121,8 @@ class OpenCodeCliWiringTest {
             resolveCodex = { null },
             resolveAgy = { null },
             resolveOpencode = { cli },
+            resolveCodebuddy = { null },
+            resolveZcode = { null },
             hint = { hints.add(it) },
             env = mapOf(
                 "OPENCODE_BASE_URL" to "https://example.invalid/v1",

@@ -1056,6 +1056,8 @@ class WorktreeSandboxExecutor(
             ".gemini",
             ".agy",
             ".dsh",
+            ".codebuddy",
+            ".zcode",
             ".npm",
             ".nvm",
             ".gitconfig",

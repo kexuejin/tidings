@@ -71,6 +71,8 @@ class CliProviderEnvWiringTest {
             resolveAgy = { null },
             resolveOpencode = { null },
             resolveDsh = { null },
+            resolveCodebuddy = { null },
+            resolveZcode = { null },
             hint = { hints += it },
             sandbox = WorktreeSandboxExecutor(sandboxRoot = root),
             env = mapOf(
@@ -141,6 +143,8 @@ class CliProviderEnvWiringTest {
             resolveAgy = { null },
             resolveOpencode = { null },
             resolveDsh = { null },
+            resolveCodebuddy = { null },
+            resolveZcode = { null },
             hint = { hints += it },
             sandbox = WorktreeSandboxExecutor(sandboxRoot = root),
             env = emptyMap(),
