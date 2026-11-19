@@ -48,6 +48,7 @@ class AgentHubProjectionTest {
         name: String,
         defaultWsId: String? = null,
         teamMembers: List<TeamMemberInfo> = emptyList(),
+        employeeId: String? = null,
     ) = VirtualAgentMember(
         agentId = agentId,
         hostNodeId = hostNodeId,
@@ -55,6 +56,7 @@ class AgentHubProjectionTest {
         entityType = if (teamMembers.isEmpty()) EntityTypes.SINGLE else EntityTypes.TEAM,
         teamMembers = teamMembers,
         defaultWsId = defaultWsId,
+        employeeId = employeeId,
     )
 
     private fun session(

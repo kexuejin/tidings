@@ -5,8 +5,10 @@ package com.kapp.tenon.orchestration
 import com.kapp.tenon.agent.DelegationPlan
 import com.kapp.tenon.core.protocol.TeamMemberInfo
 import com.kapp.tenon.core.protocol.VirtualAgentMember
+import com.kapp.tenon.domain.DispatchBlockedCode
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
@@ -14,7 +16,8 @@ import kotlin.test.assertTrue
  * 编制 → 责任链编译层（团队执行方案 §5.1/§5.2/§5.3）的矩阵钉子。
  *
  * 最要紧的三条：
- * - 恰好一个 worker：0/多 worker 在**读取期**也拒（保存期已拒；旧数据走到这里同样拒）；
+ * - 至少一个 worker：0 worker 在**读取期**也拒（保存期已拒；旧数据走到这里同样拒），
+ *   多 worker 合法（点将候选池）；
  * - reviewer 直呼 = 纯审查单棒（不调度 worker 产生冗余代码）；
  * - 0 reviewer = 单棒 worker，**不经 StageChainGate** —— 编译时就做在位检查。
  */
@@ -266,22 +269,37 @@ class TeamPlanCompilerTest {
         assertTrue(rejected.reason.contains("codex"), rejected.reason)
     }
 
-    /** 0/多 worker：读取期也拒（旧数据/手改文件走到编译这里同样拒）。 */
+    /**
+     * 0 worker：读取期也拒（旧数据/手改文件走到编译这里同样拒）。
+     * **多 worker 合法**：`kind` 只声明「谁能干」，这一单谁下场由主理人点将；没有可用
+     * 建议时回落锚点本人（见下一条）。
+     */
     @Test
-    fun zeroOrMultipleWorkersAreRejectedAtReadTime() {
+    fun aProfileWithoutAnyWorkerIsRejectedAtReadTime() {
         val noWorker = profile(reviewerSpec)
         val rejected = assertIs<TeamPlanCompiler.Compiled.Rejected>(
             TeamPlanCompiler.compile(noWorker, listOf(seatMembers[1]), reviewerInfo, "fix", null),
         )
-        assertTrue(rejected.reason.contains("exactly one worker"))
+        assertTrue(rejected.reason.contains("at least one worker"), rejected.reason)
+    }
+
+    /** 多 worker + 没有点将建议 ⇒ 锚点本人干活（旧行为逐字保留），不是拒单。 */
+    @Test
+    fun severalWorkersFallBackToTheAnchorWhenNoSuggestionIsGiven() {
         val twoWorkers = profile(
             coderSpec,
             TeamExecutionMemberSpec("m-b", TeamExecutionKinds.WORKER, "claude"),
-            testerSpec,
         )
-        assertIs<TeamPlanCompiler.Compiled.Rejected>(
-            TeamPlanCompiler.compile(twoWorkers, seatMembers, coderInfo, "fix", null),
+        val compiled = TeamPlanCompiler.compile(
+            twoWorkers,
+            listOf(seatMembers[0], TeamMemberInfo("m-b", "b", "后端")),
+            coderInfo,
+            "fix",
+            availableDrivers = setOf("codex", "claude"),
         )
+        val single = assertIs<TeamPlanCompiler.Compiled.Single>(compiled)
+        assertEquals("codex", single.agentKey, "锚点 = 编制首位 worker")
+        assertEquals("m-coder", single.agentId)
     }
 
     /** 控制面不可用（available = null）+ 单棒 ⇒ blocked（不假装能派）。 */
@@ -340,5 +358,181 @@ class TeamPlanCompilerTest {
             ),
         )
         assertEquals(bare.instruction, withBlank.instruction, "空白简报不许在指令尾部留空行")
+    }
+
+    // ------------------------------------------------- 入口语义：@组员 = 单兵（甲案）
+
+    /**
+     * `@组员` = 只让它办这一件事：编制里明明有两根审查棒也不展开。
+     *
+     * 反向探针：把 `entry` 传成缺省的 [DispatchEntry.TEAM]，同一个输入立刻变成
+     * 3 棒的 `Plan` —— 差异只来自入口，不来自编制或目标。
+     */
+    @Test
+    fun memberEntryCompilesASingleSoldierWithoutReviewers() {
+        val full = profile(coderSpec, reviewerSpec, testerSpec)
+        val drivers = setOf("codex", "claude", "dsh")
+        val single = assertIs<TeamPlanCompiler.Compiled.Single>(
+            TeamPlanCompiler.compile(
+                full, seatMembers, coderInfo, goal = "fix the login timeout",
+                availableDrivers = drivers, entry = DispatchEntry.MEMBER,
+            ),
+        )
+        assertEquals("codex", single.agentKey, "单兵派的就是被点名那个人的底座")
+        assertFalse(single.reviewOnly, "它是真干活，不是纯审查单")
+        assertTrue(single.instruction.contains("fix the login timeout"))
+        assertFalse(
+            single.instruction.contains("Review the current workspace"),
+            "单兵指令里不许出现审查棒的那套话：${single.instruction}",
+        )
+        // 同一份编制、同一个目标，只把入口换回整队 ⇒ 立刻是 3 棒链。
+        val chained = assertIs<TeamPlanCompiler.Compiled.Plan>(
+            TeamPlanCompiler.compile(
+                full, seatMembers, coderInfo, goal = "fix the login timeout",
+                availableDrivers = drivers, entry = DispatchEntry.TEAM,
+            ),
+        )
+        assertEquals(3, chained.plan.stages.size)
+    }
+
+    /** 单兵**不问 Planner**：现场给一份多棒建议也不能改变形状。 */
+    @Test
+    fun memberEntryIgnoresThePlannerSuggestion() {
+        val full = profile(coderSpec, reviewerSpec)
+        val drivers = setOf("codex", "claude")
+        val suggestion = OrchestrationSuggestion(
+            stages = listOf(
+                StageIntent("m-coder", asReviewer = false, instruction = "先调研再改"),
+                StageIntent("m-reviewer", asReviewer = true, instruction = "逐条核验"),
+            ),
+            rationale = "有两个独立面要查",
+        )
+        val single = assertIs<TeamPlanCompiler.Compiled.Single>(
+            TeamPlanCompiler.compile(
+                full, seatMembers, coderInfo, goal = "fix", availableDrivers = drivers,
+                suggestion = suggestion, entry = DispatchEntry.MEMBER,
+            ),
+        )
+        assertFalse(single.plannedByLlm, "单兵形状不来自 LLM")
+        assertEquals("fix", single.instruction, "单兵指令 = 目标本身，不是 Planner 写的那句")
+        // 对照组：整队入口采纳同一份建议 ⇒ 链与指令都来自建议。
+        val planned = assertIs<TeamPlanCompiler.Compiled.Plan>(
+            TeamPlanCompiler.compile(
+                full, seatMembers, coderInfo, goal = "fix", availableDrivers = drivers,
+                suggestion = suggestion, entry = DispatchEntry.TEAM,
+            ),
+        )
+        assertTrue(planned.plannedByLlm)
+        assertEquals("先调研再改", planned.plan.stages[0].instruction)
+    }
+
+    /** 单兵的底座不在位：编译期就拒（带 DRIVER_MISSING），不交给派单撞通用错误。 */
+    @Test
+    fun aMemberWhoseDriverIsMissingIsRejectedAtCompileTime() {
+        val rejected = assertIs<TeamPlanCompiler.Compiled.Rejected>(
+            TeamPlanCompiler.compile(
+                profile(coderSpec, reviewerSpec), seatMembers, coderInfo, goal = "fix",
+                availableDrivers = setOf("claude"), entry = DispatchEntry.MEMBER,
+            ),
+        )
+        assertEquals(DispatchBlockedCode.DRIVER_MISSING, rejected.code)
+    }
+
+    /** 点名审查员仍是纯审查单棒（单兵语义不改变「它本来就不干活」这件事）。 */
+    @Test
+    fun memberEntryForAReviewerStaysAPureReviewTask() {
+        val single = assertIs<TeamPlanCompiler.Compiled.Single>(
+            TeamPlanCompiler.compile(
+                profile(coderSpec, reviewerSpec), seatMembers, reviewerInfo, goal = "看一眼前面的改动",
+                availableDrivers = setOf("codex", "claude"), entry = DispatchEntry.MEMBER,
+            ),
+        )
+        assertTrue(single.reviewOnly)
+        assertEquals("claude", single.agentKey)
+    }
+
+    // --------------------------------------------- 参与人（授权的输入）
+
+    /**
+     * `participants` = 这次**真的会被调起的人**，与链序一致 —— 授权必须按它逐个判。
+     *
+     * 反向探针：把 `Plan.participants` 换成 `stages.map { it.agentKey }`，第一条就会红
+     * （驱动键不是身份：两个人可以共用同一个底座）。
+     */
+    @Test
+    fun participantsListThePeopleActuallyInvokedInChainOrder() {
+        val full = profile(coderSpec, reviewerSpec, testerSpec)
+        val drivers = setOf("codex", "claude", "dsh")
+        val plan = assertIs<TeamPlanCompiler.Compiled.Plan>(
+            TeamPlanCompiler.compile(full, seatMembers, coderInfo, "fix", drivers),
+        )
+        assertEquals(listOf("m-coder", "m-reviewer", "m-tester"), plan.participants)
+        assertEquals(
+            plan.plan.stages.size,
+            plan.participants.size,
+            "参与人与棒表必须同长：授权漏一个人 = 那条棒在没授权的情况下跑命令",
+        )
+
+        val single = assertIs<TeamPlanCompiler.Compiled.Single>(
+            TeamPlanCompiler.compile(profile(coderSpec), listOf(seatMembers[0]), coderInfo, "fix", setOf("codex")),
+        )
+        assertEquals(listOf("m-coder"), single.participants)
+
+        // 纯审查单棒：被调起的是审查员本人（不是编制里的 worker）。
+        val reviewOnly = assertIs<TeamPlanCompiler.Compiled.Single>(
+            TeamPlanCompiler.compile(full, seatMembers, reviewerInfo, "audit", drivers),
+        )
+        assertEquals(listOf("m-reviewer"), reviewOnly.participants)
+
+        // 单兵：只有它自己，哪怕编制里还有两个人。
+        val soldier = assertIs<TeamPlanCompiler.Compiled.Single>(
+            TeamPlanCompiler.compile(
+                full, seatMembers, coderInfo, "fix", drivers, entry = DispatchEntry.MEMBER,
+            ),
+        )
+        assertEquals(listOf("m-coder"), soldier.participants)
+
+        // 拒绝：没有人会被调起 —— 空集不是「跳过授权」，是没有授权对象。
+        val rejected = assertIs<TeamPlanCompiler.Compiled.Rejected>(
+            TeamPlanCompiler.compile(profile(reviewerSpec), listOf(seatMembers[1]), reviewerInfo, "fix", drivers),
+        )
+        assertTrue(rejected.participants.isEmpty())
+    }
+
+    /**
+     * 参与人**保留执行档里的大小写**：授权台账与执行范围都按字符串精确命中，
+     * 归一成小写会把「配过策略的人」判成「没配过」（fail-closed 变成全员不能用）。
+     */
+    @Test
+    fun participantsKeepTheProfileCasing() {
+        val mixedSeat = listOf(TeamMemberInfo("M-Coder", "coder", "编码"))
+        val mixedProfile = TeamExecutionProfile(
+            dirId = "ws-1", leaderAgentId = "dsh-lead", updatedAt = 0,
+            members = listOf(TeamExecutionMemberSpec("M-Coder", TeamExecutionKinds.WORKER, "codex")),
+        )
+        val single = assertIs<TeamPlanCompiler.Compiled.Single>(
+            TeamPlanCompiler.compile(mixedProfile, mixedSeat, mixedSeat[0], "fix", setOf("codex")),
+        )
+        assertEquals(listOf("M-Coder"), single.participants, "授权键必须与档案里写的一字不差")
+    }
+
+    /** 采纳 Planner 后，参与人跟着**它排的顺序**走（不是编制顺序）。 */
+    @Test
+    fun plannedParticipantsFollowTheSuggestionOrder() {
+        val full = profile(coderSpec, reviewerSpec, testerSpec)
+        val suggestion = OrchestrationSuggestion(
+            stages = listOf(
+                StageIntent("m-coder", asReviewer = false, instruction = "先调研再改"),
+                StageIntent("m-tester", asReviewer = true, instruction = "跑测试"),
+            ),
+        )
+        val plan = assertIs<TeamPlanCompiler.Compiled.Plan>(
+            TeamPlanCompiler.compile(
+                full, seatMembers, coderInfo, "fix", setOf("codex", "claude", "dsh"),
+                suggestion = suggestion,
+            ),
+        )
+        assertEquals(listOf("m-coder", "m-tester"), plan.participants, "审查棒是 tester，不是编制里的第一个 reviewer")
+        assertEquals(2, plan.plan.stages.size)
     }
 }

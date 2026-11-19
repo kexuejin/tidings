@@ -169,6 +169,28 @@ data class ChainProgress(
     val elapsedSec: Long? = null,
     /** 该工单绑定的 Agent 会话 ID，供工牌点击直接穿透到 Agent 控制台。 */
     val sessionId: String? = null,
+    /**
+     * 这一单**该找谁审**（单兵终态卡的落点）。
+     *
+     * 只由单兵入口填：`@组员` 派单时链形状不由这一单决定（不展开审查棒），于是卡上
+     * 只有「合并」而没有「请人看一下」。名册简报早就在 prompt 里告诉过那位组员该找谁，
+     * 但**用户**看不到那个答案 —— 卡面缺落点，人只能自己记住编制里谁管审。
+     *
+     * null = 这单没有可问的人（非团队派单 / 编制里没有在位审查员）：那时不给按钮，
+     * 也不给一颗点了必然失败的按钮。
+     */
+    val reviewBy: ChainReviewTarget? = null,
+)
+
+/**
+ * 卡上「请谁复检」的落点：组员的 **@ token**（回查用它）+ 卡面显示的人名。
+ *
+ * token 与 name 分开：改名只应改卡面那行字，动作串里的 token 是回查键，跟着改
+ * 会让「卡发出去之后改了个名」变成点了没反应。
+ */
+data class ChainReviewTarget(
+    val token: String,
+    val name: String,
 )
 
 /** 合流卡上的一条审计结论（与手机端 checks[] 解析契约同形）。 */
@@ -185,6 +207,30 @@ object StageChain {
 
     /** §7.7 的 200 字预算：摘要就是摘要，不是日志的另一个名字。 */
     const val MAX_SUMMARY = 200
+
+    /**
+     * 「请 TA 复检」的动作串前缀，后面接组员 token（`review-patch|<token>`）。
+     *
+     * 为什么把 token 编进动作串而不是另开一个卡字段：动作帧（`op=action`）只带
+     * `cardId` + `actionId` 两个槽，卡上的其它字段到了宿主这侧一个都拿不到 ——
+     * 编进动作串是本仓既有做法（`attach-team:` 整队入驻、`reject-revision|` 打回反馈）。
+     *
+     * 常量住在出卡这一侧（[cardOf] 是唯一产出方），宿主从 `:orchestration` 引用它：
+     * 格式抄两处，改一处就静默失效（点了没反应，且卡面还挂着已处理）。
+     */
+    const val ACTION_REQUEST_REVIEW = "review-patch"
+
+    /** 出卡侧：把 token 编成动作串。 */
+    fun requestReviewActionId(token: String): String = ACTION_REQUEST_REVIEW + "|" + token.trim()
+
+    /**
+     * 收卡侧：从动作串里解回 token。null = 不是复检动作 / token 空的 —— 调用方据此
+     * 走「这张卡过期了」而不是猜一个人出来。
+     */
+    fun requestReviewTokenOf(actionId: String): String? {
+        if (!actionId.startsWith(ACTION_REQUEST_REVIEW + "|")) return null
+        return actionId.removePrefix(ACTION_REQUEST_REVIEW + "|").trim().takeIf { it.isNotEmpty() }
+    }
 
     /**
      * 卡上 diff 预览的**量入为出**参数：帧预算（[Limits.CARD_BYTES]）是硬上限，
@@ -527,6 +573,27 @@ object StageChain {
                     put("label", "Merge")
                     put("approval", true)
                 })
+                // 单兵卡的第二颗按钮：这活该找谁审。**排在合并之后**——合并是机主的
+                // 决定，复检是可选的一道保险；两颗并排时先读完再做，不制造第二条主路径。
+                progress.reviewBy?.takeIf { it.token.isNotBlank() }?.let { who ->
+                    add(buildJsonObject {
+                        put("actionId", requestReviewActionId(who.token))
+                        // label 留英文兜底（旧端只读它），新端按 labelKey 翻成本地词条
+                        // 并用 labelArgs 把「谁」填进去。
+                        put("label", "Request review")
+                        put("labelKey", "card.action.request_review")
+                        put("labelArgs", buildJsonArray { add(JsonPrimitive(who.name)) })
+                    })
+                }
+                // 打回是横幅承诺过的出口（「等你合并或打回」）：不发这颗动作，
+                // 打回抽屉（reject-revision 的就地展开）永远没有触发按钮 —— 承诺
+                // 与实现断在卡面上（真机 UX 轮现场）。排最后：合并是主路径，打回
+                // 是次要出口。反馈文本由端上抽屉编码成 reject-revision|<文本>。
+                add(buildJsonObject {
+                    put("actionId", "reject-revision")
+                    put("label", "Reject")
+                    put("labelKey", "card.action.reject_revision")
+                })
             })
         } else if (progress.state == "prototype") {
             put("actions", buildJsonArray {
@@ -545,6 +612,7 @@ object StageChain {
                 add(buildJsonObject {
                     put("actionId", "approve-prototype")
                     put("label", "Approve & Develop")
+                    put("labelKey", "card.action.approve_prototype")
                     put("approval", true)
                 })
             })
@@ -558,6 +626,7 @@ object StageChain {
                     // 旧端只认 label（英文兜底，不空白）；新端按 labelKey 翻成本地词条。
                     put("label", "Start now")
                     put("labelKey", "card.action.start_task")
+                    put("style", "primary")
                 })
                 add(buildJsonObject {
                     put("actionId", "cancel-task")
@@ -570,6 +639,8 @@ object StageChain {
                 add(buildJsonObject {
                     put("actionId", "retry")
                     put("label", "Retry")
+                    put("labelKey", "card.action.retry")
+                    put("style", "primary")
                 })
             })
         }
@@ -886,7 +957,44 @@ object StageChain {
 /** 链执行器只需要一个只读的 JSON 解析器（逐行拆 CLI 的各种信封）。 */
 private val Json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
 
+/**
+ * 这条链的**形状是谁定的**（宿主侧飞行记录用）。
+ *
+ * 为什么不直接引 `orchestration.FlightPlanDecision`：`:agentNode` 是协议/执行层，
+ * 依赖方向不许反过来。这里只搬运**分类码与几个标量**，判据与取值域仍在
+ * `FlightPlanDecision.SOURCE_*` 那一份（两边各写一套判据才是真的腐坏）。
+ *
+ * `source` 为 null 时整条 trace 也就没有意义 —— 调用方传 null 即可。
+ */
+data class ChainPlanTrace(
+    val source: String,
+    val rationale: String? = null,
+    val workerAgentId: String? = null,
+    val workerName: String? = null,
+    val anchorAgentId: String? = null,
+)
+
 /** 外壳装配链执行器；null 的重返值 = 这条请求接不了（宿主没装驱动器等）。 */
+/**
+ * 链工单的**恢复能力**（卡上「重试」的落点）：单兵工单的重试走编排器的
+ * activeTickets；链工单的受阻卡点了重试，这里按注册表把**同形状同参数**的链
+ * 再派一次（新 chainId —— 旧卡停在终态当历史，新链有自己的卡）。
+ * 消费方用 `as? ChainRetry` 探测：链执行器没实现（老装配）= 按钮接不住，如实翻面。
+ */
+interface ChainRetry {
+    fun retry(chainId: String): Boolean
+
+    /**
+     * 链工单的**打回重派**：卡上「打回」的落点。与 [retry] 同形状同参数重派，
+     * 额外把人的反馈作为**硬约束前置**进每一棒的 instruction —— 打回不是简单
+     * 重跑，而是把「人为什么不满意」变成下一轮每棒都要满足的验收标准。
+     *
+     * 默认 false：老装配没实现 = 按钮接不住，调用方如实翻 stale（与 [retry] 的
+     * 探测式兼容同一纪律）。反馈非空才受理；空串视作无效打回。
+     */
+    fun reject(chainId: String, feedback: String): Boolean = false
+}
+
 fun interface AgentChainDispatcher {
     /** @return chainId（已受理，后台在跑）；null = 没有链执行器。 */
     suspend fun start(
@@ -897,6 +1005,20 @@ fun interface AgentChainDispatcher {
         target: String?,
         module: String?,
         context: String?,
+        /**
+         * 主理人上下文：非 null = 这条链由一个 Lead 负责，他在卡住时会被请来做决定。
+         * null = 纯规约链（既有行为逐字不变）。
+         *
+         * 不能给默认值：`fun interface` 的抽象方法不允许默认参数 —— 所以调用方
+         * **必须显式表态**「这条链有没有主理人」，比一个隐式 null 更不容易漏接。
+         */
+        leader: LeaderBrief?,
+        /**
+         * 形状来源（团队派单带下来）。null = 这条链不经团队编排（HTTP 路由 / 模板链）
+         * —— 飞行记录里就如实没有这一段，不编一个 `compiled` 出来。
+         * 同样不许给默认值：调用方必须表态，漏接会在记录里留下空白。
+         */
+        planTrace: ChainPlanTrace?,
     ): String?
 }
 
@@ -906,7 +1028,7 @@ suspend fun AgentChainDispatcher.start(
     repoPath: String?,
     title: String,
     stages: List<ChainStage>,
-): String? = start(groupId, repoPath, title, stages, null, null, null)
+): String? = start(groupId, repoPath, title, stages, null, null, null, null, null)
 
 /**
  * 顺序跑一条链。
@@ -931,10 +1053,22 @@ class StageChainRunner(
     /** 隔离棒并行分发的并发上限（防一张派单开满宿主 CPU）；测试注入更小值钉住语义。 */
     private val parallelLimit: Int = StageChain.PARALLEL_MAX,
     /** 线性多棒审查流水线；null = 旧的单链行为逐字不变（P2 规格 3 的可逆开关）。 */
-    private val review: ReviewPipeline? = null,
+    review: ReviewPipeline? = null,
     /** 从一棒的结论里取审查判定；缺省 null = 不解析（与 review=null 成对）。 */
     private val verdictOf: (StageRun) -> ReviewVerdict? = { null },
+    /**
+     * 显式决策器：每棒跑完由它裁决下一步。非 null 时**优先于** [review]。
+     * null = 走确定性规约（[DeterministicStepDecider]），行为与 P2 逐字一致。
+     *
+     * 两者最终汇到同一条处理路径 —— 不是两套并行逻辑：并存的分支会在改判据时
+     * 只改一边，链的行为就随「装配方有没有传这个参数」而变。
+     */
+    private val decider: StepDecider? = null,
+    /** 每步决策留痕（卡面与飞行记录消费）。默认不留，避免测试与旧装配产生噪音。 */
+    private val onDecision: (StepRecord) -> Unit = {},
 ) {
+    /** 既有规约包的决策器：与 [decider] 同一个插槽，优先级更低。 */
+    private val rules: StepDecider? = review?.let { DeterministicStepDecider(it) }
 
     suspend fun run(
         chainId: String,
@@ -944,9 +1078,14 @@ class StageChainRunner(
     ): List<StageRun> {
         require(stages.isNotEmpty()) { "chain $chainId has no stages" }
         var rev = 0
-        val statuses = stages.map { it.role to "pending" }.toMutableList()
+        // 计划从「编译期定死的直线」改成工作副本：决策器可以现场插棒（Spawn），
+        // 棒表 / 状态 / 摘要三份平行结构必须同步长，否则卡面与落盘会错位。
+        val plan = stages.toMutableList()
+        val statuses = plan.map { it.role to "pending" }.toMutableList()
+        // 逐步决策的留痕：喂给下一个决策者（它要知道前面已经试过什么）。
+        val records = mutableListOf<StepRecord>()
         // 线性多棒模式拒绝并行隔离组：扇出与投票会把确定性时序变成锁竞争（规格明确不做）。
-        if (review != null && stages.any { it.requiresIsolation }) {
+        if ((rules != null || decider != null) && plan.any { it.requiresIsolation }) {
             report(ChainProgress(chainId, ++rev, "blocked", title, null, statuses.toList(), 0,
                 "Review pipeline is strictly linear: isolation stages are not allowed"))
             return emptyList()
@@ -954,7 +1093,7 @@ class StageChainRunner(
         var attempt = 1
         var reviewMerge = false
         // 每棒摘要（P1）：与 statuses 平行，随每次 report 上卡 —— 「做了哪些事情」的答案。
-        val details = arrayOfNulls<String>(stages.size)
+        val details = MutableList<String?>(plan.size) { null }
         fun detailsArg(): List<String> = details.map { it.orEmpty() }
         // 读不到基线就不开跑：没有起点的链跑出来的「全绿」谁也核对不了。
         val base = headSha(repoPath) ?: run {
@@ -963,7 +1102,7 @@ class StageChainRunner(
             return emptyList()
         }
         report(ChainProgress(chainId, ++rev, "executing", title, null, statuses.toList(), 0,
-            "链条开工：" + stages.size + " 棒，基线 " + base.take(8), details = detailsArg()))
+            "链条开工：" + plan.size + " 棒，基线 " + base.take(8), details = detailsArg()))
 
         var cursor = base
         var prevSummary: String? = null
@@ -973,20 +1112,20 @@ class StageChainRunner(
         val executed = mutableListOf<Pair<ChainStage, StageRun>>()
 
         var index = 0
-        while (index < stages.size) {
-            if (stages[index].requiresIsolation) {
+        while (index < plan.size) {
+            if (plan[index].requiresIsolation) {
                 // —— 隔离组：连续多根 requiresIsolation=true 的棒 ——
                 // 同一基线并行开工（每根棒由驱动侧的 worktree 沙箱各给一个实例），
                 // 全部完成才按棒序落盘、才进下一棒。非隔离棒的顺序依赖链不动。
                 var end = index
-                while (end < stages.size && stages[end].requiresIsolation) end++
+                while (end < plan.size && plan[end].requiresIsolation) end++
                 val group = index until end
-                group.forEach { i -> statuses[i] = stages[i].role to "running" }
+                group.forEach { i -> statuses[i] = plan[i].role to "running" }
                 report(ChainProgress(chainId, ++rev, "executing", title,
-                    if (group.count() == 1) stages[index].role else null, statuses.toList(),
-                    percentOf(index, stages.size),
+                    if (group.count() == 1) plan[index].role else null, statuses.toList(),
+                    percentOf(index, plan.size),
                     if (group.count() == 1) {
-                        stages[index].role + " 开跑（第 " + (index + 1) + "/" + stages.size + " 棒）"
+                        plan[index].role + " 开跑（第 " + (index + 1) + "/" + plan.size + " 棒）"
                     } else {
                         "第 " + (index + 1) + "–" + end + " 棒（隔离组 " + group.count() + " 根）并行开跑"
                     }))
@@ -1001,7 +1140,7 @@ class StageChainRunner(
                         async(Dispatchers.Default) {
                             permits.withPermit {
                                 val t0 = System.nanoTime()
-                                val r = runStage(stages[i], StageChain.promptOf(stages[i], seed), repoPath)
+                                val r = runStage(plan[i], StageChain.promptOf(plan[i], seed), repoPath)
                                 r.copy(elapsedMs = (System.nanoTime() - t0) / 1_000_000)
                             }
                         }
@@ -1009,17 +1148,17 @@ class StageChainRunner(
                 }
                 runs.forEachIndexed { k, r ->
                     val i = group.first + k
-                    statuses[i] = stages[i].role to (if (r.ok) "done" else "failed")
+                    statuses[i] = plan[i].role to (if (r.ok) "done" else "failed")
                 }
-                executed += group.map { stages[it] }.zip(runs)
+                executed += group.map { plan[it] }.zip(runs)
                 // 全部完成才判停：任一棒失败 ⇒ 整组不落盘、不进下一棒。部分合入比不合入
                 // 更难对账（「哪半个改动是谁的」变成悬案），fail-stop 保持整组原子。
                 val firstFailure = runs.indexOfFirst { !it.ok }
                 if (firstFailure >= 0) {
                     val failIndex = group.first + firstFailure
                     details[failIndex] = (runs[firstFailure].error ?: "原因未报").take(200)
-                    report(ChainProgress(chainId, ++rev, "blocked", title, stages[failIndex].role,
-                        statuses.toList(), percentOf(failIndex, stages.size),
+                    report(ChainProgress(chainId, ++rev, "blocked", title, plan[failIndex].role,
+                        statuses.toList(), percentOf(failIndex, plan.size),
                         "第 " + (failIndex + 1) + " 棒失败，链条已停：" + (runs[firstFailure].error ?: "原因未报"),
                         details = detailsArg()))
                     done += runs
@@ -1027,18 +1166,18 @@ class StageChainRunner(
                 }
                 // 按棒序串行落盘：宿主仓的 git 是共享面，不能并发 apply。
                 group.forEachIndexed { k, i ->
-                    val stage = stages[i]
+                    val stage = plan[i]
                     val run = runs[k]
                     val summary = StageChain.summarize(run.summary)
                     val sha = land(repoPath, run.copy(summary = summary),
-                        commitMessageOf(chainId, i, stages.size, stage, summary))
+                        commitMessageOf(chainId, i, plan.size, stage, summary))
                     done += run.copy(summary = summary, sha = sha)
                     if (sha != null) cursor = sha
                     details[i] = summary
                     // 完成事件带上「干了什么」的尾巴：卡上不用点开也知道这棒做成了什么。
                     val tail = summary?.take(80)?.let { "：" + it } ?: ""
                     report(ChainProgress(chainId, ++rev, "executing", title, stage.role, statuses.toList(),
-                        percentOf(i + 1, stages.size),
+                        percentOf(i + 1, plan.size),
                         stage.role + " 完成" + (if (sha == null) "（无改动）" else "（提交 " + sha.take(8) + "）") + tail,
                         details = detailsArg()))
                 }
@@ -1049,10 +1188,10 @@ class StageChainRunner(
             }
 
             // —— 非隔离棒：维持原顺序依赖链 ——
-            val stage = stages[index]
+            val stage = plan[index]
             statuses[index] = stage.role to "running"
             report(ChainProgress(chainId, ++rev, "executing", title, stage.role, statuses.toList(),
-                percentOf(index, stages.size), stage.role + " 开跑（第 " + (index + 1) + "/" + stages.size + " 棒）",
+                percentOf(index, plan.size), stage.role + " 开跑（第 " + (index + 1) + "/" + plan.size + " 棒）",
                 details = detailsArg()))
 
             val prompt = StageChain.promptOf(stage, StageSeed(cursor, repoPath, prevSummary, prevArtifacts))
@@ -1065,14 +1204,14 @@ class StageChainRunner(
                 statuses[index] = stage.role to "failed"
                 details[index] = (run.error ?: "原因未报").take(200)
                 report(ChainProgress(chainId, ++rev, "blocked", title, stage.role, statuses.toList(),
-                    percentOf(index, stages.size),
+                    percentOf(index, plan.size),
                     "第 " + (index + 1) + " 棒失败，链条已停：" + (run.error ?: "原因未报"),
                     details = detailsArg()))
                 return done + run
             }
             val summary = StageChain.summarize(run.summary)
             val sha = land(repoPath, run.copy(summary = summary),
-                commitMessageOf(chainId, index, stages.size, stage, summary))
+                commitMessageOf(chainId, index, plan.size, stage, summary))
             statuses[index] = stage.role to "done"
             done += run.copy(summary = summary, sha = sha)
             if (sha != null) cursor = sha
@@ -1081,36 +1220,81 @@ class StageChainRunner(
             prevArtifacts = listOfNotNull(run.patchPath)
             val tail = summary?.take(80)?.let { "：" + it } ?: ""
             report(ChainProgress(chainId, ++rev, "executing", title, stage.role, statuses.toList(),
-                percentOf(index + 1, stages.size),
+                percentOf(index + 1, plan.size),
                 stage.role + " 完成" + (if (sha == null) "（无改动）" else "（提交 " + sha.take(8) + "）") + tail,
                 details = detailsArg()))
-            // 线性多棒审查：REJECT 打回第 0 棒（保留已落地的提交现场），全棒 PASS 才给合流信号。
-            // review=null 时走原来的 index += 1，既有链行为逐字不变。
-            val advance = review?.advance(
-                index, stages.size, attempt, verdictOf(run), run.summary ?: run.error.orEmpty(),
-            )
-            if (advance == null) {
-                index += 1
-            } else when (advance) {
-                is ReviewPipeline.Advance.Next -> index = advance.stageIndex
-                is ReviewPipeline.Advance.Merge -> {
-                    reviewMerge = true
-                    index = stages.size
+            // —— 下一步：决策器裁决（显式决策器 > 既有规约 > 顺序推进）——
+            // 三条来源最终落进同一个 `when`，所以「谁在同一步上做决定」不会改变
+            // 执行器的语义 —— 变的只是决策从哪里来。
+            val verdict = verdictOf(run)
+            val active = decider ?: rules
+            val decision = if (active == null) {
+                StepDecision.Next(index + 1)
+            } else {
+                val input = StepInput(
+                    chainId = chainId,
+                    goal = title,
+                    stageIndex = index,
+                    stages = plan.toList(),
+                    attempt = attempt,
+                    verdict = verdict,
+                    feedback = run.summary ?: run.error.orEmpty(),
+                    history = records.toList(),
+                    budget = StepBudget(attempt = attempt, stageCount = plan.size),
+                    patchPath = run.patchPath,
+                )
+                // 决策器抛异常 = 决策不可用：如实停下，绝不悄悄回落成「顺序推进」——
+                // 那会把一次崩溃变成一次没人知道的假通过。
+                runCatching { active.decide(input) }.getOrElse { t ->
+                    StepDecision.Stop("step decider failed: " + (t.message ?: t::class.simpleName))
                 }
-                is ReviewPipeline.Advance.BackToWorker -> {
-                    attempt = advance.attempt
-                    prevSummary = advance.feedback
+            }
+            val record = StepRecord(
+                stageIndex = index,
+                stageRole = stage.role,
+                verdict = verdict,
+                action = actionOf(decision),
+                decidedBy = if (decider != null) StepRecord.BY_LEADER else StepRecord.BY_RULE,
+                reason = reasonOf(decision),
+            )
+            records += record
+            onDecision(record)
+            when (decision) {
+                is StepDecision.Next -> index = decision.stageIndex.coerceIn(0, plan.size)
+                is StepDecision.Finish -> {
+                    reviewMerge = true
+                    index = plan.size
+                }
+                is StepDecision.Rework -> {
+                    attempt = decision.attempt
+                    prevSummary = decision.feedback
                     prevArtifacts = emptyList()
-                    index = 0
-                    statuses.indices.forEach { i -> statuses[i] = stages[i].role to "pending" }
-                    report(ChainProgress(chainId, ++rev, "executing", title, stages[0].role,
-                        statuses.toList(), percentOf(1, stages.size),
-                        "attempt " + advance.attempt + ": review rejected, back to worker with feedback",
+                    index = decision.stageIndex.coerceIn(0, plan.size - 1)
+                    statuses.indices.forEach { i -> statuses[i] = plan[i].role to "pending" }
+                    report(ChainProgress(chainId, ++rev, "executing", title, plan[index].role,
+                        statuses.toList(), percentOf(1, plan.size),
+                        "attempt " + decision.attempt + ": review rejected, back to worker with feedback",
                         details = detailsArg()))
                 }
-                is ReviewPipeline.Advance.Blocked -> {
+                is StepDecision.Spawn -> {
+                    // 插棒上限按「相对原始计划的增量」算：决策者可以现场加人，但不能把
+                    // 一条链撑成几十棒 —— 每棒都是真进程、真 worktree、一次提交。
+                    if (plan.size >= stages.size + MAX_DYNAMIC_STAGES) {
+                        report(ChainProgress(chainId, ++rev, "blocked", title, stage.role,
+                            statuses.toList(), percentOf(index, plan.size),
+                            "dynamic stages exceed budget (" + MAX_DYNAMIC_STAGES + "): " + decision.stage.role,
+                            details = detailsArg()))
+                        return done
+                    }
+                    val at = (decision.afterIndex + 1).coerceIn(0, plan.size)
+                    plan.add(at, decision.stage)
+                    statuses.add(at, decision.stage.role to "pending")
+                    details.add(at, null)
+                    index = at
+                }
+                is StepDecision.Stop -> {
                     report(ChainProgress(chainId, ++rev, "blocked", title, stage.role,
-                        statuses.toList(), percentOf(index, stages.size), advance.reason,
+                        statuses.toList(), percentOf(index, plan.size), decision.reason,
                         details = detailsArg()))
                     return done
                 }
@@ -1120,7 +1304,7 @@ class StageChainRunner(
         // —— Reviewer 三项审计：全部执行棒完成、验收棒合流前（fail-closed）——
         // a) 语法规范 + b) 白名单键按棒判定；c) 帧预算对**合流卡整体**判定。
         val auditChecks = ReviewerAudit.checksFor(executed, valueDomains)
-        val readyBanner = "全部 " + stages.size + " 棒完成，等待机主终审"
+        val readyBanner = "全部 " + plan.size + " 棒完成，等待机主终审"
         // 文档预览（用户验收意见）：最后一根有产出的棒的 patch，
         // 在合流卡上给**真 hunk 预览 + 交付产物块** —— 机主批准前看得到自己批的是什么。
         // 读不到/超预算由 patchPreviewOf 的裁剪兜底；没有产出的棒（nothing to harvest）
@@ -1144,7 +1328,7 @@ class StageChainRunner(
         var readyJson = ""
         repeat(3) {
             readyJson = StageChain.cardJsonOf(
-                ChainProgress(chainId, rev + 1, "review_ready", title, stages.last().role,
+                ChainProgress(chainId, rev + 1, "review_ready", title, plan.last().role,
                     statuses.toList(), 100, readyBanner,
                     checks = auditChecks + ReviewerAudit.budgetCheck(measured), details = detailsArg(),
                     diff = patchPreview, artifacts = patchArtifacts),
@@ -1156,7 +1340,7 @@ class StageChainRunner(
         val failedCheck = if (budgetFailed.observation!!.isNotEmpty()) budgetFailed
             else auditChecks.firstOrNull { it.status == ReviewerAudit.FAILED }
         if (failedCheck != null) {
-            val full = ChainProgress(chainId, rev + 1, "blocked", title, stages.last().role,
+            val full = ChainProgress(chainId, rev + 1, "blocked", title, plan.last().role,
                 statuses.toList(), 100, "审计未通过，停止合流：" + failedCheck.observation.orEmpty(),
                 checks = auditChecks + budgetFailed, details = detailsArg())
             if (StageChain.cardOf(full).toString().toByteArray(Charsets.UTF_8).size <= Limits.CARD_BYTES) {
@@ -1173,7 +1357,7 @@ class StageChainRunner(
             return done
         }
         rev++
-        report(ChainProgress(chainId, rev, "review_ready", title, stages.last().role,
+        report(ChainProgress(chainId, rev, "review_ready", title, plan.last().role,
             statuses.toList(), 100, readyBanner, checks = auditChecks + ReviewerAudit.budgetCheck(measured),
             details = detailsArg(), reviewPassed = reviewMerge,
             diff = patchPreview, artifacts = patchArtifacts))
@@ -1182,6 +1366,31 @@ class StageChainRunner(
 
     private fun percentOf(finished: Int, total: Int): Int =
         if (total <= 0) 0 else (finished * 100 / total).coerceIn(0, 100)
+
+    /** 决策的可读动作名：进留痕与卡面，不参与任何判据（判据只看 [StepDecision] 类型）。 */
+    private fun actionOf(decision: StepDecision): String = when (decision) {
+        is StepDecision.Next -> "next:" + decision.stageIndex
+        is StepDecision.Rework -> "rework:" + decision.attempt
+        is StepDecision.Spawn -> "spawn:" + decision.stage.role
+        StepDecision.Finish -> "finish"
+        is StepDecision.Stop -> "stop"
+    }
+
+    private fun reasonOf(decision: StepDecision): String? = when (decision) {
+        is StepDecision.Spawn -> decision.reason
+        is StepDecision.Stop -> decision.reason
+        else -> null
+    }
+
+    companion object {
+        /**
+         * 决策器现场插棒的上限（相对**原始计划**的增量）。
+         *
+         * 这不是「应该插几棒」的策略，而是宿主的硬边界：每一棒都占一个真进程、
+         * 一份 worktree 与一次提交，无上限的自我加人会把一台机器跑死。
+         */
+        const val MAX_DYNAMIC_STAGES: Int = 2
+    }
 
     private fun commitMessageOf(
         chainId: String,

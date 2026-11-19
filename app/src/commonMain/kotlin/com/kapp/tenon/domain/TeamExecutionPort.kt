@@ -27,6 +27,23 @@ interface TeamExecutionPort {
     fun driverCatalog(): Set<String>
 
     /**
+     * 本机**全集名册**（方案 §3.2）：盘面上「七家全画」的数据源 —— 全集与 [driverCatalog]
+     * （在位）是**两份数据**，差集才是「未装」。null = 本壳没有名册事实（手机/预览）
+     * ⇒ 盘面的检测段整体不画（不变量 3：能力缺失不画按钮），卡片仍可看目录。
+     *
+     * UI **不许 import `CliDriverSpecs`**（composeApp 不依赖 `:agent-contract`）：
+     * 显示名/厂商/安装指引全部经这条投影过来，`composeResources` 不出现第二张手写表。
+     */
+    fun driverRoster(): List<DriverRosterEntryUi>? = null
+
+    /**
+     * 跑一次**在位各家**的登录态检测（方案 §3.2）：并发、只读、不落盘。
+     * null = 本壳没有检测面（手机/预览）⇒ 检测按钮不画（不变量 3）。
+     * 「全部检测」与单卡「重查」都走这里（一次全检是可接受的粗粒度 —— 结果按键落行）。
+     */
+    suspend fun driverAuthChecks(): List<DriverAuthCheckUi>? = null
+
+    /**
      * agy CLI 的登录态（预检探针）：true = 已登录，false = 未登录，null = 本机没有
      * agy / 探针不可用。suspend：首次探测要起一次子进程（≈6s），结果由探针侧记忆。
      */
@@ -52,6 +69,22 @@ interface TeamExecutionPort {
      * 环境在位）只表示"有凭证物、未验真"。任何"两集合都空即通过"的写法都是空集假绿。
      */
     suspend fun driverAuthStates(): Map<String, DriverAuthStateEntryUi>? = null
+
+    /**
+     * 各底座**当下真的列出**的模型目录：`driverKey → 目录结论`。
+     *
+     * **设计用途 = 打开编制时的按需调用**（判据与 [driverAuthStates] 同一套：自动预检不做、
+     * 常驻表不做、用户打开编制才探）。结果由装配件按驱动缓存，重复打开不重复起子进程。
+     *
+     * 三态必须分清，空集不许冒充「没有模型」：
+     * - [DriverModelCatalogStateUi.KNOWN]：真读到了，`models` 至少一条；
+     * - [DriverModelCatalogStateUi.UNKNOWN]：没读到（缺规格 / CLI 不在 / 超时 / 解析不了），
+     *   UI 转成手填兜底；
+     * - [DriverModelCatalogStateUi.NOT_PROBED]：这一壳还没探过（本方法尚未调用）。
+     *
+     * null = 本壳没有目录能力（手机 / 预览 / 老装配）⇒ UI 不画选择项，只留手填。
+     */
+    suspend fun driverModelCatalog(): Map<String, DriverModelCatalogEntryUi>? = null
 
     /**
      * 读该支队的执行档；null = 没配过（正常）。主键 = `(目录, 领队)`，**不含群** ——
@@ -81,6 +114,30 @@ interface TeamExecutionPort {
 }
 
 /** 底座登录态的三态（与探针侧同口径：只报确定未登录，其余放行）。 */
+/**
+ * 盘面上一家底座的**名册行**（方案 §3.2/§3.9）：显示名、短名、厂商、在位与否、安装指引。
+ * 由编排层从 `CliDriverSpecs` + 安装指引表投影出来 —— 这是「友好名」的唯一真相源。
+ */
+data class DriverRosterEntryUi(
+    val key: String,
+    val displayName: String,
+    val shortName: String,
+    val vendor: String,
+    val installed: Boolean,
+    val installUrl: String? = null,
+    val supportsPerTaskModel: Boolean = false,
+)
+
+/** 检测台账里一行（只读快照；`checkedAt` = 0 表示从没检测过）。 */
+data class DriverAuthCheckUi(
+    val driverKey: String,
+    val state: DriverAuthStateUi,
+    val evidence: DriverAuthEvidenceUi,
+    val remediation: DriverAuthRemediationUi,
+    val remediationDetail: String,
+    val checkedAt: Long = 0L,
+)
+
 enum class DriverAuthStateUi { AUTHENTICATED, NOT_AUTHENTICATED, UNKNOWN }
 
 /** 证据强度：真跑子命令 = STRONG；只看凭证文件/环境在位 = HINT（未验真）。 */
@@ -118,6 +175,36 @@ data class DriverAuthStateEntryUi(
      * 状态仍由 [state] 与 [evidence] 如实表达。
      */
     val remediationDetail: String = "",
+)
+
+/**
+ * 模型目录的一行：`id` 是派单时真正传给 CLI 的值，`label` 只用于显示
+ * （CLI 自己给的可读名；没有就回落成 id）。
+ */
+data class DriverModelOptionUi(val id: String, val label: String)
+
+/** 目录三态（与探针侧同口径：只报确定读到的，其余一律 UNKNOWN）。 */
+enum class DriverModelCatalogStateUi {
+    /** 真读到了模型列表。 */
+    KNOWN,
+
+    /** 没读到 —— 缺规格 / CLI 不在位 / 超时 / 解析不了。**不是**「没有模型」。 */
+    UNKNOWN,
+
+    /** 这一壳还没探过（端口方法没被调用）。 */
+    NOT_PROBED,
+}
+
+/**
+ * 一家底座的目录结论。字段全是 `String`/枚举，不携带驱动或平台类型 —— `:app` 零依赖边界。
+ *
+ * [note] 是诊断串（装配层写的原因），UI 不直接显示它 —— 显示文案按 [state] 走本地化资源。
+ */
+data class DriverModelCatalogEntryUi(
+    val driverKey: String,
+    val state: DriverModelCatalogStateUi,
+    val models: List<DriverModelOptionUi> = emptyList(),
+    val note: String = "",
 )
 
 /** 端口侧的执行档成员（UI 编辑形状；与编排层 TeamExecutionMemberSpec 逐字段对齐）。 */
@@ -206,15 +293,21 @@ fun initialExecutionProfileUi(
 /**
  * UI 侧保存校验（与编排层 save 共用同一份规则口径；端口的 validate 实现会再做一次
  * 完整校验 —— 这里只做**结构前置**，给出可就地显示的原因）。
+ *
+ * @param knownModels 该驱动**当下真的列出**的模型 id；null = 没探到（放行）。
+ *   判据是「已知且不含」而不是「不在表里」：后者会在离线/未登录时拒掉一切合法模型。
  */
 fun validateExecutionProfileUi(
     profile: TeamExecutionProfileUi,
     declaredMemberIds: Set<String>,
     driverCatalog: Set<String>,
+    knownModels: Map<String, Set<String>>? = null,
 ): List<String> {
     val reasons = mutableListOf<String>()
     val workers = profile.members.filter { it.isWorker }
-    if (workers.size != 1) reasons.add("exactly one worker required (found " + workers.size + ")")
+    // 与宿主侧 `TeamExecutionValidation` 同口径：0 人不行，多人合法（本单谁下场由主理人
+    // 按任务点将，编制不能替它锁死）。
+    if (workers.isEmpty()) reasons.add("at least one worker required (found 0)")
     val ids = profile.members.map { it.agentId.trim().lowercase() }
     if (ids.toSet().size != ids.size) reasons.add("duplicate member agentId")
     if (profile.members.size > Limits.TEAM_MEMBERS_MAX) {
@@ -230,6 +323,16 @@ fun validateExecutionProfileUi(
         // `TeamExecutionValidation` 会在真正落盘前按它拒一次。
         if (m.models.size > 1) {
             reasons.add("member " + m.agentId + ": only one model per member is supported (" + m.models.size + ")")
+        }
+        // 目录已知却不含该模型 ⇒ 就地指出。「没验到」放行（缺键 ≠ 空集）。
+        val catalogIds = knownModels?.get(m.driverKey.trim().lowercase())
+        if (catalogIds != null) {
+            m.models.filter { it.isNotBlank() && it !in catalogIds }.forEach { bad ->
+                reasons.add(
+                    "member " + m.agentId + ": model '" + bad.take(70) +
+                        "' is not in driver '" + m.driverKey + "' catalog",
+                )
+            }
         }
     }
     val declared = declaredMemberIds.map { it.trim().lowercase() }.toSet()

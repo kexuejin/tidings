@@ -6,7 +6,6 @@ import com.kapp.tenon.core.protocol.AppFlavor
 import com.kapp.tenon.core.protocol.FlavorMode
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 

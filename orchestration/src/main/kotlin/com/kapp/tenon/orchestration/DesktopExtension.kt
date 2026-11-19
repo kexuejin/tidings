@@ -528,6 +528,10 @@ class DesktopExtension(
                 // leader 动态编排：@团队名 编译出的固定链先过一次 LLM 重排；
                 // 无 key / 超时 / 门校验不过由 TeamPlanRefiner 自己返回 null，回落编译固定链。
                 teamPlanRefiner = { plan -> TeamPlanRefiner.refine(plan) },
+                // 审核面裁决（L1）：审不审 / 审几棒 / 谁审由 LLM 按任务复杂度定，
+                // 0 审查棒是合法输出。建议过形状门与既有硬门，任何一步不过都回落编译
+                // 固定链 —— 派单永不因为 LLM 卡住。
+                teamPlannerChain = { input -> TeamPlannerLlm.decide(input) },
                 // 团队执行档：@组员 的宿主侧解析与编译（§4.3）。
                 teamExecutionStore = teamExecution,
                 // P3 工具面：给每一棒的指令尾部追加「本机还能调哪些改编制/改档案的动作」。
@@ -537,6 +541,9 @@ class DesktopExtension(
                 },
                 // D16：执行档主键的 dirId 一半 —— 与控制面/端口同一份 HostDirectoryStore。
                 groupDirIdOf = { groupId -> hostDirectoryStore?.pointerOf(groupId) },
+                // D16 的另一半：dirId → 本机路径。单兵派单靠它认出「用目录指针绑过、
+                // 但席位投影还没重建」的群（同一个目录的两条落点都要认）。
+                dirPathOf = { dirId -> hostDirectoryStore?.directoryOf(dirId)?.path },
                 // D10/D15：节点级目录白名单（默认 deny 在 store 里）。按 path 反查 dirId；
                 // 未登记的路径一律不放行 —— 不回落别的目录。
                 pathAllowed = { path, requireWrite ->
@@ -550,6 +557,9 @@ class DesktopExtension(
             // 登录态只读探针：每家跑一次 status 子命令，5 秒超时；探针只在本机装配，
             // 不进 domain / 手机端。失败一律 UNKNOWN，不弹错误框。
             val cliAuthRunner = com.kapp.tenon.agent.drivers.CliAuthProbes.jvmRunner()
+            // 模型目录探测：打开编制时按需调一次，结果在探针侧按驱动缓存（TTL 见
+            // DriverModelCatalog）。只登记实测过输出形态的子命令，其余驱动答 UNKNOWN。
+            val modelCatalog = com.kapp.tenon.agent.drivers.DriverModelCatalog()
             // 团队执行档端口（§6.3）：UI 读写宿主本地执行配置的唯一通路（手机端为 null ⇒ 只读）。
             val execPort = DesktopTeamExecutionPort(
                 store = teamExecution,
@@ -610,6 +620,11 @@ class DesktopExtension(
                         },
                     )
                 },
+                // 模型目录（v1 只读可见面）：与登录态同一条按需路径 —— 打开编制才探，
+                // 失败降级 UNKNOWN、不抛到 UI；映射见 DriverModelCatalogMapping。
+                modelCatalogProbe = { inService ->
+                    DriverModelCatalogMapping.toUi(modelCatalog.snapshot(inService))
+                },
             )
             controller.teamExecutionPort = execPort
             // 员工工位端口：名录上那格「用什么工具干活」。与执行档端口**同一实例** ——
@@ -622,8 +637,8 @@ class DesktopExtension(
             // 「AI 建队」生成桥：LLM → 过门 → 回落模板一条龙（TeamScaffoldGenerator）。
             // 驱动名册与执行档端口同一份在位事实；领队候选由 UI 传（与 TeamProfileDialog
             // 同一候选源），桥只负责"给一份可建方案"，落盘仍走用户确认后的 saveTeamProfile。
-            controller.teamScaffoldBridge = TeamScaffoldBridge { need, leaderKeys, defaults ->
-                TeamScaffoldGenerator.generate(need, leaderKeys, defaults) {
+            controller.teamScaffoldBridge = TeamScaffoldBridge { need, roster, defaults ->
+                TeamScaffoldGenerator.generate(need, roster, defaults) {
                     workerOrchestrator.availableAgentKeys()
                 }
             }
@@ -1258,6 +1273,22 @@ class DesktopExtension(
                     }
                 }
             }
+            // MINT 建档的底座在位判据（方案 §3.3）：与执行盘面同一份 driverCatalog（availableAgentKeys）。
+            // null = 控制面不可用 ⇒ 端口为 null ⇒ MINT 不拦（与台账空放行同一条宽容纪律）。
+            controller.driverInCatalogOf = workerOrchestrator.availableAgentKeys()?.let { catalog ->
+                { agentId ->
+                    com.kapp.tenon.agent.drivers.AgentProfiles.resolveKey(agentId, catalog)?.let { true }
+                        ?: (agentId in catalog)
+                }
+            }
+            // 实例键 → 规范 driverKey 的反解（A7）：REGISTER_EXISTING 没给 driverKey 时建档落档用；
+            // 解不出返回 null ⇒ 档案落空串 ⇒ 派单期 NO_DRIVER（不猜）。同一份 catalog。
+            controller.driverKeyResolveOf = workerOrchestrator.availableAgentKeys()?.let { catalog ->
+                { raw: String ->
+                    com.kapp.tenon.agent.drivers.AgentProfiles.resolveKey(raw, catalog)
+                        ?: raw.takeIf { raw in catalog }
+                }
+            }
             // M7-T2（D-016 后半步 / D-017 修订）：入站 agent-channel 的域层分流。
             // 授权门在这里（域层才有群元数据）——编排器只管承接后的调度。
             // 判据复用 grants 的执行面判定（同一批可信设备，forExecution 口径）：
@@ -1340,10 +1371,11 @@ class DesktopExtension(
                     // **档案键**（`dsh`）。不归位 ⇒ resolveCliDriver 恒 null ⇒ CLI 分支
                     // 整段跳过、直接 NO_PLUGIN，真机上表现为「点了没反应」。
                     // 在位名册与编排器同源（availableAgentKeys），不在装配层再问一遍。
-                    val cliKey = AgentProfiles.resolveKey(
-                        request.agentId,
-                        workerOrchestrator.availableAgentKeys().orEmpty(),
-                    ) ?: request.agentId
+                    val cliKey = dispatchDriverKey(
+                        agentId = request.agentId,
+                        profiles = controller.state.value.settings.employeeProfiles,
+                        availableKeys = workerOrchestrator.availableAgentKeys().orEmpty(),
+                    )
                     // wsId → 路径的解析表只在宿主本机（隐私收口：路径不出宿主）。
                     val wsPath = request.wsId?.trim()?.takeIf { it.isNotEmpty() }?.let { id ->
                         controller.state.value.agentWorkspaces.values
@@ -1387,6 +1419,18 @@ class DesktopExtension(
                             replyToId = null,
                             agentKey = cliKey,
                             wsId = request.wsId,
+                            // **卡面承办人是人**：agentKey 在桥上已经归一成驱动键
+                            // （cliKey），员工身份（request.agentId）只剩这里能带到 ——
+                            // 丢了它，单兵卡的承办人就退化成「Codex（本机）」，同底座
+                            // 两个员工的两张单在用户眼里无法区分。解析不出（老数据/
+                            // 非员工席位）传 null，卡面回落驱动名，逐字同旧行为。
+                            assigneeName = TicketActorNaming.assigneeNameOf(
+                                controller.state.value.settings.groups.firstOrNull {
+                                    it.groupId == request.groupId
+                                },
+                                controller.state.value.settings.employeeProfiles,
+                                request.agentId,
+                            ),
                         )
                         // 产物投递**全部归编排器审阅流**（deliverPatchBundle + 
                         // deliverOversizedArtifacts，在 handlePromptAwait 内完成）。

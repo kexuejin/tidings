@@ -54,3 +54,23 @@ fun sameAgent(candidate: String?, kind: String?, wanted: String?): Boolean {
     }
     return false
 }
+
+/**
+ * 两个**员工身份**是不是同一个人 —— 按 `employeeId` 精确相等（三层正交模型的身份尺）。
+ *
+ * ## 为什么不能用 [sameAgent]
+ *
+ * [sameAgent] 是**路由尺**：它把 `-` 之前同 head 的全并（`dsh` ~ `dsh-029bbbf3`），
+ * 自己的 KDoc 就写明「绝不能用它做是不是同一个实例的判定」。拿它判员工身份，
+ * 同底座的两个真人会被并成一份档案（撞 `EMPLOYEE_EXISTS`、卡面并档）—— 正是洞 E。
+ *
+ * 员工身份锚是本机分配的 `emp-…`，跨进程重启稳定、与底座/hex 无关，因此这里只做
+ * trim 后精确相等。**大小写敏感**（`emp-A` ≠ `emp-a`）：它是不透明键，不是展示名。
+ *
+ * 空值一律不匹配（fail-closed）：两份都没有身份锚的档案不能被当成同一个人。
+ */
+fun sameEmployee(a: String?, b: String?): Boolean {
+    val x = a?.trim().orEmpty()
+    val y = b?.trim().orEmpty()
+    return x.isNotEmpty() && x == y
+}

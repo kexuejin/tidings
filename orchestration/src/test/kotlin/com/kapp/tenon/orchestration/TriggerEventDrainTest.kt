@@ -371,11 +371,19 @@ class TriggerEventDrainTest {
         }
         drain.start()
         try {
+            // **等状态，不等它前一步的事实**：`handled` 在 handler 一进来就为真，而落
+            // `done` 是 handler 返回之后写的 —— 两个断言之间隔着一个真实的窗口，
+            // 全量并行跑时必然偶发 "expected done but was running"。
             TestAwait.condition(
                 "库抖动之后循环必须自己再跑一轮（不许等下一个事件）",
                 timeoutMs = 10_000L,
-            ) { handled.contains("evt-recover") }
-            assertEquals(TriggerEventStates.DONE, base.row("evt-recover").state)
+            ) { base.row("evt-recover").state == TriggerEventStates.DONE }
+            assertEquals(
+                TriggerEventStates.DONE,
+                base.row("evt-recover").state,
+                "重踢之后这一行必须走到终态，不许停在 pending/running",
+            )
+            assertTrue(handled.contains("evt-recover"), "走到 done 之前必须真的派发过（不是直接改状态）")
         } finally {
             drain.stop()
         }

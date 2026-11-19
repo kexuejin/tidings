@@ -141,6 +141,40 @@ interface RelayUiTexts {
     /** 「团队已就位」横幅（role、倒计时秒数）。 */
     suspend fun teamReadyBanner(role: String, seconds: Long): String = ""
 
+    /**
+     * 这次派单**没有独立审查棒**时的标注（拼接在就位横幅后面）。
+     *
+     * 0 审查棒是**合法形状**（单点、低风险、可自验），不限制，但必须让人知道：
+     * 没有这句标注，用户看到的只是「一单干完了」，而不是「这单没人复核过」。
+     * 取不到文案返回空串 —— 调用方不拼分隔符，不编中文。
+     */
+    suspend fun unreviewedNotice(): String = ""
+
+    /**
+     * 「本单由 X 承办」—— 主理人**换过人**时拼在就位横幅后面。
+     *
+     * `@团队名` 的锚点只是默认落点，换人是主理人的职权；但用户点的是团队，不是那个
+     * 人。卡上不说，换人就是静默的（承办人那一列是岗位不是"你点的人"）。
+     * 取不到文案返回空串 —— 调用方不拼分隔符，不编中文。
+     */
+    suspend fun pickedWorkerNotice(name: String): String = ""
+
+    /**
+     * 链式工单的「重试」接不住时的**如实翻面横幅**：链执行器没有恢复注册表，
+     * 一键重试暂不支持 —— 与单兵工单的「已结束/宿主重启」是两回事，措辞分开
+     * （真机 UX 轮现场：链受阻卡上点重试，横幅谎报「已结束」，用户被骗去重启宿主）。
+     * 取不到文案返回空串 —— 调用方回落通用措辞，不编中文。
+     */
+    suspend fun chainRetryUnsupported(): String = ""
+
+    /**
+     * 打回后**旧卡**的翻面横幅：团队链打回会生成新 chainId、另发新卡，旧
+     * review_ready 卡必须就地变成不可操作的终态 —— 否则它的「采纳并应用修改」
+     * 仍能合入已被打回的旧分支（patch 登记无清理，且 merge 对链卡有分支兜底）。
+     * 取不到文案返回空串 —— 调用方回落通用措辞，不编中文。
+     */
+    suspend fun revisionSupersedesCard(): String = ""
+
     /** diff 就绪但没摘要时的兜底句。 */
     suspend fun diffReadyPrompt(): String = ""
 

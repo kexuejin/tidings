@@ -70,6 +70,8 @@ import com.kapp.tenon.feature.conversations.createWorkspaceGroupForNewDirectory
 import com.kapp.tenon.feature.conversations.createWorkspaceGroupWithDirectory
 import com.kapp.tenon.feature.conversations.systemDirectoryPicker
 import com.kapp.tenon.ui.components.AppBanner
+import com.kapp.tenon.ui.components.LocalDriverRoster
+import com.kapp.tenon.ui.components.rememberDriverModelCatalog
 import com.kapp.tenon.generated.resources.workspace_group_default_name
 import com.kapp.tenon.ui.components.WorkspaceGroupCreateDialog
 import com.kapp.tenon.ui.components.WorkspaceGroupPromptDialog
@@ -200,11 +202,8 @@ private data class EmployeeEditInput(
     val employeeId: String?,
     val name: String,
     val duty: String,
-    /**
-     * 表单上方那句「登记对象：…」。只有**从档案页新建**时给：那条路进来的用户手里没有卡，
-     * 不说出身份键就只能凭记忆确认点的是哪个人。从详情页进（那张卡就在屏幕上）留 null。
-     */
-    val subjectLabel: String? = null,
+    val driverKey: String = "",
+    val model: String? = null,
 )
 
 /**
@@ -678,6 +677,9 @@ public fun DesktopShell(
     CompositionLocalProvider(
         LocalCardShape provides
             if (chromeMode.showsDesktopChrome) RelayShapes.medium else RelayShapes.large,
+        // 底座名册（方案 §3.9）：友好名/盘面全集的**唯一真相**（端口投影 CliDriverSpecs）
+        // 在这里注入一次，全应用（盘面/下拉/名录/团队行）同源 —— UI 不 import CliDriverSpecs。
+        LocalDriverRoster provides controller.teamExecutionPort?.driverRoster(),
     ) {
     // 截图接缝用的覆盖层：生产恒不画（`overflowPanelPreview` 默认 false），
     // 所以这里只是给内容区加一层「可以叠东西」的父级，不改布局。
@@ -1014,20 +1016,33 @@ public fun DesktopShell(
                             // 员工档案对话框（登记 / 改名 / 改职责）：桌面壳独占 —— 档案只住宿主机，
                             // 手机端连写入口都没有，那里的详情页也不画这颗按钮。
                             employeeEditing?.let { editing ->
+                                // 模型目录：只在对话框打开时探一次（端口侧按驱动缓存 TTL），
+                                // 与团队编制读同一份事实 —— 员工档案与执行档是两个存储，
+                                // 「这家有什么模型」却只有一个答案。
+                                val employeeModelCatalog = rememberDriverModelCatalog(
+                                    controller.teamExecutionPort,
+                                    controller.teamExecutionPort?.driverCatalog().orEmpty(),
+                                )
                                 com.kapp.tenon.feature.agents.EmployeeEditDialog(
                                     employeeId = editing.employeeId,
                                     initialName = editing.name,
                                     initialDuty = editing.duty,
-                                    subjectLabel = editing.subjectLabel,
+                                    initialDriverKey = editing.driverKey,
+                                    initialModel = editing.model,
+                                    roster = controller.teamExecutionPort?.driverRoster(),
+                                    authStates = null,
+                                    modelCatalog = employeeModelCatalog,
                                     // 「谁能调用」读宿主策略：读不到（没装桥）就整段不画。
                                     initialPolicy = editing.agentId?.let(controller::agentExecPolicyOf),
-                                    onSave = { name, duty, policy ->
+                                    onSave = { name, duty, policy, driverKey, model ->
                                         // 位置实参（见 RelayController.saveEmployeeProfile 的注释）。
                                         controller.saveEmployeeProfile(
                                             editing.agentId.orEmpty(),
                                             editing.employeeId,
                                             name,
                                             duty,
+                                            driverKey = driverKey,
+                                            model = model,
                                         )
                                         // 档位是**另一个存储**（宿主侧 AgentExecPolicyStore），
                                         // 与档案分开写：写失败由域层出横幅，界面不猜成败。
@@ -1178,6 +1193,9 @@ public fun DesktopShell(
                                     controller.requestAgentSessionPage(id, wsId, offset = 0)
                                 },
                                 onFindNodes = { view = DesktopView.Nodes },
+                                // 空态四档的 D 档判据（§3.1）：在线节点数 + 本机。
+                                // 「在线」只认链路，与节点页同一个口径（`peers.online`）。
+                                connectedNodeCount = nodeSlice.peers.count { it.online } + 1,
                                 onRespondApproval = controller::respondApproval,
                                 // 三参处置（「本会话免审」）：与手机壳同一条，接 controller 的
                                 // 三参重载 —— 此前只接两参，免审按钮永远不出现。
@@ -1193,6 +1211,8 @@ public fun DesktopShell(
                                         name = detail.employeeName ?: detail.displayName.orEmpty(),
                                         duty = detail.employeeDuty
                                             ?: com.kapp.tenon.core.protocol.AgentDuties.DEFAULT_SINGLE,
+                                        driverKey = detail.driverKey,
+                                        model = detail.model,
                                     )
                                 },
                                 // 档案行（登记簿视角）的两个动作：编辑同一个对话框、注销走档案写路径。
@@ -1203,6 +1223,8 @@ public fun DesktopShell(
                                         employeeId = profile.employeeId,
                                         name = profile.name,
                                         duty = profile.duty,
+                                        driverKey = profile.driverKey,
+                                        model = profile.model,
                                     )
                                 },
                                 // 注销：此前 `Forget` 命令一直在、界面侧零调用 ⇒ 档案删不掉。
@@ -1210,23 +1232,12 @@ public fun DesktopShell(
                                 onForgetEmployee = { profile ->
                                     controller.forgetEmployeeProfile(profile.employeeId)
                                 },
-                                // 档案页的「新建档案」：候选表由屏算（它有卡片流），这里只接
-                                // 「给这个人建档」—— 复用详情页同一个表单与同一条写路径。
-                                // 名字**不预填**：候选的显示名是席位 token / 身份键，原样存下去
-                                // 等于什么都没起；档案的意义就是人给的名字。
-                                onNewEmployeeProfile = { candidate ->
-                                    employeeEditing = EmployeeEditInput(
-                                        agentId = candidate.agentId,
-                                        employeeId = null,
-                                        name = "",
-                                        duty = com.kapp.tenon.core.protocol.AgentDuties.DEFAULT_SINGLE,
-                                        subjectLabel = candidate.agentId,
-                                    )
-                                },
+                                // MINT 建档（方案 §3.3）：拒绝枚举回表单字段（横幅说不出哪个字段）。
+                                onCreateEmployeeMint = controller.employeeMintWriter,
                                 // 团队档案（新建 / 改名 / 换名册 / 进更多群）：档案只住宿主机，
                                 // 手机壳不接（null）⇒ 团队视角里不画那两个入口。
-                                onSaveTeam = { teamId, name, leader, members, groupIds ->
-                                    controller.saveTeamProfile(teamId, name, leader, members, groupIds)
+                                onSaveTeam = { teamId, name, leader, members, groupIds, description ->
+                                    controller.saveTeamProfile(teamId, name, leader, members, groupIds, description)
                                 },
                                 // 解散：同一条档案写通路的另一半。缺了它，队伍能被建、
                                 // 能改名册、能被逐群移除，却**删不掉**（档案留在设置里，
@@ -1235,8 +1246,8 @@ public fun DesktopShell(
                                 // 「AI 建队」：生成桥由 DesktopExtension 装配（LLM → 过门 → 回落）；
                                 // 能力位 false（预览 / 未装配）= 不画入口，与 onSaveTeam 同 gate。
                                 onGenerateTeam = if (controller.teamScaffoldAvailable) {
-                                    { need, leaderKeys, defaults ->
-                                        controller.generateTeamScaffold(need, leaderKeys, defaults)
+                                    { need, defaults ->
+                                        controller.generateTeamScaffold(need, defaults)
                                     }
                                 } else {
                                     null

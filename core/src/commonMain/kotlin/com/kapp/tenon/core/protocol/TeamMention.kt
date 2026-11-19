@@ -273,6 +273,19 @@ private fun GroupMeta.teamNameVerdict(
 }
 
 /**
+ * 团队名在文本里**占住的区间**（长名优先、去重叠 —— 与 [resolveTeamNameMention]
+ * 同一份判据的区间形态）。
+ *
+ * 给路由层的**跨池仲裁**用：member/seat token 的命中若落在团队名占住的区间里，
+ * 那不是「第二个意图」，是同一句话被**前缀撞名**撞上了 —— `@e2e-team` 内含
+ * `@e2e`（`-` 在 [mentionsToken] 的边界判据里是标点， employee token 会假命中），
+ * 最长命中优先，被覆盖的那个必须让位（真机 UX 轮现场：整队派单被判成
+ * 「团队名与成员同时被点到」的歧义而静默不执行）。
+ */
+fun GroupMeta.occupiedTeamMentionSpans(text: String): List<Pair<Int, Int>> =
+    teamNameHits(text).flatMap { mentionSpans(text, it) }
+
+/**
  * 一个 token（已小写）在群元数据里命中的**席位 token 目标**：
  * 席位名 / 席位 agentId 之一（大小写不敏感）。
  *

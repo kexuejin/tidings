@@ -114,7 +114,6 @@ import com.kapp.tenon.ui.desktop.DesktopShellActions
 import com.kapp.tenon.ui.desktop.desktopNavBadges
 import com.kapp.tenon.ui.theme.AppTheme
 import com.kapp.tenon.ui.theme.ComponentSizes
-import com.kapp.tenon.ui.theme.LocalAppSpacing
 import com.kapp.tenon.ui.theme.ThemeMode
 import com.kapp.tenon.domain.model.ConversationUi
 import com.kapp.tenon.domain.model.PeerUi
@@ -1180,6 +1179,8 @@ fun RelayApp(
                                                 controller.requestAgentSessionPage(peerId, wsId, offset = 0)
                                             },
                                             onFindNodes = { nav = nav.selectTab(AppRoutes.NODES) },
+                                            // 空态四档的 D 档判据（§3.1）：在线节点数 + 本机。
+                                            connectedNodeCount = nodeSlice.peers.count { it.online } + 1,
                                             onRespondApproval = controller::respondApproval,
                                             // 三参处置（「本会话免审」）：controller 有现成三参重载，
                                             // 此前只接了两参 —— 免审按钮与徽标在组件里备好了却永远

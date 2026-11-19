@@ -550,6 +550,59 @@ class AgentCardTypeCoverageTest {
     }
 
     /**
+     * 支线任务卡：`type="assistant_quest"`（`AssistantQuestCardPayload.build`）。
+     *
+     * 形状：state + 可选 progress=100 + context 摘要 + actions（打开/调整/合并/取消）。
+     * 钉住最要紧的两件：**type 不是英文原文落到 else**（徽标档已补），且动作 ID 与
+     * `AssistantQuestCardPayload.Actions` 词表一致 —— 动作对不上时 ChatScreen 的拦截
+     * 分支会把它当普通群卡动作派给宿主，支线动作静默丢失。
+     */
+    @Test
+    fun assistantQuestCardKeepsContextAndItsOwnActionVocabulary() {
+        val json = card(
+            cardId = "quest-77",
+            type = "assistant_quest",
+            title = "补一版深色模式",
+            state = "working",
+        ) {
+            put("context", "正在改配色与对比度")
+            putJsonArray("actions") {
+                add(buildJsonObject {
+                    put("actionId", "open-quest")
+                    put("label", "打开")
+                    put("labelKey", "card.action.open_quest")
+                    put("approval", true)
+                })
+                add(buildJsonObject {
+                    put("actionId", "cancel-quest")
+                    put("label", "取消")
+                    put("labelKey", "card.action.cancel_quest")
+                    put("approval", false)
+                })
+            }
+        }
+
+        val c = assertNotNull(parseAgentCard(json))
+        assertEquals("assistant_quest", c.type, "type 必须是字面值 assistant_quest，不是徽标文案")
+        assertEquals("working", c.state)
+        assertEquals(
+            setOf("open-quest", "cancel-quest"),
+            c.actions.map { it.actionId }.toSet(),
+            "动作 ID 必须与 AssistantQuestCardPayload.Actions 词表一致",
+        )
+        assertEquals(
+            setOf(CardBlock.ButtonGroup),
+            presentBlocksOf(c),
+            "数据里只有动作面：context 是文本摘要，不是 banner 块",
+        )
+        assertEquals(
+            setOf(CardBlock.Banner, CardBlock.StepList, CardBlock.ButtonGroup),
+            CardTypeRegistry.recommendedBlocksOf("assistant_quest"),
+            "注册表已登记：发射侧真实在发（AssistantQuestCardPayload）",
+        )
+    }
+
+    /**
      * 翻面卡：`type="diff-review"`（`BoardCardFlip.kt:45/71/99`，合并/判定后 rev+1）。
      *
      * 这一类的推荐构成是「diff + 按钮组」，而翻面时按钮组必须**收起来**
@@ -704,6 +757,8 @@ class AgentCardTypeCoverageTest {
             "app/…/domain/RelayControllerAgentInvokeComponent.kt:534",
         ),
         "direction-ask" to listOf("orchestration/…/DesktopWorkerOrchestrator.kt:307"),
+        // 支线任务卡：`AssistantQuestCardPayload.build()` 固定写 TYPE_ASSISTANT_QUEST。
+        "assistant_quest" to listOf("app/…/domain/AssistantQuestCardPayload.kt"),
     )
 
     /**
@@ -765,7 +820,10 @@ class AgentCardTypeCoverageTest {
      */
     @Test
     fun everyEmittedTypeHasAParseCase() {
-        val covered = setOf("task-board", "diff-review", "ask_question", "team-task-board", "direction-ask")
+        val covered = setOf(
+            "task-board", "diff-review", "ask_question", "team-task-board", "direction-ask",
+            "assistant_quest",
+        )
         assertEquals(
             emittedCardTypes.keys,
             covered,

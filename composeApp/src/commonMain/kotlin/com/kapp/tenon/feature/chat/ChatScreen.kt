@@ -59,7 +59,6 @@ import com.kapp.tenon.domain.mayDecideApproval
 import com.kapp.tenon.core.nowMillis
 import com.kapp.tenon.core.transport.LocalFile
 import com.kapp.tenon.generated.resources.Res
-import com.kapp.tenon.ui.components.AppBanner
 import com.kapp.tenon.core.protocol.ConvId
 import com.kapp.tenon.core.protocol.isTeam
 import com.kapp.tenon.generated.resources.chat_qa_diff
@@ -313,6 +312,10 @@ fun ChatScreen(
     // **团队行**（整队）：`@开发团队` 一次点名整支队，不用先 @ 领队。
     // 团队名是展示串（多为中文），手打成本高 —— 候选不给这一行，这个能力就只有
     // 记得住名字的人能用。带空白的团队名不进候选（`@` 打不出来，与匹配池同一条）。
+    //
+    // **排在组员之前**：候选面板是固定高度的 ScrollView（真机实测只放得下 5 行），
+    // 一支两人小队就能把整队行挤到折叠线以下 —— 那是"整队"这个主行动在界面上消失。
+    // 组员是补充（点某个人干一件事），整队才是这支队伍的主入口。
     val teamTargets = if (group != null) {
         group.virtualAgents.orEmpty()
             .filter { it.isTeam }
@@ -343,7 +346,7 @@ fun ChatScreen(
             // 真人候选不标：这条提示说的是「派给智能体宿主的活现在不会开始」。
             isHostOffline = identity.isAgent && identity.online == false,
         )
-    } + teamMemberTargets + teamTargets
+    } + teamTargets + teamMemberTargets
     // 发送侧要用同一份离线事实：token → 显示名，提示里报的是用户认识的那个名字。
     val offlineMentionByToken = mentionTargets
         .filter { it.isHostOffline }
@@ -467,9 +470,11 @@ fun ChatScreen(
     val replyingToMessageState = remember(peerId) { mutableStateOf<MessageUi?>(null) }
     var replyingToMessage by replyingToMessageState
     // 声明式卡片的**本机乐观记账**（方案 §5.3）：点击审批按钮先置灰再发动作，
-    // 键是 "cardId|actionId"。会话切换即重建（remember(peerId)）—— 换个会话看别的卡，
-    // 这份 pending 没有意义；宿主判定（rev+1 新帧）到达后由三态判据接管。
-    val pendingCardActionsState = remember(peerId) { mutableStateOf<Set<String>>(emptySet()) }
+    // 键是 "cardId|actionId"，值是点击时的会话锚（now），供渲染侧按 TTL 过滤。
+    // 会话切换即重建（remember(peerId)）—— 换个会话看别的卡，这份 pending 没有意义；
+    // 宿主判定（rev+1 新帧）到达后由三态判据接管。宿主拒绝只发 result 帧不翻 rev 卡，
+    // 那类按钮由 ChatMessageList 按 now 做 TTL 回收，不会永久停在「等待宿主确认」。
+    val pendingCardActionsState = remember(peerId) { mutableStateOf<Map<String, Long>>(emptyMap()) }
     var pendingCardActions by pendingCardActionsState
 
     // ── 上下文唤起胶囊（方案 §5.2，交付 2）──────────────────────────────
@@ -1020,9 +1025,17 @@ fun ChatScreen(
 
         // 支线卡动作的唯一路由表：消息列表的劫持守卫与作战室状态行共用这一份 ——
         // 两个入口各抄一张 when 表，迟早分家。
-        val effectiveActions = remember(actions, activeQuestId) {
+        val effectiveActions = remember(actions, activeQuestId, group) {
                 actions.copy(
                     onCardAction = { convId, card, actionId ->
+                        if (actionId == SYSTEM_ACTION_BIND_WORKSPACE || actionId == "bind-workspace" || actionId == "open-workspace-picker") {
+                            if (group != null) {
+                                showGroupInfo = true
+                            } else {
+                                showWorkspacePicker = true
+                            }
+                            return@copy
+                        }
                         // 劫持守卫：quest 动作分支只认**支线卡**（type 标或助理会话）。
                         // 群工单卡的 merge-patch 是既有动作（BoardCardFlip 发出），语义走
                         // HostCardActions 的补丁合并 —— 不加这道守卫，它会被本分支吃掉，

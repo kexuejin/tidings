@@ -46,7 +46,6 @@ import com.kapp.tenon.generated.resources.ic_close
 import com.kapp.tenon.ui.components.AppIconButton
 import com.kapp.tenon.ui.components.AppOutlinedButton
 import com.kapp.tenon.ui.components.AppTextButton
-import com.kapp.tenon.ui.components.AppBanner
 import com.kapp.tenon.ui.theme.LocalAppSpacing
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource

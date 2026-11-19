@@ -37,13 +37,31 @@ class TeamExecutionModelValidationTest {
     )
 
     @Test
-    fun dshPlusModelIsRejected() {
+    fun dshPlusModelIsAccepted() {
+        // **这条曾断言相反的事。** 旧判据是「dsh 没有 --model 旗标 ⇒ 填模型必须拒」；
+        // 实测发现 dsh 支持按次指定，走它自己的 `--patch` 配置覆盖（patch 写对时真跑通，
+        // 拿到 "OK"；写不存在的 id 当场报 UNKNOWN_MODEL）。所以现在应当**接受**。
         val store = TeamExecutionStore(tmpFile())
-        // dsh 当 worker、claude 当 reviewer（异厂商门槛过），但给 dsh 填了模型。
         val verdict = store.save(
             profile(
                 listOf(
-                    member("m-coder", TeamExecutionKinds.WORKER, "dsh", models = listOf("deepseek-v4.1")),
+                    member("m-coder", TeamExecutionKinds.WORKER, "dsh", models = listOf("deepseek-v4.1-flash")),
+                    member("m-r", driverKey = "claude"),
+                ),
+            ),
+        )
+        assertEquals(TeamExecutionSaveVerdict.Saved, verdict)
+    }
+
+    @Test
+    fun zcodePlusModelIsRejected() {
+        // 真正没有按次通道的一家：zcode 只能在应用内选模型。
+        // 「配了模型、跑的还是默认模型」必须有保存期判据兜住。
+        val store = TeamExecutionStore(tmpFile())
+        val verdict = store.save(
+            profile(
+                listOf(
+                    member("m-coder", TeamExecutionKinds.WORKER, "zcode", models = listOf("glm-5.3")),
                     member("m-r", driverKey = "claude"),
                 ),
             ),
@@ -51,7 +69,7 @@ class TeamExecutionModelValidationTest {
         val rejected = assertIs<TeamExecutionSaveVerdict.Rejected>(verdict)
         assertTrue(
             rejected.reasons.any { "cannot take a model per task" in it },
-            "dsh 没有 --model 旗标 ⇒ 必须当场拒，不许静默跑 profile 里的默认模型；实际原因=" +
+            "zcode 没有按次通道 ⇒ 必须当场拒，不许静默跑它自己配置里的默认模型；实际原因=" +
                 rejected.reasons,
         )
     }

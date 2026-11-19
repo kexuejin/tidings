@@ -101,7 +101,6 @@ import com.kapp.tenon.generated.resources.banner_pairing_not_sent
 import com.kapp.tenon.generated.resources.banner_pairing_rejected
 import com.kapp.tenon.generated.resources.banner_pairing_not_ready
 import com.kapp.tenon.generated.resources.banner_scan_generic
-import com.kapp.tenon.generated.resources.banner_scan_failed
 import com.kapp.tenon.generated.resources.banner_scan_range_added
 import com.kapp.tenon.generated.resources.banner_scan_range_invalid
 import com.kapp.tenon.generated.resources.banner_scan_range_triggered

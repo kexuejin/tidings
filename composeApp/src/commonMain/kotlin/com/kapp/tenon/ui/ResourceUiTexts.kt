@@ -16,6 +16,10 @@ import com.kapp.tenon.generated.resources.orchestration_stage_impl_1
 import com.kapp.tenon.generated.resources.orchestration_stage_impl_2
 import com.kapp.tenon.generated.resources.orchestration_stage_impl_3
 import com.kapp.tenon.generated.resources.orchestration_team_ready
+import com.kapp.tenon.generated.resources.orchestration_unreviewed_notice
+import com.kapp.tenon.generated.resources.orchestration_chain_retry_unsupported
+import com.kapp.tenon.generated.resources.orchestration_revision_supersedes_card
+import com.kapp.tenon.generated.resources.orchestration_picked_worker
 import com.kapp.tenon.generated.resources.orchestration_diff_ready_prompt
 import com.kapp.tenon.generated.resources.orchestration_diff_ready_detail
 import com.kapp.tenon.generated.resources.orchestration_answered_no_changes
@@ -143,6 +147,18 @@ internal object ResourceUiTexts : RelayUiTexts {
 
     override suspend fun teamReadyBanner(role: String, seconds: Long): String =
         runCatching { getString(Res.string.orchestration_team_ready, role, seconds) }.getOrNull().orEmpty()
+
+    override suspend fun unreviewedNotice(): String =
+        runCatching { getString(Res.string.orchestration_unreviewed_notice) }.getOrNull().orEmpty()
+
+    override suspend fun pickedWorkerNotice(name: String): String =
+        runCatching { getString(Res.string.orchestration_picked_worker, name) }.getOrNull().orEmpty()
+
+    override suspend fun chainRetryUnsupported(): String =
+        runCatching { getString(Res.string.orchestration_chain_retry_unsupported) }.getOrNull().orEmpty()
+
+    override suspend fun revisionSupersedesCard(): String =
+        runCatching { getString(Res.string.orchestration_revision_supersedes_card) }.getOrNull().orEmpty()
 
     override suspend fun diffReadyPrompt(): String =
         runCatching { getString(Res.string.orchestration_diff_ready_prompt) }.getOrNull().orEmpty()

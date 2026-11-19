@@ -79,6 +79,8 @@ class TeamProfileWriteGuardTest {
      * - `DesktopRosterWritePort.kt`：**工具面的适配层**（同一类东西：`teamId` 只是从
      *   `TeamProfileCommand` 的命名实参里传下去，实际写入仍是 `TeamProfileWritePath`）。
      *   离开这一档就不该再有第二个名字 —— 它没有 `copy(teamProfiles =`（上面那条测试钉着）。
+     * - `DesktopWorkerOrchestrator.kt`：**只有 `LeaderBrief(teamName = …)` 一处命名实参**
+     *   （派单简报里给主理人看"这是哪支队"），不写席位、不写档案。
      */
     @Test
     fun teamNamesAndTeamIdsAreWrittenInTheDeclaredPlacesOnly() {
@@ -93,9 +95,18 @@ class TeamProfileWriteGuardTest {
         // 自己不写席位、也不写档案（`copy(teamProfiles =` 那条测试钉着这一点）。
         // 它不碰 `teamName`，所以只出现在下面那一条里 —— 两个针的答案是两套。
         val toolAdapter = "orchestration/src/main/kotlin/com/kapp/tenon/orchestration/DesktopRosterWritePort.kt"
+        // `LeaderBrief(teamName = …)` 与工具面同一类：**命名实参**把席位字段传进一次派单
+        // 的简报（只用于给主理人看"这是哪支队"），既不写席位也不写档案。它不是第四个
+        // 写入口，但确实命中同一个针 —— 所以在这里显式登记，而不是把针改松。
+        val leaderBriefArg =
+            "orchestration/src/main/kotlin/com/kapp/tenon/orchestration/DesktopWorkerOrchestrator.kt"
         // 针里带**尾随空格**：`it.teamId == key` 这种比较也会命中不带空格的 `teamId =`，
         // 守卫会把只读比较误判成写入点（本轮真踩过）。
-        assertEquals(seatWriters, filesContaining("teamName = "), "团队名的写入点越界了")
+        assertEquals(
+            seatWriters + leaderBriefArg,
+            filesContaining("teamName = "),
+            "团队名的写入点越界了",
+        )
         assertEquals(seatWriters + toolAdapter, filesContaining("teamId = "), "团队档案引用的写入点越界了")
     }
 }

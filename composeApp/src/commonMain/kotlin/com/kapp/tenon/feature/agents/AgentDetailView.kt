@@ -4,7 +4,6 @@ package com.kapp.tenon.feature.agents
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -18,13 +17,13 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import com.kapp.tenon.core.protocol.AVATAR_LEGACY_INITIAL_VALUE
 import com.kapp.tenon.domain.AgentHubDetailUi
 import com.kapp.tenon.domain.AgentSlice
 import com.kapp.tenon.domain.NodeSlice
@@ -54,13 +53,12 @@ import com.kapp.tenon.generated.resources.agent_detail_ws_session_count
 import com.kapp.tenon.generated.resources.agent_detail_workspaces_section_title
 import com.kapp.tenon.generated.resources.agent_session_untitled
 import com.kapp.tenon.generated.resources.agent_subtitle_pending
-import com.kapp.tenon.generated.resources.conv_inbox_ws_badge_unknown_kind
+import com.kapp.tenon.generated.resources.common_unknown_member
 import com.kapp.tenon.generated.resources.conv_inbox_ws_row_unnamed
 import com.kapp.tenon.generated.resources.group_project_directory_unset
 import com.kapp.tenon.generated.resources.hub_agent_role_single
 import com.kapp.tenon.generated.resources.hub_agent_role_team
 import com.kapp.tenon.generated.resources.ic_arrow_back
-import com.kapp.tenon.generated.resources.ic_bot
 import com.kapp.tenon.generated.resources.ic_chev
 import com.kapp.tenon.generated.resources.workspace_no_sessions
 import com.kapp.tenon.generated.resources.workspace_session_pending_count
@@ -68,6 +66,7 @@ import com.kapp.tenon.ui.ContentWidths
 import com.kapp.tenon.ui.centerCapped
 import com.kapp.tenon.ui.components.AppIconButton
 import com.kapp.tenon.ui.components.MutedTag
+import com.kapp.tenon.ui.components.PeerAvatar
 import com.kapp.tenon.ui.components.PendingPill
 import com.kapp.tenon.ui.components.SectionHeader
 import com.kapp.tenon.ui.components.SessionStateLabel
@@ -102,8 +101,9 @@ import org.jetbrains.compose.resources.stringResource
  * （与卡片流同一套装配），这里只画 —— 一屏的规则只留一处。空段如实：没有群、没有目录
  * 就写「还没有」，不画填料也不藏段落标题（没有可看的东西本身就是状态）。
  */
+// 公开面：androidApp 的 screenshotTest 跨模块组装预览；生产入口仍在本模块。
 @Composable
-internal fun AgentDetailView(
+public fun AgentDetailView(
     detail: AgentHubDetailUi,
     now: Long,
     onBack: () -> Unit,
@@ -149,7 +149,7 @@ internal fun AgentDetailView(
             )
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = displayName ?: stringResource(Res.string.conv_inbox_ws_badge_unknown_kind),
+                    text = displayName ?: stringResource(Res.string.common_unknown_member),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
@@ -450,21 +450,14 @@ private fun AgentHubIdentityCard(detail: AgentHubDetailUi) {
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(sp.md),
             ) {
-                // 头像槽：与卡片流同款（surfaceVariant 底 + primary 图标），尺寸走 spacing token。
-                Surface(
-                    color = MaterialTheme.colorScheme.surfaceVariant,
+                // 头像槽：首字头像（底色哈希，对比度合格，与名录行同款）。
+                val avatarName = detail.displayName ?: stringResource(Res.string.common_unknown_member)
+                PeerAvatar(
+                    name = avatarName,
+                    avatar = AVATAR_LEGACY_INITIAL_VALUE,
+                    size = sp.xxl,
                     shape = MaterialTheme.shapes.medium,
-                    modifier = Modifier.size(sp.xxl),
-                ) {
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Icon(
-                            painter = painterResource(Res.drawable.ic_bot),
-                            contentDescription = null,
-                            modifier = Modifier.size(IconSizes.Body),
-                            tint = MaterialTheme.colorScheme.primary,
-                        )
-                    }
-                }
+                )
                 Column(modifier = Modifier.weight(1f)) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -473,7 +466,7 @@ private fun AgentHubIdentityCard(detail: AgentHubDetailUi) {
                         StatusDot(detail.online)
                         Text(
                             text = detail.displayName
-                                ?: stringResource(Res.string.conv_inbox_ws_badge_unknown_kind),
+                                ?: stringResource(Res.string.common_unknown_member),
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.SemiBold,
                             maxLines = 1,

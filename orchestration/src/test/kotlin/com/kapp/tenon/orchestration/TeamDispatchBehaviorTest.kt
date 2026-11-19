@@ -61,16 +61,27 @@ class TeamDispatchBehaviorTest {
     /** 席位宿主 = **控制器自己的 nodeId**（卡片发布有成员表校验，成员必须包含 self）。 */
     private val sender = "member-node"
 
-    private fun teamSeat(hostNodeId: String, teamName: String? = "devteam") = VirtualAgentMember(
+    /** 默认编制：一位可干活的人 + 一位异厂商审查。 */
+    private val DEFAULT_SEAT_MEMBERS = listOf(
+        TeamMemberInfo("m-coder", "coder", "编码"),
+        TeamMemberInfo("m-reviewer", "reviewer", "审查"),
+    )
+    private val DEFAULT_EXEC_MEMBERS = listOf(
+        TeamExecutionMemberSpec("m-coder", TeamExecutionKinds.WORKER, "codex"),
+        TeamExecutionMemberSpec("m-reviewer", TeamExecutionKinds.REVIEWER, "claude"),
+    )
+
+    private fun teamSeat(
+        hostNodeId: String,
+        teamName: String? = "devteam",
+        members: List<TeamMemberInfo> = DEFAULT_SEAT_MEMBERS,
+    ) = VirtualAgentMember(
         agentId = "dsh-lead",
         hostNodeId = hostNodeId,
         name = "lead-seat",
         entityType = EntityTypes.TEAM,
         teamName = teamName,
-        teamMembers = listOf(
-            TeamMemberInfo("m-coder", "coder", "编码"),
-            TeamMemberInfo("m-reviewer", "reviewer", "审查"),
-        ),
+        teamMembers = members,
         defaultWsId = "ws-1",
     )
 
@@ -86,13 +97,19 @@ class TeamDispatchBehaviorTest {
     private fun harness(
         withProfile: Boolean,
         policyOf: ((String) -> String?)? = null,
+        seatMembers: List<TeamMemberInfo> = DEFAULT_SEAT_MEMBERS,
+        execMembers: List<TeamExecutionMemberSpec> = DEFAULT_EXEC_MEMBERS,
+        /** 在位底座清单：null = 没有控制面（既有用例的口径）。 */
+        available: Set<String>? = null,
+        /** 主理人的审核面裁决（注入路径 = 生产 `teamPlannerChain`）。 */
+        planner: (suspend (PlannerChainInput) -> OrchestrationSuggestion?)? = null,
     ): Triple<RelayController, DesktopWorkerOrchestrator, File> {
         val scope = CoroutineScope(Dispatchers.Unconfined)
         val base = RelaySettings.firstRun().copy(
             udpPort = 0, tcpPort = 0,
             persistMessages = false, persistMessagesDecided = true,
         )
-        val meta = group(teamSeat(base.nodeId), base.nodeId)
+        val meta = group(teamSeat(base.nodeId, members = seatMembers), base.nodeId)
         val controller = RelayController(
             platform = InMemoryAppPlatform(),
             store = SeededSettingsStore(base, listOf(meta)),
@@ -109,10 +126,7 @@ class TeamDispatchBehaviorTest {
                 TeamExecutionProfile(
                     dirId = "ws-1", leaderAgentId = "dsh-lead",
                     updatedAt = 0,
-                    members = listOf(
-                        TeamExecutionMemberSpec("m-coder", TeamExecutionKinds.WORKER, "codex"),
-                        TeamExecutionMemberSpec("m-reviewer", TeamExecutionKinds.REVIEWER, "claude"),
-                    ),
+                    members = execMembers,
                 ),
             )
             assertTrue(verdict is TeamExecutionSaveVerdict.Saved, "前置：执行档必须能落盘")
@@ -124,6 +138,10 @@ class TeamDispatchBehaviorTest {
             teamExecutionStore = store,
             // D16：执行档键的 dirId 一半 —— 测试档案都落在 dir-1/ws-1 这条指针上。
             groupDirIdOf = { "ws-1" },
+            // 点将需要候选池：没有它 `decideChainShape` 直接回 null（= 没人可点），
+            // 「主理人换人」这条路径在单测里就永远走不到。
+            availableDriversHint = { available },
+            teamPlannerChain = planner,
         )
         return Triple(controller, orch, tmp)
     }
@@ -254,6 +272,156 @@ class TeamDispatchBehaviorTest {
     }
 
     /**
+     * **整队入口的闸看「队里有没有人能干活」，不是锚点本人**（点将之后这两件事分开了）。
+     *
+     * 这里验的是反向：两位可干活的人都被设成「仅自己可用」时仍必须拒 —— 放宽成
+     * 「只要有一个人被授权」不能变成「谁都不需要授权」。审批申请按**锚点**记：
+     * 批了它，没有点将建议时的默认落点就能跑。
+     */
+    @Test
+    fun aTeamEntryIsBlockedOnlyWhenNoWorkerMayRun() = runBlocking {
+        val (controller, orch, tmp) = harness(
+            withProfile = true,
+            policyOf = { AgentExecPolicies.LIST },
+            seatMembers = listOf(
+                TeamMemberInfo("m-coder", "coder", "编码"),
+                TeamMemberInfo("m-backend", "backend", "后端"),
+                TeamMemberInfo("m-reviewer", "reviewer", "审查"),
+            ),
+            execMembers = listOf(
+                TeamExecutionMemberSpec("m-coder", TeamExecutionKinds.WORKER, "codex"),
+                TeamExecutionMemberSpec("m-backend", TeamExecutionKinds.WORKER, "claude"),
+                TeamExecutionMemberSpec("m-reviewer", TeamExecutionKinds.REVIEWER, "dsh"),
+            ),
+        )
+        val recorded = mutableListOf<Pair<String, String?>>()
+        controller.invokeRecordGrantRequest = { nodeId, agentKey, _ -> recorded += nodeId to agentKey }
+        try {
+            dispatch(orch, mentionedAgentKey = "devteam")
+            val card = assertNotNull(blockedCard(controller), "两位可干活的人都没授权时必须出 blocked 卡")
+            assertTrue(
+                card.toString().contains("not authorized"),
+                "卡面要写明是授权拒绝：$card ；rows=${debugRows(controller)}",
+            )
+            assertEquals(
+                "m-coder",
+                recorded.single().second,
+                "审批按锚点记：批了它，没有点将建议时的默认落点就能跑",
+            )
+        } finally {
+            tmp.deleteRecursively()
+            controller.stop()
+        }
+    }
+
+    /**
+     * **点将的正例**：锚点（默认落点）只对自己开放，而主理人点了另一位可干活的人 ⇒
+     * 整队入口**不许**被锚点一个人挡死。
+     *
+     * 这是「至少一位 worker 可被调起」那档的真实路径：没有候选池就没有点将（`decideChainShape`
+     * 直接回 null），所以用例必须同时给在位清单与裁决 —— 只有这两样齐了，
+     * 「换个授权的人顶上」才在代码里真的发生。
+     *
+     * 断言的是**没有**授权拒绝：单测没有链执行器 ⇒ 后面仍会出卡（渠道/目录那条原因），
+     * 但卡面不该再出现 `not authorized` —— 说明授权闸放的是被点中的那个人。
+     */
+    @Test
+    fun anOwnerOnlyAnchorDoesNotBlockTheTeamWhenTheLeadPicksSomeoneElse() = runBlocking {
+        val (controller, orch, tmp) = harness(
+            withProfile = true,
+            // 锚点（m-coder）仅自己可用；被点中的 m-backend 与审查棒对群成员开放。
+            policyOf = { id ->
+                if (id == "m-coder") AgentExecPolicies.LIST else AgentExecPolicies.ANY_MEMBER
+            },
+            seatMembers = TWO_WORKER_SEAT_MEMBERS,
+            execMembers = TWO_WORKER_EXEC_MEMBERS,
+            available = setOf("codex", "claude", "dsh"),
+            planner = { pickWorker("m-backend") },
+        )
+        val recorded = mutableListOf<String?>()
+        controller.invokeRecordGrantRequest = { _, agentKey, _ -> recorded += agentKey }
+        try {
+            dispatch(orch, mentionedAgentKey = "devteam")
+            val card = assertNotNull(blockedCard(controller), "单测没有链执行器 ⇒ 仍会出卡")
+            assertTrue(
+                !card.toString().contains("not authorized"),
+                "锚点没授权不该挡住整队：主理人点的是 m-backend，它已授权。$card ；rows=${debugRows(controller)}",
+            )
+            assertTrue(
+                recorded.isEmpty(),
+                "既然放行了，就不该记「锚点的」授权申请：$recorded",
+            )
+        } finally {
+            tmp.deleteRecursively()
+            controller.stop()
+        }
+    }
+
+    /**
+     * **点将的反例**：主理人点到的人自己没授权 ⇒ 仍要拒，并且**点名他**（不是锚点）。
+     *
+     * 授权跟着编译结果走，不是跟着 `@` 锚点走：否则「允许 A 用 codex」会顺带允许
+     * 「A 拉的队让只对自己开放的 B 跑」。审批申请也按被拒的那个人记 —— 批了他，
+     * 下一次同样的点将就能跑。
+     */
+    @Test
+    fun pickingAMemberWhoMayNotRunBlocksAndNamesThatMember() = runBlocking {
+        val (controller, orch, tmp) = harness(
+            withProfile = true,
+            policyOf = { id ->
+                if (id == "m-backend") AgentExecPolicies.LIST else AgentExecPolicies.ANY_MEMBER
+            },
+            seatMembers = TWO_WORKER_SEAT_MEMBERS,
+            execMembers = TWO_WORKER_EXEC_MEMBERS,
+            available = setOf("codex", "claude", "dsh"),
+            planner = { pickWorker("m-backend") },
+        )
+        val recorded = mutableListOf<String?>()
+        controller.invokeRecordGrantRequest = { _, agentKey, _ -> recorded += agentKey }
+        try {
+            dispatch(orch, mentionedAgentKey = "devteam")
+            val card = assertNotNull(blockedCard(controller), "被点中的人没授权必须出 blocked 卡")
+            assertTrue(
+                card.toString().contains("not authorized"),
+                "卡面要写明是授权拒绝：$card ；rows=${debugRows(controller)}",
+            )
+            assertTrue(
+                card.toString().contains("delegated member"),
+                "被拒的不是锚点时必须点名是谁（否则用户以为是锚点被拒）：$card",
+            )
+            assertEquals(
+                "m-backend",
+                recorded.singleOrNull(),
+                "审批按**被点中的人**记：批了锚点救不了这一单",
+            )
+        } finally {
+            tmp.deleteRecursively()
+            controller.stop()
+        }
+    }
+
+    /** 两位可干活的人 + 一位审查：点将的最小编制（审查棒换厂商，过保存期厂商门）。 */
+    private val TWO_WORKER_SEAT_MEMBERS = listOf(
+        TeamMemberInfo("m-coder", "coder", "编码"),
+        TeamMemberInfo("m-backend", "backend", "后端"),
+        TeamMemberInfo("m-reviewer", "reviewer", "审查"),
+    )
+    private val TWO_WORKER_EXEC_MEMBERS = listOf(
+        TeamExecutionMemberSpec("m-coder", TeamExecutionKinds.WORKER, "codex"),
+        TeamExecutionMemberSpec("m-backend", TeamExecutionKinds.WORKER, "claude"),
+        TeamExecutionMemberSpec("m-reviewer", TeamExecutionKinds.REVIEWER, "dsh"),
+    )
+
+    /** 主理人的裁决：点 `workerAgentId` 下场，再让审查棒验一遍。 */
+    private fun pickWorker(workerAgentId: String): OrchestrationSuggestion = OrchestrationSuggestion(
+        stages = listOf(
+            StageIntent(workerAgentId, asReviewer = false, instruction = "Fix the login timeout."),
+            StageIntent("m-reviewer", asReviewer = true, instruction = "Verify the fix. End with VERDICT: PASS."),
+        ),
+        rationale = "the picked member owns this area",
+    )
+
+    /**
      * **逐成员可见性（mulica 式）**：领队把整队设为「对外开放」，但真正干活的 worker 设为
      * 「仅自己可用」时，外部成员 `@团队` 必须被授权闸拦下 —— 闸按**执行成员**判，不是按领队。
      * 若闸按领队（旧逻辑），领队开放 ⇒ 外部直接落到「控制面不可用」卡，授权闸形同虚设。
@@ -284,13 +452,50 @@ class TeamDispatchBehaviorTest {
     }
 
     /**
+     * **审查棒也要过授权闸**（与 worker 同一份判据）。
+     *
+     * 审查棒同样会在宿主上跑命令（读工作区、跑测试、给 VERDICT），把它排除在授权之外，
+     * 等于「允许小张用 codex」顺带允许了「小张拉的队可以让只对自己开放的老王跑测试」。
+     *
+     * 反向探针：把 `firstDenied(compiled.participants)` 换回锚点单判，这张卡就不会出现，
+     * 而是落到「控制面不可用」——那说明授权闸放行了整条链。
+     */
+    @Test
+    fun aReviewerWhosePolicyIsOwnerOnlyBlocksTheWholeTeamDispatch() = runBlocking {
+        val (controller, orch, tmp) = harness(
+            withProfile = true,
+            policyOf = { id ->
+                if (id == "m-coder") AgentExecPolicies.ANY_MEMBER else AgentExecPolicies.LIST
+            },
+        )
+        try {
+            dispatch(orch, mentionedAgentKey = "devteam") // 锚点（worker）开放，审查棒仅自己可用
+            val card = assertNotNull(blockedCard(controller), "审查棒没授权时整条链不许开跑")
+            assertTrue(
+                card.toString().contains("not authorized"),
+                "卡面要写明是授权拒绝：$card ；rows=${debugRows(controller)}",
+            )
+            assertTrue(
+                card.toString().contains("delegated member"),
+                "被拒的不是锚点时必须点名是谁：$card",
+            )
+            assertTrue(
+                !card.toString().contains("control plane"),
+                "不能落成『控制面不可用』—— 那说明授权闸把整条链放过去了：$card",
+            )
+        } finally {
+            tmp.deleteRecursively()
+            controller.stop()
+        }
+    }
+
+    /**
      * 反例：领队与 worker 都开放时，外部 `@团队` **通过授权闸**，落到一个非「授权拒绝」的卡
      * （单测里控制面为 null ⇒ 执行档编译期报「driver 不在位」）。证明上一条卡住的是**授权闸**，
      * 而不是控制面缺失等下游原因。
      */
     @Test
-    fun aTeamWithOpenLeaderAndOpenWorkerPassesTheAuthGate() = runBlocking {
-        val (controller, orch, tmp) = harness(
+    fun aTeamWithOpenLeaderAndOpenWorkerPassesTheAuthGate() = runBlocking {        val (controller, orch, tmp) = harness(
             withProfile = true,
             policyOf = { AgentExecPolicies.ANY_MEMBER },
         )

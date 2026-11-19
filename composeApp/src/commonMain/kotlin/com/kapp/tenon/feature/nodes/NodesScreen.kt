@@ -57,7 +57,6 @@ import com.kapp.tenon.generated.resources.nodes_subtitle_short
 import com.kapp.tenon.ui.AppError
 import com.kapp.tenon.ui.ErrorState
 import com.kapp.tenon.ui.components.AddNodeAction
-import com.kapp.tenon.ui.components.AppBanner
 import com.kapp.tenon.ui.components.AppButtonSize
 import com.kapp.tenon.ui.components.AppTextButton
 import com.kapp.tenon.ui.components.bannerText

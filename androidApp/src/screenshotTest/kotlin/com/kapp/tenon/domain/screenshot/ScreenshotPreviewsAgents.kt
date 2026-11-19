@@ -28,12 +28,42 @@ import com.kapp.tenon.domain.model.ScreenSessionUiState
 import com.kapp.tenon.domain.model.WorkspaceKey
 import com.kapp.tenon.domain.model.WorkspaceUi
 import com.kapp.tenon.domain.navBadges
+import com.kapp.tenon.core.protocol.AgentExecPolicies
 import com.kapp.tenon.core.protocol.ScreenEndReasons
 import com.kapp.tenon.core.protocol.ScreenMode
 import com.kapp.tenon.core.protocol.ScreenPhase
 import com.kapp.tenon.core.protocol.ScreenRole
 import com.kapp.tenon.core.protocol.ScreenSessionState
+import com.kapp.tenon.core.protocol.TeamMemberDraft
+import com.kapp.tenon.domain.AgentAssignmentUi
+import com.kapp.tenon.domain.AgentHubDetailUi
+import com.kapp.tenon.domain.AgentHubGroupRow
+import com.kapp.tenon.domain.AgentHubWorkspaceRow
+import com.kapp.tenon.domain.AgentSlice
+import com.kapp.tenon.domain.AgentTeamDetailUi
+import com.kapp.tenon.domain.AgentTeamGroupRow
+import com.kapp.tenon.domain.AgentTeamMemberUi
+import com.kapp.tenon.domain.DriverAuthCheckUi
+import com.kapp.tenon.domain.DriverAuthEvidenceUi
+import com.kapp.tenon.domain.DriverAuthRemediationUi
+import com.kapp.tenon.domain.DriverAuthStateUi
+import com.kapp.tenon.domain.DriverModelCatalogEntryUi
+import com.kapp.tenon.domain.DriverModelCatalogStateUi
+import com.kapp.tenon.domain.DriverModelOptionUi
+import com.kapp.tenon.domain.DriverRosterEntryUi
+import com.kapp.tenon.domain.NodeSlice
+import com.kapp.tenon.domain.SettingsSlice
+import com.kapp.tenon.domain.TeamExecutionKindsUi
+import com.kapp.tenon.domain.TeamScaffoldSpec
 import com.kapp.tenon.feature.agents.AgentConsoleScreen
+import com.kapp.tenon.feature.agents.AgentDetailView
+import com.kapp.tenon.feature.agents.AgentTeamDetailView
+import com.kapp.tenon.feature.agents.EmployeeCreateDialog
+import com.kapp.tenon.feature.agents.EmployeeEditDialog
+import com.kapp.tenon.feature.agents.TeamBuilderDialog
+import com.kapp.tenon.feature.agents.TeamGroupOption
+import com.kapp.tenon.feature.agents.TeamLeaderOption
+import com.kapp.tenon.feature.agents.TeamProfileDialog
 import com.kapp.tenon.navigation.AppNavItems
 import com.kapp.tenon.navigation.AppRoutes
 import com.kapp.tenon.platform.Transport
@@ -524,8 +554,8 @@ private fun screenSession(
 )
 
 @Composable
-private fun DialogBackdrop(content: @Composable () -> Unit) {
-    AppTheme(darkTheme = false) {
+private fun DialogBackdrop(darkTheme: Boolean = false, content: @Composable () -> Unit) {
+    AppTheme(darkTheme = darkTheme) {
         Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxSize()) {
             content()
         }
@@ -876,5 +906,458 @@ private fun DeskViewScreenHostPreview() {
 private fun DeskReqScreenConfirmPreview() {
     PreviewBackdrop {
         ScreenRequestConfirmDialog(onCancel = {}, onSend = {})
+    }
+}
+
+// ────────────────────────────────── 智能体治理表单与详情页
+
+@PreviewTest
+@Preview(name = "agent-employee-create", widthDp = 393, heightDp = 852, showBackground = true, locale = "zh-rCN")
+@Composable
+private fun EmployeeCreateDialogPhonePreview() {
+    DialogBackdrop(darkTheme = false) {
+        EmployeeCreateDialog(
+            roster = listOf(
+                DriverRosterEntryUi(
+                    key = "codex",
+                    displayName = "Codex",
+                    shortName = "codex",
+                    vendor = "OpenAI",
+                    installed = true,
+                    supportsPerTaskModel = true,
+                ),
+                DriverRosterEntryUi(
+                    key = "claude",
+                    displayName = "Claude",
+                    shortName = "claude",
+                    vendor = "Anthropic",
+                    installed = true,
+                    supportsPerTaskModel = true,
+                ),
+            ),
+            authStates = mapOf(
+                "codex" to DriverAuthCheckUi(
+                    driverKey = "codex",
+                    state = DriverAuthStateUi.AUTHENTICATED,
+                    evidence = DriverAuthEvidenceUi.STRONG,
+                    remediation = DriverAuthRemediationUi.TERMINAL_LOGIN,
+                    remediationDetail = "codex login",
+                    checkedAt = at(20),
+                )
+            ),
+            modelCatalog = mapOf(
+                "codex" to DriverModelCatalogEntryUi(
+                    driverKey = "codex",
+                    state = DriverModelCatalogStateUi.KNOWN,
+                    models = listOf(
+                        DriverModelOptionUi("gpt-5-codex", "GPT-5 Codex"),
+                        DriverModelOptionUi("gpt-5-mini", "GPT-5 Mini"),
+                    ),
+                )
+            ),
+            takenTokens = setOf("lead", "qa"),
+            onSubmit = { _, _, _, _, _ -> null },
+            onOpenExecutionConfig = {},
+            onDismiss = {},
+        )
+    }
+}
+
+@PreviewTest
+@Preview(name = "agent-employee-create-dark", widthDp = 393, heightDp = 852, showBackground = true, locale = "zh-rCN")
+@Composable
+private fun EmployeeCreateDialogPhoneDarkPreview() {
+    DialogBackdrop(darkTheme = true) {
+        EmployeeCreateDialog(
+            roster = listOf(
+                DriverRosterEntryUi(
+                    key = "codex",
+                    displayName = "Codex",
+                    shortName = "codex",
+                    vendor = "OpenAI",
+                    installed = true,
+                    supportsPerTaskModel = true,
+                ),
+                DriverRosterEntryUi(
+                    key = "claude",
+                    displayName = "Claude",
+                    shortName = "claude",
+                    vendor = "Anthropic",
+                    installed = true,
+                    supportsPerTaskModel = true,
+                ),
+            ),
+            authStates = mapOf(
+                "codex" to DriverAuthCheckUi(
+                    driverKey = "codex",
+                    state = DriverAuthStateUi.AUTHENTICATED,
+                    evidence = DriverAuthEvidenceUi.STRONG,
+                    remediation = DriverAuthRemediationUi.TERMINAL_LOGIN,
+                    remediationDetail = "codex login",
+                    checkedAt = at(20),
+                )
+            ),
+            modelCatalog = mapOf(
+                "codex" to DriverModelCatalogEntryUi(
+                    driverKey = "codex",
+                    state = DriverModelCatalogStateUi.KNOWN,
+                    models = listOf(
+                        DriverModelOptionUi("gpt-5-codex", "GPT-5 Codex"),
+                        DriverModelOptionUi("gpt-5-mini", "GPT-5 Mini"),
+                    ),
+                )
+            ),
+            takenTokens = setOf("lead", "qa"),
+            onSubmit = { _, _, _, _, _ -> null },
+            onOpenExecutionConfig = {},
+            onDismiss = {},
+        )
+    }
+}
+
+@PreviewTest
+@Preview(name = "agent-employee-edit", widthDp = 393, heightDp = 852, showBackground = true, locale = "zh-rCN")
+@Composable
+private fun EmployeeEditDialogPhonePreview() {
+    DialogBackdrop(darkTheme = false) {
+        EmployeeEditDialog(
+            employeeId = "emp-001",
+            initialName = "Codex Pro",
+            initialDuty = "coder",
+            initialDriverKey = "codex",
+            initialModel = "gpt-5-codex",
+            roster = listOf(
+                DriverRosterEntryUi(
+                    key = "codex",
+                    displayName = "Codex",
+                    shortName = "codex",
+                    vendor = "OpenAI",
+                    installed = true,
+                    supportsPerTaskModel = true,
+                ),
+            ),
+            authStates = mapOf(
+                "codex" to DriverAuthCheckUi(
+                    driverKey = "codex",
+                    state = DriverAuthStateUi.AUTHENTICATED,
+                    evidence = DriverAuthEvidenceUi.STRONG,
+                    remediation = DriverAuthRemediationUi.TERMINAL_LOGIN,
+                    remediationDetail = "codex login",
+                    checkedAt = at(20),
+                )
+            ),
+            modelCatalog = mapOf(
+                "codex" to DriverModelCatalogEntryUi(
+                    driverKey = "codex",
+                    state = DriverModelCatalogStateUi.KNOWN,
+                    models = listOf(
+                        DriverModelOptionUi("gpt-5-codex", "GPT-5 Codex"),
+                    ),
+                )
+            ),
+            initialPolicy = AgentExecPolicies.ANY_MEMBER,
+            onSave = { _, _, _, _, _ -> },
+            onDismiss = {},
+        )
+    }
+}
+
+@PreviewTest
+@Preview(name = "agent-employee-edit-dark", widthDp = 393, heightDp = 852, showBackground = true, locale = "zh-rCN")
+@Composable
+private fun EmployeeEditDialogPhoneDarkPreview() {
+    DialogBackdrop(darkTheme = true) {
+        EmployeeEditDialog(
+            employeeId = "emp-001",
+            initialName = "Codex Pro",
+            initialDuty = "coder",
+            initialDriverKey = "codex",
+            initialModel = "gpt-5-codex",
+            roster = listOf(
+                DriverRosterEntryUi(
+                    key = "codex",
+                    displayName = "Codex",
+                    shortName = "codex",
+                    vendor = "OpenAI",
+                    installed = true,
+                    supportsPerTaskModel = true,
+                ),
+            ),
+            authStates = mapOf(
+                "codex" to DriverAuthCheckUi(
+                    driverKey = "codex",
+                    state = DriverAuthStateUi.AUTHENTICATED,
+                    evidence = DriverAuthEvidenceUi.STRONG,
+                    remediation = DriverAuthRemediationUi.TERMINAL_LOGIN,
+                    remediationDetail = "codex login",
+                    checkedAt = at(20),
+                )
+            ),
+            modelCatalog = mapOf(
+                "codex" to DriverModelCatalogEntryUi(
+                    driverKey = "codex",
+                    state = DriverModelCatalogStateUi.KNOWN,
+                    models = listOf(
+                        DriverModelOptionUi("gpt-5-codex", "GPT-5 Codex"),
+                    ),
+                )
+            ),
+            initialPolicy = AgentExecPolicies.ANY_MEMBER,
+            onSave = { _, _, _, _, _ -> },
+            onDismiss = {},
+        )
+    }
+}
+
+@PreviewTest
+@Preview(name = "agent-team-profile-dialog", widthDp = 393, heightDp = 852, showBackground = true, locale = "zh-rCN")
+@Composable
+private fun TeamProfileDialogPhonePreview() {
+    DialogBackdrop(darkTheme = false) {
+        TeamProfileDialog(
+            profileKey = null,
+            initialName = "前端团队",
+            leaders = listOf(
+                TeamLeaderOption(agentKey = "lead-1", label = "DSH (本机架构师)"),
+                TeamLeaderOption(agentKey = "lead-2", label = "CI Runner"),
+            ),
+            initialLeaderAgentId = "lead-1",
+            initialMembers = listOf(
+                TeamMemberDraft(agentId = "m-coder", name = "coder", role = "业务编码", isNew = false),
+            ),
+            groups = listOf(
+                TeamGroupOption(groupId = "g-1", name = "核心架构群", joined = false),
+                TeamGroupOption(groupId = "g-2", name = "端侧发布群", joined = false),
+            ),
+            onSave = { _, _, _, _, _ -> },
+            onDismiss = {},
+            onFindNodes = {},
+        )
+    }
+}
+
+@PreviewTest
+@Preview(name = "agent-team-profile-dialog-dark", widthDp = 393, heightDp = 852, showBackground = true, locale = "zh-rCN")
+@Composable
+private fun TeamProfileDialogPhoneDarkPreview() {
+    DialogBackdrop(darkTheme = true) {
+        TeamProfileDialog(
+            profileKey = null,
+            initialName = "前端团队",
+            leaders = listOf(
+                TeamLeaderOption(agentKey = "lead-1", label = "DSH (本机架构师)"),
+                TeamLeaderOption(agentKey = "lead-2", label = "CI Runner"),
+            ),
+            initialLeaderAgentId = "lead-1",
+            initialMembers = listOf(
+                TeamMemberDraft(agentId = "m-coder", name = "coder", role = "业务编码", isNew = false),
+            ),
+            groups = listOf(
+                TeamGroupOption(groupId = "g-1", name = "核心架构群", joined = false),
+                TeamGroupOption(groupId = "g-2", name = "端侧发布群", joined = false),
+            ),
+            onSave = { _, _, _, _, _ -> },
+            onDismiss = {},
+            onFindNodes = {},
+        )
+    }
+}
+
+@PreviewTest
+@Preview(name = "agent-team-builder-dialog", widthDp = 393, heightDp = 852, showBackground = true, locale = "zh-rCN")
+@Composable
+private fun TeamBuilderDialogPhonePreview() {
+    DialogBackdrop {
+        TeamBuilderDialog(
+            leaders = listOf(
+                TeamLeaderOption(agentKey = "lead-1", label = "DSH (本机架构师)"),
+            ),
+            groups = listOf(
+                TeamGroupOption(groupId = "g-1", name = "核心架构群", joined = false),
+                TeamGroupOption(groupId = "g-2", name = "端侧发布群", joined = false),
+            ),
+            onGenerate = { _ -> null },
+            onConfirm = { _, _ -> emptyList() },
+            onDismiss = {},
+            onFindNodes = {},
+        )
+    }
+}
+
+@PreviewTest
+@Preview(name = "agent-team-builder-plan", widthDp = 393, heightDp = 852, showBackground = true, locale = "zh-rCN")
+@Composable
+private fun TeamBuilderDialogPlanPhonePreview() {
+    DialogBackdrop {
+        TeamBuilderDialog(
+            leaders = listOf(
+                TeamLeaderOption(agentKey = "lead-1", label = "DSH (本机架构师)"),
+            ),
+            groups = listOf(
+                TeamGroupOption(groupId = "g-1", name = "核心架构群", joined = false),
+                TeamGroupOption(groupId = "g-2", name = "端侧发布群", joined = false),
+            ),
+            onGenerate = { _ -> null },
+            onConfirm = { _, _ -> emptyList() },
+            onDismiss = {},
+            onFindNodes = {},
+            initialSpec = TeamScaffoldSpec(
+                teamTitle = "移动端自动化治理突击队",
+                leaderAgentId = "lead-1",
+                members = listOf(
+                    TeamScaffoldSpec.Member(
+                        agentId = "m-worker-1",
+                        name = "worker-dev",
+                        role = "代码生成与重构执行",
+                        driverKey = "codex",
+                        kind = TeamExecutionKindsUi.WORKER,
+                        prompt = "你负责严格遵照领域层约束与门禁规则进行代码重构与单测补齐。",
+                        reused = false,
+                    ),
+                    TeamScaffoldSpec.Member(
+                        agentId = "m-reviewer-1",
+                        name = "reviewer-qa",
+                        role = "质量门禁与安全审查",
+                        driverKey = "claude",
+                        kind = TeamExecutionKindsUi.REVIEWER,
+                        prompt = "你负责逐行 review 差异并验证是否引入未允许的 JVM 专有 API 或格式退化。",
+                        reused = true,
+                    ),
+                ),
+            ),
+        )
+    }
+}
+
+@PreviewTest
+@Preview(name = "agent-team-detail", widthDp = 393, heightDp = 852, showBackground = true, locale = "zh-rCN")
+@Composable
+private fun AgentTeamDetailPhonePreview() {
+    val detail = AgentTeamDetailUi(
+        groupId = "grp-mobile",
+        leaderAgentId = "lead-1",
+        hostNodeId = "host-mac",
+        teamId = "team-mobile-core",
+        displayName = "移动核心工程组",
+        groupName = "Teahouse Mobile 核心群",
+        leaderName = "架构师 · DSH",
+        members = listOf(
+            AgentTeamMemberUi(agentId = "lead-1", name = "DSH", role = "架构与任务编排", isLeader = true),
+            AgentTeamMemberUi(agentId = "m-coder", name = "Codex", role = "Kotlin 业务实现", isLeader = false),
+            AgentTeamMemberUi(agentId = "m-review", name = "Claude", role = "架构守卫与 Diff 审查", isLeader = false),
+        ),
+        teamSize = 3,
+        online = true,
+        pendingCount = 1,
+        lastActivityAt = PREVIEW_NOW - 60_000L,
+        groups = listOf(
+            AgentTeamGroupRow(
+                groupId = "grp-mobile",
+                groupName = "Teahouse Mobile 核心群",
+                wsId = "ws-mobile",
+                wsTitle = "teahouse-mobile",
+                pendingCount = 1,
+            )
+        ),
+    )
+    DialogBackdrop {
+        AgentTeamDetailView(
+            detail = detail,
+            selfNodeId = "host-mac",
+            teamExecutionPort = null,
+            onBack = {},
+            onOpenGroup = {},
+            onOpenWorkspaceDetail = {},
+            onEditTeam = {},
+            onDissolveTeam = {},
+        )
+    }
+}
+
+@PreviewTest
+@Preview(name = "agent-detail", widthDp = 393, heightDp = 852, showBackground = true, locale = "zh-rCN")
+@Composable
+private fun AgentDetailPhonePreview() {
+    Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+        val now = at(25)
+        AgentDetailView(
+            detail = AgentHubDetailUi(
+                hostNodeId = "node-host-01",
+                hostName = "MacBook Pro · DSH",
+                agentKey = "dsh",
+                displayName = "DSH (本机架构师)",
+                employeeId = "emp-001",
+                employeeName = "DSH (本机架构师)",
+                employeeDuty = "lead",
+                driverKey = "dsh",
+                isTeam = false,
+                teamSize = 0,
+                online = true,
+                teamMembers = emptyList(),
+                servingGroups = listOf(
+                    AgentHubGroupRow(
+                        groupId = "grp-mobile",
+                        groupName = "Teahouse Mobile 核心群",
+                        defaultWsId = "ws-th",
+                        resolvedWsTitle = "teahouse-mobile",
+                        pendingCount = 1,
+                    )
+                ),
+                assignments = listOf(
+                    AgentAssignmentUi(
+                        groupId = "grp-mobile",
+                        groupName = "Teahouse Mobile 核心群",
+                        seatName = "DSH",
+                        isLeader = true,
+                        isTeam = false,
+                        teamSize = 0,
+                        role = "架构师",
+                        defaultWsId = "ws-th",
+                        defaultWsTitle = "teahouse-mobile",
+                    )
+                ),
+                workspaces = listOf(
+                    AgentHubWorkspaceRow(
+                        wsId = "ws-th",
+                        wsTitle = "teahouse-mobile",
+                        online = true,
+                        sessionCount = 3,
+                    )
+                ),
+                approvals = listOf(
+                    AgentApprovalUi(
+                        approvalId = "appr-01",
+                        peerId = "node-host-01",
+                        sessionId = "sess-01",
+                        tool = "Bash",
+                        summary = "git push origin main",
+                        status = "pending",
+                        expiresAt = at(40),
+                    )
+                ),
+                sessions = listOf(
+                    AgentSessionUi(
+                        peerId = "node-host-01",
+                        sessionId = "sess-01",
+                        alias = "refactor runner",
+                        agentKind = "DSH",
+                        state = "running",
+                        title = "重构智能体治理卡片体系",
+                        startedAt = at(4),
+                        updatedAt = at(24),
+                    )
+                ),
+            ),
+            now = now,
+            onBack = {},
+            onOpenWorkspaceDetail = {},
+            onOpenSessionDetail = {},
+            onRespondApproval = { _, _ -> },
+            onRespondChoice = { _, _ -> },
+            agentSlice = AgentSlice(),
+            nodeSlice = NodeSlice(),
+            settingsSlice = SettingsSlice(),
+            onEditEmployee = {},
+        )
     }
 }

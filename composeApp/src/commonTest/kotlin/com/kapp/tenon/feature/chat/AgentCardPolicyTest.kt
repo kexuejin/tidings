@@ -399,4 +399,55 @@ class AgentCardPolicyTest {
         )
         assertFalse(donePlan.isHeartbeatStale, "终态卡片不触发心跳超时告警")
     }
+
+    // ── 动作按钮三档色彩（纯函数）──────────────────────────────────────────────
+
+    @Test
+    fun healSteerKeepsPrimaryDespiteReusingRejectId() {
+        // 熔断自愈的「补充指示并重试」复用了 reject-revision 这个 id（为蹭抽屉展开），
+        // 但显式标了 primary。若按 id 判成危险档，纠偏会被画成带关闭叉的红按钮。
+        val tone = cardActionToneOf(
+            actionId = SYSTEM_ACTION_REJECT_REVISION,
+            style = "primary",
+            approval = false,
+            cardState = "blocked",
+        )
+        assertEquals(CardActionTone.Primary, tone)
+    }
+
+    @Test
+    fun realRejectRevisionWithoutStyleStaysDanger() {
+        // 真·打回修订没有显式 style，仍须靠 id 判成危险档。
+        assertEquals(
+            CardActionTone.Danger,
+            cardActionToneOf(SYSTEM_ACTION_REJECT_REVISION, null, false, "review_ready"),
+        )
+        assertEquals(
+            CardActionTone.Danger,
+            cardActionToneOf("$SYSTEM_ACTION_REJECT_REVISION|feedback", null, false, "review_ready"),
+        )
+    }
+
+    @Test
+    fun explicitDangerOverridesPrimaryIdHeuristic() {
+        // 发出方显式 danger 时覆盖 id 推断（如 retry 一般算主档，这里必须落危险档）。
+        assertEquals(CardActionTone.Danger, cardActionToneOf("retry", "danger", false, "blocked"))
+    }
+
+    @Test
+    fun retryInBlockedOrTimeoutStaysPrimaryWithoutStyle() {
+        // 无 style 的 block/timeout + retry 仍按状态判主档，不被本次改动打破。
+        assertEquals(CardActionTone.Primary, cardActionToneOf("retry-quest", null, false, "blocked"))
+        assertEquals(CardActionTone.Primary, cardActionToneOf("retry", null, false, "timeout"))
+        assertEquals(CardActionTone.Neutral, cardActionToneOf("retry", null, false, "working"))
+    }
+
+    @Test
+    fun unknownStyleFallsBackToIdHeuristic() {
+        // 非 primary/danger 的 style（如 secondary）不参与判定，回落到 id 推断。
+        assertEquals(
+            CardActionTone.Danger,
+            cardActionToneOf(SYSTEM_ACTION_REJECT_REVISION, "secondary", false, "review_ready"),
+        )
+    }
 }

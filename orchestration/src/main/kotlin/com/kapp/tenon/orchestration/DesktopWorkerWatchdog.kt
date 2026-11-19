@@ -277,6 +277,8 @@ object OrchestratorCards {
                 add(buildJsonObject {
                     put("actionId", JsonPrimitive("retry"))
                     put("label", JsonPrimitive("Retry"))
+                    put("labelKey", JsonPrimitive("card.action.retry"))
+                    put("style", JsonPrimitive("primary"))
                 })
             })
         }
@@ -315,6 +317,8 @@ object OrchestratorCards {
                 add(buildJsonObject {
                     put("actionId", JsonPrimitive("retry"))
                     put("label", JsonPrimitive("Retry"))
+                    put("labelKey", JsonPrimitive("card.action.retry"))
+                    put("style", JsonPrimitive("primary"))
                 })
             })
         }

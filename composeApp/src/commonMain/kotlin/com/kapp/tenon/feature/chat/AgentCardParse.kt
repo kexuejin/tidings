@@ -157,7 +157,31 @@ fun parseAgentCard(json: JsonObject?): AgentCardUi? {
             val label = obj.str("label")?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
             AgentCardOption(label = label, recommended = obj.boolean("recommended") == true)
         },
+        blockedCode = json.str("blockedCode")?.takeIf { it.isNotBlank() } ?: inferBlockedCode(json),
+        attachTeamId = json.str("attachTeamId")?.takeIf { it.isNotBlank() },
+        remediationKind = json.str("remediationKind")?.takeIf { it.isNotBlank() },
+        remediationCommand = json.str("remediationCommand")?.takeIf { it.isNotBlank() },
     )
+}
+
+/**
+ * 宽容回落推断受阻分类码：
+ * 若远端或旧节点卡片未显式下发 blockedCode，但 state 为 blocked 且 banner 携带已知特征，
+ * 在解析阶段归并为标准分类码，确保渲染端能展示友好中文与引导行动，绝不把底层技术黑话裸露给用户。
+ */
+private fun inferBlockedCode(json: JsonObject): String? {
+    if (json.str("state") != "blocked") return null
+    val bannerText = (json["banner"] as? JsonObject)?.str("text") ?: return null
+    return when {
+        bannerText.contains("no workspace bound", ignoreCase = true) ||
+            bannerText.contains("no git workspace bound", ignoreCase = true) ||
+            bannerText.contains("chain executor unavailable", ignoreCase = true) -> "NO_DIRECTORY"
+        bannerText.contains("not authorized", ignoreCase = true) -> "NOT_AUTHORIZED"
+        bannerText.contains("team not in group", ignoreCase = true) -> "TEAM_NOT_IN_GROUP"
+        bannerText.contains("driver missing", ignoreCase = true) -> "DRIVER_MISSING"
+        bannerText.contains("no driver", ignoreCase = true) -> "NO_DRIVER"
+        else -> null
+    }
 }
 
 /** 步骤/检查项的 status 字符串 → 枚举：steps 与 checks 两处逐字同源，未知值退 Pending（协议兼容）。 */

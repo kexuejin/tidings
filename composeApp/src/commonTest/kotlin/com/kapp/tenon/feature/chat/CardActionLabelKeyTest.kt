@@ -65,4 +65,37 @@ class CardActionLabelKeyTest {
             cardActionLabel(AgentCardAction(actionId = "future-action", label = ""), null),
         )
     }
+
+    @Test
+    fun retryAndPrototypeAndHealKeysAreRegistered() {
+        assertTrue(CardActionLabelKeys.keys.containsKey("card.action.retry"))
+        assertTrue(CardActionLabelKeys.keys.containsKey("card.action.approve_prototype"))
+        assertTrue(CardActionLabelKeys.keys.containsKey("card.action.heal_steer"))
+        assertTrue(CardActionLabelKeys.keys.containsKey("card.action.heal_abandon"))
+    }
+
+    /**
+     * 单兵终态卡的「请 TA 复检」：文案带一个占位符（组员名），名字随 `labelArgs` 下来。
+     *
+     * 这条钉的是**两端接线**：宿主在 `StageChain.cardOf` 里发的键是
+     * `card.action.request_review`、参数是那一位组员的名字；本端若不登记这个键，
+     * 按钮会静默退化成英文 "Request review" —— 用户看不出「该找谁」，
+     * 而那正是这颗按钮存在的唯一理由。
+     */
+    @Test
+    fun theReviewActionIsRegisteredTogetherWithItsNameArgument() {
+        val card = parse(
+            """{"cardId":"c","rev":1,"actions":[
+                 {"actionId":"review-patch|qa","label":"Request review",
+                  "labelKey":"card.action.request_review","labelArgs":["质量"]}
+               ]}""",
+        )
+        val action = card.actions.single()
+        assertEquals("review-patch|qa", action.actionId, "动作串原样保留（宿主靠它解回组员名）")
+        assertEquals(listOf("质量"), action.labelArgs)
+        assertTrue(
+            CardActionLabelKeys.keys.containsKey("card.action.request_review"),
+            "本端必须登记这个键，否则「请谁」退化成一句固定英文",
+        )
+    }
 }

@@ -369,8 +369,23 @@ class CliSubprocessDriver(
             args = { cliSessionId, prompt -> dshResumeArgs(cliSessionId, prompt) },
         )
 
-        fun dshResumeArgs(cliSessionId: String, prompt: String): List<String> =
-            listOf("--profile", "headless", "--json", "--session-id", cliSessionId, prompt)
+        /** dsh 的续跑规格（带模型）：patch 路径由调用方按次给出。 */
+        fun dshResume(model: String?, patchPath: () -> String?): CliResumeSpec = CliResumeSpec(
+            sessionIdFromLine = { line -> RESUME_SESSION_LINE.find(line)?.groupValues?.getOrNull(1) },
+            args = { cliSessionId, prompt ->
+                dshResumeArgs(cliSessionId, prompt, model, patchPath())
+            },
+        )
+
+        fun dshResumeArgs(
+            cliSessionId: String,
+            prompt: String,
+            model: String? = null,
+            patchPath: String? = null,
+        ): List<String> =
+            // 同样：`--patch` 在前（启动器选项）。
+            (if (model != null && patchPath != null) listOf("--patch", patchPath) else emptyList()) +
+                listOf("--profile", "headless", "--json", "--session-id", cliSessionId, prompt)
 
         private val RESUME_SESSION_LINE =
             Regex("\"type\"\\s*:\\s*\"session\".*?\"sessionId\"\\s*:\\s*\"([^\"]+)\"")
@@ -427,8 +442,76 @@ class CliSubprocessDriver(
          * tool_result/final），喂给 [CliLineEventMapper] 的 dsh 分支。任务文本是
          * 最后一个位置参数；`-` 读 stdin 我们用不上。
          */
-        fun dshArgs(prompt: String): List<String> =
-            listOf("--profile", "headless", "--json", prompt)
+        /**
+         * dsh 的按次指定模型：**没有 `--model` 旗标**，走官方 `--patch` 配置覆盖。
+         *
+         * 实测两件事，都写在这里免得后人重踩：
+         * 1. `--patch` 是**整块替换**而不是字段合并 —— 只写 `model` 会把 `provider` 弄丢，
+         *    dsh 启动即失败（本机实测：进程退出、无输出）；
+         * 2. dsh 会**校验模型 id**：不存在的 id 当场报 `UNKNOWN_MODEL`，不会静默跑默认。
+         *    所以「填了个错的值」是响亮失败，不是本仓最贵的那种静默失效。
+         *
+         * [model] 非空时写一份临时 patch（三字段写全）并追加 `--patch`；调用方负责删文件。
+         */
+        fun dshArgs(prompt: String, model: String? = null, patchPath: String? = null): List<String> =
+            // `--patch` 是 dsh **启动器**的选项，不是 headless 应用的选项 —— 必须排在
+            // `--profile` 之前。放错位置时 dsh 报 `unknown option '--patch'` 并退出 1
+            // （本机实测），而那个报错看着像「参数拼错了」，实际是位置错了。
+            (if (model != null && patchPath != null) listOf("--patch", patchPath) else emptyList()) +
+                listOf("--profile", "headless", "--json", prompt)
+
+        /**
+         * dsh 的 patch 文件内容：**三个字段必须写全**（整块替换语义，见 [dshArgs]）。
+         *
+         * provider 用 dsh 出厂的那个（`dsh-opencode-go`）；换 provider 不在本层能力内 ——
+         * 那是改用户 profile 的事，得单独评估。
+         */
+        /**
+         * [dshArgs] 的按模型版本：把 patch 写到**按模型哈希命名的固定路径**再追加 `--patch`。
+         *
+         * 为什么是固定路径而不是每次 createTempFile：同一次编制里反复派单用同一个模型是常态，
+         * 固定路径让内容天然幂等、不留一堆临时文件（也省掉「谁负责删」这个问题）。
+         * 内容由模型 id 完全决定，不存在读到别人写的文件的可能。
+         *
+         * 写盘失败 ⇒ **不带 patch**（回落默认模型）并让 dsh 报错 —— 但这不是静默降级：
+         * `DriverModelFlags` 已经把「不支持就响亮失败」的判据放在 executeTask 前，
+         * 这里是「支持但环境不允许」的兜底，stderr 会照实进失败信息。
+         */
+        fun dshArgsWithModel(prompt: String, model: String?): List<String> {
+            if (model.isNullOrBlank()) return dshArgs(prompt)
+            val patchPath = runCatching { dshPatchFileFor(model) }.getOrNull()
+                ?: return dshArgs(prompt)
+            return dshArgs(prompt, model, patchPath)
+        }
+
+        /**
+         * 模型 → patch 文件绝对路径（写好了才返回）。同模型重复调用不会重写。
+         *
+         * 目录取 `java.io.tmpdir` 下的固定子目录；文件名是模型 id 的稳定哈希，
+         * 避免 id 里的 `/` `:` 之类字符进路径。
+         */
+        fun dshPatchFileFor(model: String): String {
+            val dir = File(System.getProperty("java.io.tmpdir"), "tenon-dsh-model-patches")
+            if (!dir.isDirectory && !dir.mkdirs()) error("cannot create " + dir.absolutePath)
+            val digest = java.security.MessageDigest.getInstance("SHA-256")
+                .digest(model.toByteArray(Charsets.UTF_8))
+                .take(8)
+                .joinToString("") { b -> "%02x".format(b) }
+            val file = File(dir, "model-" + digest + ".yml")
+            val content = dshModelPatch(model)
+            // 内容相同就不重写：幂等，且不会让并发派单互相踩写。
+            if (!file.isFile || file.readText(Charsets.UTF_8) != content) {
+                file.writeText(content, Charsets.UTF_8)
+            }
+            return file.absolutePath
+        }
+
+        fun dshModelPatch(model: String): String =
+            "- id: agent-default-model\n" +
+                "  config:\n" +
+                "    provider: dsh-opencode-go\n" +
+                "    model: " + model + "\n" +
+                "    reasoningEffort: high\n"
 
         /**
          * CodeBuddy CLI（本机 2.176.0 实测）：与 Claude Code 同形，prompt 是 `-p` 的**选项值**，
@@ -716,7 +799,9 @@ fun cliDriverRegistrations(
                     driverId = DriverKeys.cliDriverId("dsh"),
                     displayName = "DeepSeek Harness (CLI)",
                     cliPath = dsh,
-                    argSpec = { prompt -> CliSubprocessDriver.dshArgs(prompt) },
+                    argSpec = { prompt, model ->
+                        CliSubprocessDriver.dshArgsWithModel(prompt, model)
+                    },
                     sandbox = sandbox,
                     envOverrides = providerEnv,
                     resumeSpec = CliSubprocessDriver.DSH_RESUME,
@@ -726,7 +811,9 @@ fun cliDriverRegistrations(
                     driverId = DriverKeys.cliDriverId("dsh"),
                     displayName = "DeepSeek Harness (CLI)",
                     cliPath = dsh,
-                    argSpec = { prompt -> CliSubprocessDriver.dshArgs(prompt) },
+                    argSpec = { prompt, model ->
+                        CliSubprocessDriver.dshArgsWithModel(prompt, model)
+                    },
                     envOverrides = providerEnv,
                     resumeSpec = CliSubprocessDriver.DSH_RESUME,
                 )

@@ -2,6 +2,7 @@
 
 package com.kapp.tenon.feature.chat
 
+import com.kapp.tenon.domain.ATTACH_TEAM_ACTION_PREFIX
 import com.kapp.tenon.domain.SYSTEM_ACTION_SESSION_EXEMPT
 import com.kapp.tenon.domain.SenderIdentityContext
 import com.kapp.tenon.domain.resolveNodeIdentity
@@ -56,7 +57,6 @@ import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.Spacer
@@ -67,10 +67,12 @@ import com.kapp.tenon.ui.components.AppButtonTone
 import com.kapp.tenon.ui.components.AppTextButton
 import com.kapp.tenon.domain.model.MessageUi
 import com.kapp.tenon.generated.resources.Res
+import com.kapp.tenon.generated.resources.chat_agent_request_grant
 import com.kapp.tenon.generated.resources.ic_terminal
 import com.kapp.tenon.generated.resources.ic_bot
 import com.kapp.tenon.generated.resources.ic_shield
 import com.kapp.tenon.generated.resources.ic_list
+import com.kapp.tenon.generated.resources.ic_refresh
 import com.kapp.tenon.generated.resources.ic_check_double
 import com.kapp.tenon.generated.resources.ic_info
 import com.kapp.tenon.generated.resources.ic_warn
@@ -95,15 +97,35 @@ import com.kapp.tenon.generated.resources.card_status_blocked
 import com.kapp.tenon.generated.resources.card_status_done
 import com.kapp.tenon.generated.resources.card_status_failed
 import com.kapp.tenon.generated.resources.card_status_merged
+import com.kapp.tenon.generated.resources.card_status_proposed
 import com.kapp.tenon.generated.resources.card_status_pending
 import com.kapp.tenon.generated.resources.card_status_prototype
 import com.kapp.tenon.generated.resources.card_status_running
+import com.kapp.tenon.generated.resources.dispatch_blocked_dir_denied
+import com.kapp.tenon.generated.resources.dispatch_blocked_details
+import com.kapp.tenon.generated.resources.dispatch_blocked_driver_missing
+import com.kapp.tenon.generated.resources.dispatch_blocked_no_directory
+import com.kapp.tenon.generated.resources.dispatch_blocked_no_driver
+import com.kapp.tenon.generated.resources.dispatch_blocked_not_authorized
+import com.kapp.tenon.generated.resources.dispatch_blocked_target_missing
+import com.kapp.tenon.generated.resources.dispatch_blocked_team_not_in_group
+import com.kapp.tenon.generated.resources.dispatch_blocked_team_not_in_group_action
+import com.kapp.tenon.generated.resources.dispatch_blocked_bind_workspace_action
+import com.kapp.tenon.generated.resources.dispatch_blocked_title
+import com.kapp.tenon.generated.resources.driver_action_copy_login
+import com.kapp.tenon.generated.resources.driver_action_open_app
+import com.kapp.tenon.generated.resources.driver_login_hint
+import com.kapp.tenon.generated.resources.driver_state_login
+import com.kapp.tenon.generated.resources.remediation_app_model
+import com.kapp.tenon.generated.resources.remediation_copy_var
+import com.kapp.tenon.generated.resources.remediation_token_env
 import com.kapp.tenon.generated.resources.card_status_review_ready
 import com.kapp.tenon.generated.resources.card_type_task_board
 import com.kapp.tenon.generated.resources.card_type_diff_review
 import com.kapp.tenon.generated.resources.card_type_prototype
 import com.kapp.tenon.generated.resources.card_type_approval
 import com.kapp.tenon.generated.resources.card_type_ask_question
+import com.kapp.tenon.generated.resources.card_type_assistant_quest
 import com.kapp.tenon.generated.resources.card_type_assignment
 import com.kapp.tenon.generated.resources.card_type_direction_ask
 import com.kapp.tenon.generated.resources.card_type_result
@@ -233,38 +255,35 @@ fun AgentCardBubble(
             .relayCardShadow(shape = cardShape),
     ) {
         Column(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = sp.lg),
-            verticalArrangement = Arrangement.spacedBy(sp.md),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = sp.lg14),
+            verticalArrangement = Arrangement.spacedBy(sp.md10),
         ) {
-            // 数字员工工牌（升级计划 Phase 2 要点 1）：avatar + 角色名 + worktree 分支
-            // 芯片 + 呼吸微动效点。bot 缺席 = 老插件没给，整块不画（不是每个卡都有承办人）。
-            card.bot?.let { CardHeaderRow(bot = it, sessionId = sessionId, onAgentBadgeClick = onAgentBadgeClick) }
-            // 头行：上栏元信息（type 徽标 + 状态胶囊 + rev 游标）+ 独立主标题。
-            if (card.type != null || card.title != null || card.rev > 0 || plan.showExpiredTag) {
+            // 统合型顶栏（去 demo 感、拒绝多层堆叠）：主体身份在左，状态标签在右，紧跟标题
+            if (card.bot != null || card.type != null || card.title != null || card.rev > 0 || plan.showExpiredTag) {
                 Column(verticalArrangement = Arrangement.spacedBy(sp.xs)) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(sp.sm),
                         modifier = Modifier.fillMaxWidth(),
                     ) {
-                        card.type?.let { CardTypeTag(it) }
-                        Spacer(Modifier.weight(1f))
+                        if (card.bot != null) {
+                            CardHeaderRow(
+                                bot = card.bot,
+                                sessionId = sessionId,
+                                onAgentBadgeClick = onAgentBadgeClick,
+                                modifier = Modifier.weight(1f),
+                            )
+                        } else if (card.type != null) {
+                            CardTypeTag(card.type)
+                        }
                         if (plan.showExpiredTag) {
                             CardNeutralTag(text = stringResource(Res.string.card_expired))
                         }
                         CardStateTag(card)
-                        // 这里曾经显示「第 N 版」。删掉的理由不是省地方，是它没有意义：
-                        // rev 每广播一次就 +1（受理、结论、处理人落定各一次），真机上同一
-                        // 张刚跑完的卡写着「第 4 版」—— 用户会以为前面还有三次任务。
-                        // 卡的「变了没有」由状态胶囊和横幅表达；版本号是协议内部的事，
-                        // 不该占用户的注意力。
                     }
                     if (card.title != null) {
                         Text(
                             text = card.title,
-                            // 设计契约（componentSpecs.AgentCards.requiredTokens）要的就是
-                            // titleSmall。先前这一行被改成 titleMedium，`designSpecDrift`
-                            // 当天就红了 —— 规格里的人写明是这一档，改大要连规格一起改。
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onSurface,
@@ -274,27 +293,52 @@ fun AgentCardBubble(
                     }
                 }
             }
-            // 状态胶囊行（原型稿 .mchips）：在头行与横幅之间 —— 机器事实的快照
-            // （进度/门禁/受阻），宿主 cardOf 从既有状态派生。
-            if (card.chips.isNotEmpty()) {
-                CardChipsRow(card.chips)
+            // 胶囊是宿主给的**机器事实**：只滤掉与进度条逐字相同的那一条。
+            // 按 tone 批量滤会吞掉唯一一条受阻原因；按 contains("0%") 滤会把
+            // 10%/100% 一起吃掉 —— 卡面宁可多一条重复，也不许静默少一条事实。
+            val progressChip = card.progress?.takeIf { it > 0 }?.let { "$it%" }
+            val visibleChips = if (progressChip == null) {
+                card.chips
+            } else {
+                card.chips.filterNot { it.text.trim() == progressChip }
+            }
+            if (visibleChips.isNotEmpty()) {
+                CardChipsRow(visibleChips)
             }
             // 业务上下文与意图说明框（原型稿 .ctx-box）
             card.context?.let { CardContextBox(it) }
             // 高危命令展示框（原型稿 .cmd-box）
             card.cmd?.let { CardCmdBox(it) }
-            card.banner?.let { CardBannerRow(it) }
+            if (card.blockedCode != null) {
+                CardBlockedBanner(card = card, onAction = onAction)
+            } else {
+                card.banner?.let { CardBannerRow(it) }
+            }
+            if (card.remediationKind != null && card.remediationKind != "NONE") {
+                CardRemediationRow(card = card)
+            }
             if (plan.isHeartbeatStale) {
                 CardHeartbeatWarningBanner(card = card, onAction = onAction)
             }
-            card.progress?.let { CardProgressRow(it, card.elapsedSec) }
+            // 前置受阻且进度为 0% 时不展示无意义的 0% 进度条（任务未开始，避免空白和误导）
+            val showProgress = card.progress != null && (card.progress > 0 || card.state != "blocked")
+            if (showProgress) {
+                CardProgressRow(card.progress!!, card.elapsedSec)
+            }
             // Acceptance 检查清单（升级计划 Phase 2 要点 2）：新式卡走 checks（带单项耗时 /
             // 观察结论 / 日志抽屉），老卡继续走 StepList。两者都画会把同一批步骤说两遍 ——
             // 解析侧 checks 本就由 items 回退而来，有 checks 时 steps 是它的影子。
             if (card.checks.isNotEmpty() && card.steps.isEmpty()) {
                 CardChecksColumn(card.checks, card.cardId)
             } else if (card.steps.isNotEmpty()) {
-                CardStepListColumn(card.steps)
+                // 受阻态且没有真实步骤展开时（仅有占位项），不绘制冗余空步骤
+                val isSinglePlaceholderStep = card.state == "blocked" &&
+                    card.steps.size == 1 &&
+                    (card.steps[0].label == "Team" || card.steps[0].label == "Worker" || card.steps[0].label == "Delegation") &&
+                    card.steps[0].detail.isNullOrBlank()
+                if (!isSinglePlaceholderStep) {
+                    CardStepListColumn(card.steps)
+                }
             }
             card.diff?.let { CardDiffViewerRow(it) }
             card.diff?.takeIf { it.hunk.isNotEmpty() }?.let { CardDiffHunkViewer(it) }
@@ -312,44 +356,58 @@ fun AgentCardBubble(
             // 它不是按钮，是「这件事已被谁定了」的事实 —— 就算这个壳没有动作通路
             // （onAction == null），它也照画。
             card.decidedBy?.let { decided ->
-                // D7：decidedBy 是拍板节点的 nodeId，先过一遍与消息署名同源的解析再上屏。
-                // self ⇒ 本机昵称（SenderIdentityContext.selfNick，真机上即设备名称）；
-                // 别人 ⇒ 昵称/群昵称/档案名；解析不出 ⇒ 8 位短 id（resolveNodeIdentity
-                // 的最后一档），仍比 36 位裸 id 可读。ctx 为 null 的壳保持老形态。
-                //
-                // self 整句资源（card_decided_by_self「你已处理」），但本机编译
-                // 环境对**新增**资源键一律 Unresolved（生成物在盘上含该键、编译仍报错，
-                // 冷建/清守护/清 .gradle 均复现；老键同文件同形状可解析）——如实记账，
-                // 先落 displayName 方案，「你已处理」待环境恢复再上（证据 §十三）。
                 val decidedText = if (decidedByCtx != null) {
                     stringResource(Res.string.card_decided_by, resolveNodeIdentity(decided, decidedByCtx).displayName)
                 } else {
                     stringResource(Res.string.card_decided_by, decided)
                 }
-                // 升级稿 .decided（relay.html:580-581）：surface-2 底 + r8 + 12 on-2，块化知情行。
-                Text(
-                    text = decidedText,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(sp.sm),
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(SurfaceTiers.Raised, MaterialTheme.shapes.small)
-                        .padding(horizontal = sp.md, vertical = sp.sm),
-                )
+                        .padding(horizontal = sp.md, vertical = sp.sm6),
+                ) {
+                    Icon(
+                        painter = painterResource(Res.drawable.ic_check_double),
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                        modifier = Modifier.size(com.kapp.tenon.ui.theme.IconSizes.Inline),
+                    )
+                    Text(
+                        text = decidedText,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
             // 只读态必须说清「为什么没有按钮」（.wait 同 .decided：580 段的另一形态，
             // text-align:center —— relay.html:584-585）。
             if (plan.showWaitingForHost) {
-                Text(
-                    text = stringResource(Res.string.card_waiting_host),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center,
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center,
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(SurfaceTiers.Raised, MaterialTheme.shapes.small)
-                        .padding(horizontal = sp.md, vertical = sp.sm),
-                )
+                        .padding(horizontal = sp.md, vertical = sp.sm6),
+                ) {
+                    Icon(
+                        painter = painterResource(Res.drawable.ic_refresh),
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                        modifier = Modifier.size(com.kapp.tenon.ui.theme.IconSizes.Inline),
+                    )
+                    Spacer(Modifier.width(sp.xs))
+                    Text(
+                        text = stringResource(Res.string.card_waiting_host),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
             if (plan.showActions) {
                 // 打回动作的就地展开（升级计划 Phase 2 要点 4）：reject 按钮被点时
@@ -409,7 +467,7 @@ internal fun CardHeaderRow(
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(sp.sm),
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier,
     ) {
         // .hd .bot-badge 的字母座：agent 紫微底 + 角色名首字（图形级 3:1 用 agentAccent）。
         // 圆角 6px 属档外值（原型 .bot-badge 6px）：按 ShapeRoles 表头裁决就近归并 extraSmall。
@@ -435,11 +493,11 @@ internal fun CardHeaderRow(
             color = MaterialTheme.colorScheme.onSurface,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f, fill = false).then(clickModifier),
+            modifier = clickModifier,
         )
         CardBreathDot(bdot = bot.bdot)
-        bot.branch?.let { branch ->
-            // .hd .wk-chip：等宽 11px surface-2 底 —— worktree 分支是机器事实，不做语义着色。
+        bot.branch?.takeIf { !it.startsWith("chain/") && !it.startsWith("delegation-") }?.let { branch ->
+            // 仅对用户真实业务分支展示轻量 chip；对内部临时 worktree 分支隐藏，避免暴露开发黑话
             Text(
                 text = branch,
                 style = MaterialTheme.typography.labelSmall,
@@ -749,6 +807,9 @@ private fun CardTypeTag(type: String) {
         "team-task-board" -> stringResource(Res.string.card_type_team_task_board) to Res.drawable.ic_terminal
         // 求方向卡：问「这是调整还是新任务」，语义同「要你定一件事」⇒ 与 ask_question 同图标。
         "direction-ask" -> stringResource(Res.string.card_type_direction_ask) to Res.drawable.ic_list
+        // 支线任务卡（AssistantQuestCardPayload）：发射侧固定写这个 type，缺档会把英文
+        // 原文 assistant_quest 印在卡面上 —— 与上面几档"发射折叠但仍补档"同一理由。
+        "assistant_quest" -> stringResource(Res.string.card_type_assistant_quest) to Res.drawable.ic_terminal
         else -> type to Res.drawable.ic_bot
     }
     Row(
@@ -781,10 +842,12 @@ internal fun CardStateTag(card: AgentCardUi) {
     // 发出方声明的 state 优先。反推那套（下面）留着给不带 state 的老卡：
     // 它认不出「已中止」，会把一张停掉的卡继续标成「待合并」。
     val declared = when (card.state) {
+        // 「已停止」是用户自己按下的决定，不是故障 —— 用中性档（与 blocked 的 warn
+        // 区分开），避免红色/警示色让人误以为出错、下次不敢再停。
         "aborted" -> Triple(
             stringResource(Res.string.card_status_aborted),
-            MaterialTheme.accents.warn.copy(alpha = 0.12f),
-            MaterialTheme.colorScheme.onSecondaryContainer,
+            MaterialTheme.colorScheme.surfaceVariant,
+            MaterialTheme.colorScheme.onSurfaceVariant,
         )
         "blocked" -> Triple(
             stringResource(Res.string.card_status_blocked),
@@ -815,6 +878,20 @@ internal fun CardStateTag(card: AgentCardUi) {
             stringResource(Res.string.card_status_running),
             MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
             MaterialTheme.colorScheme.primary,
+        )
+        // 提议卡（未绑定工作区时的待选态）：它还没开始干，也不是"待合并"——用中性
+        // 档表示"提议中、等人拍板"，避免落到 action 反推被标成"待合并"。
+        "proposed" -> Triple(
+            stringResource(Res.string.card_status_proposed),
+            MaterialTheme.colorScheme.outline.copy(alpha = 0.12f),
+            MaterialTheme.colorScheme.onSurface,
+        )
+        // 零产物成功态：显式给绿档，不再只靠 progress==100 的兜底反推 —— 发 done 却
+        // 漏带 progress 或带动作的卡，此前会被反推成"待合并"。
+        "done" -> Triple(
+            stringResource(Res.string.card_status_done),
+            MaterialTheme.accents.online.copy(alpha = 0.12f),
+            MaterialTheme.accents.online,
         )
         else -> null
     }
@@ -976,6 +1053,159 @@ private fun CardBannerRow(banner: AgentCardBanner) {
     }
 }
 
+/** 派单失败 blocked 卡（方案 §3.5）：分类码 chip + 一句人话 + 主行动 + 其余原因折叠。 */
+@Composable
+private fun CardBlockedBanner(
+    card: AgentCardUi,
+    onAction: ((card: AgentCardUi, actionId: String) -> Unit)?,
+) {
+    val sp = LocalAppSpacing.current
+    val isError = when (card.blockedCode) {
+        "DIR_NOT_ALLOWED", "NOT_AUTHORIZED", "DRIVER_MISSING" -> true
+        else -> false
+    }
+    val tone = if (isError) AgentCardBannerTone.Error else AgentCardBannerTone.Warn
+    val (_, contentColor) = bannerColorsOf(tone)
+    val humanText = when (card.blockedCode) {
+        "NO_DRIVER" -> stringResource(Res.string.dispatch_blocked_no_driver)
+        "NO_DIRECTORY" -> stringResource(Res.string.dispatch_blocked_no_directory)
+        "DIR_NOT_ALLOWED" -> stringResource(Res.string.dispatch_blocked_dir_denied)
+        "NOT_AUTHORIZED" -> stringResource(Res.string.dispatch_blocked_not_authorized)
+        "TEAM_NOT_IN_GROUP" -> stringResource(Res.string.dispatch_blocked_team_not_in_group)
+        "TARGET_MISSING" -> stringResource(Res.string.dispatch_blocked_target_missing)
+        "DRIVER_MISSING" -> stringResource(Res.string.dispatch_blocked_driver_missing)
+        else -> card.banner?.text ?: stringResource(Res.string.dispatch_blocked_title)
+    }
+    var expandedDetails by remember { mutableStateOf(false) }
+
+    BannerSurface(tone = tone) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = sp.md, vertical = sp.sm),
+            verticalArrangement = Arrangement.spacedBy(sp.xs),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(sp.sm),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(
+                    painter = painterResource(if (isError) Res.drawable.ic_close else Res.drawable.ic_warn),
+                    contentDescription = null,
+                    tint = contentColor,
+                    modifier = Modifier.size(com.kapp.tenon.ui.theme.IconSizes.Label),
+                )
+                Text(
+                    // 标题只说人话。分类码是**排查用的**（`NO_DRIVER` 这种大写枚举），
+                    // 拼进标题等于把日志贴到用户脸上；它已经在下面那句人话里被翻译过。
+                    text = stringResource(Res.string.dispatch_blocked_title),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = contentColor,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            Text(
+                text = humanText,
+                style = MaterialTheme.typography.bodySmall,
+                color = contentColor,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(sp.sm),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                if (card.blockedCode == "TEAM_NOT_IN_GROUP" && card.attachTeamId != null && onAction != null) {
+                    AppTextButton(
+                        text = stringResource(Res.string.dispatch_blocked_team_not_in_group_action),
+                        onClick = { onAction(card, ATTACH_TEAM_ACTION_PREFIX + card.attachTeamId) },
+                        size = AppButtonSize.Small,
+                    )
+                }
+                if (card.blockedCode == "NO_DIRECTORY" && onAction != null) {
+                    AppTextButton(
+                        text = stringResource(Res.string.dispatch_blocked_bind_workspace_action),
+                        onClick = { onAction(card, SYSTEM_ACTION_BIND_WORKSPACE) },
+                        size = AppButtonSize.Small,
+                    )
+                }
+                if (card.banner?.text != null && card.banner.text != humanText) {
+                    AppTextButton(
+                        text = stringResource(Res.string.dispatch_blocked_details) + if (expandedDetails) " ▴" else " ▾",
+                        onClick = { expandedDetails = !expandedDetails },
+                        size = AppButtonSize.Small,
+                    )
+                }
+            }
+            if (expandedDetails && card.banner?.text != null) {
+                Text(
+                    text = card.banner.text,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = contentColor.copy(alpha = 0.8f),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
+    }
+}
+
+/** 结果卡正文中的认证/模型提示行（方案 §3.6）：固定一行，不折叠。 */
+@Composable
+private fun CardRemediationRow(card: AgentCardUi) {
+    val sp = LocalAppSpacing.current
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+    val tone = AgentCardBannerTone.Warn
+    val (_, contentColor) = bannerColorsOf(tone)
+    val cmd = card.remediationCommand.orEmpty()
+    val (text, actionLabel, onActionClick) = when (card.remediationKind) {
+        "TERMINAL_LOGIN" -> Triple(
+            stringResource(Res.string.driver_state_login) + " · " + stringResource(Res.string.driver_login_hint, cmd),
+            stringResource(Res.string.driver_action_copy_login),
+            { clipboard.setText(androidx.compose.ui.text.AnnotatedString(cmd)) },
+        )
+        "TOKEN_ENV" -> Triple(
+            stringResource(Res.string.remediation_token_env, cmd),
+            stringResource(Res.string.remediation_copy_var),
+            { clipboard.setText(androidx.compose.ui.text.AnnotatedString(cmd)) },
+        )
+        "APP_MODEL" -> Triple(
+            stringResource(Res.string.remediation_app_model),
+            stringResource(Res.string.driver_action_open_app),
+            {},
+        )
+        else -> return
+    }
+    BannerSurface(tone = tone) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(sp.sm),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = sp.md, vertical = sp.sm),
+        ) {
+            Icon(
+                painter = painterResource(Res.drawable.ic_warn),
+                contentDescription = null,
+                tint = contentColor,
+                modifier = Modifier.size(com.kapp.tenon.ui.theme.IconSizes.Label),
+            )
+            Text(
+                text = text,
+                style = MaterialTheme.typography.bodySmall,
+                color = contentColor,
+                modifier = Modifier.weight(1f),
+            )
+            AppTextButton(
+                text = actionLabel,
+                onClick = onActionClick,
+                size = AppButtonSize.Small,
+            )
+        }
+    }
+}
+
 /**
  * 横幅的**外壳**（圆角 + 底色 + 内边距）：卡内 Banner 与群流执行状态横幅共用。
  *
@@ -1088,14 +1318,40 @@ fun agentStateBannerToneOf(state: String?): AgentCardBannerTone? = when (state) 
  * 而沉默正是这个组件存在的理由。
  */
 @Composable
-fun AgentStateBannerRow(state: String, text: String, modifier: Modifier = Modifier) {
+fun AgentStateBannerRow(
+    state: String,
+    text: String,
+    modifier: Modifier = Modifier,
+    /**
+     * 「申请授权」的动作（§4 #7：分类 + 入口）：失败横幅带被 @ 的 agent 名
+     * （`mentions[0]`，随帧下来）时给出能寻址的出口 —— 与「@ 了没执行」通知行的
+     * 入口同一套流程。null = 没有可寻址的名字 / 壳没接授权流（老端）= 不画按钮。
+     */
+    onRequestGrant: (() -> Unit)? = null,
+) {
     val tone = agentStateBannerToneOf(state) ?: return
     BannerSurface(tone = tone, modifier = modifier.fillMaxWidth()) {
-        BannerText(
-            text.ifBlank {
-                if (state == "failed") stringResource(Res.string.agent_state_banner_failed) else ""
-            },
-        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.weight(1f)) {
+                BannerText(
+                    text.ifBlank {
+                        if (state == "failed") stringResource(Res.string.agent_state_banner_failed) else ""
+                    },
+                )
+            }
+            if (onRequestGrant != null) {
+                // chip 与通知行的「申请授权」同一措辞（chat_notice_grant）：
+                // 同一句话两个落点，措辞分叉会让用户以为是两件事。
+                Text(
+                    text = stringResource(Res.string.chat_agent_request_grant),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier
+                        .padding(start = LocalAppSpacing.current.sm)
+                        .clickable { onRequestGrant() },
+                )
+            }
+        }
     }
 }
 
@@ -1156,17 +1412,36 @@ private fun CardProgressRow(progress: Int, elapsedSec: Long? = null) {
 @Composable
 private fun CardStepListColumn(steps: List<AgentCardStep>) {
     val sp = LocalAppSpacing.current
+    val allDone = steps.isNotEmpty() && steps.all { it.status == AgentCardStepStatus.Done }
+    var expanded by remember { mutableStateOf(false) }
+
     if (steps.size <= 4) {
         Column(
-            verticalArrangement = Arrangement.spacedBy(sp.sm6),
+            verticalArrangement = Arrangement.spacedBy(sp.xs),
             modifier = Modifier.padding(vertical = sp.xs),
         ) {
-            steps.forEach { step -> CardStepRow(step) }
+            steps.forEach { step ->
+                CardStepRow(
+                    step = step,
+                    showDetail = expanded || step.status != AgentCardStepStatus.Done,
+                )
+            }
+            if (allDone && steps.any { !it.detail.isNullOrBlank() }) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    AppTextButton(
+                        text = stringResource(if (expanded) Res.string.card_details_hide else Res.string.card_details_show),
+                        onClick = { expanded = !expanded },
+                        size = AppButtonSize.Compact,
+                    )
+                }
+            }
         }
         return
     }
 
-    var expanded by remember { mutableStateOf(false) }
     val priorityIdx = steps.indexOfFirst {
         it.status == AgentCardStepStatus.Running ||
             it.status == AgentCardStepStatus.Failed ||
@@ -1183,10 +1458,15 @@ private fun CardStepListColumn(steps: List<AgentCardStep>) {
     }
 
     Column(
-        verticalArrangement = Arrangement.spacedBy(sp.sm6),
+        verticalArrangement = Arrangement.spacedBy(sp.xs),
         modifier = Modifier.padding(vertical = sp.xs),
     ) {
-        visibleSteps.forEach { step -> CardStepRow(step) }
+        visibleSteps.forEach { step ->
+            CardStepRow(
+                step = step,
+                showDetail = expanded || step.status != AgentCardStepStatus.Done,
+            )
+        }
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.End,
@@ -1329,7 +1609,10 @@ private fun StepStatusIcon(status: AgentCardStepStatus) {
 }
 
 @Composable
-private fun CardStepRow(step: AgentCardStep) {
+private fun CardStepRow(
+    step: AgentCardStep,
+    showDetail: Boolean = true,
+) {
     val sp = LocalAppSpacing.current
     val labelColor = if (step.status == AgentCardStepStatus.Running) {
         MaterialTheme.colorScheme.primary
@@ -1343,6 +1626,7 @@ private fun CardStepRow(step: AgentCardStep) {
         val isRoleLabel = step.label.length <= 6 && !step.label.startsWith("@")
         val titleText = if (hasAssignee && isRoleLabel) step.assignee.orEmpty() else step.label
         val badgeText = if (hasAssignee && isRoleLabel) step.label else step.assignee?.takeIf { it.trim() != step.label.trim() }
+        val safeBadgeText = badgeText?.takeIf { it.trim().lowercase() != titleText.trim().lowercase() }
 
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -1364,7 +1648,7 @@ private fun CardStepRow(step: AgentCardStep) {
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
-            badgeText?.let {
+            safeBadgeText?.let {
                 Text(
                     text = it,
                     style = MaterialTheme.typography.labelSmall,
@@ -1377,17 +1661,19 @@ private fun CardStepRow(step: AgentCardStep) {
             }
         }
         // 「这棒干了什么」的副行（P1）：两行封顶——它是摘要不是日志，日志在 checks 抽屉里。
-        step.detail?.let {
-            Text(
-                text = it,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = 30.dp, end = sp.sm, bottom = sp.xs),
-            )
+        if (showDetail) {
+            step.detail?.let {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 30.dp, end = sp.sm, bottom = sp.xs),
+                )
+            }
         }
     }
 }

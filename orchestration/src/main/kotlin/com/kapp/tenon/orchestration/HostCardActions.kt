@@ -10,7 +10,9 @@ import com.kapp.tenon.agent.latestPatchRefForCard
 import com.kapp.tenon.agent.latestSessionForAgent
 import com.kapp.tenon.agent.pluginAction
 import com.kapp.tenon.agent.pluginForAgent
+import com.kapp.tenon.domain.ATTACH_TEAM_ACTION_PREFIX
 import com.kapp.tenon.domain.RelayController
+import com.kapp.tenon.domain.attachTeamToGroupEntry
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonPrimitive
@@ -487,7 +489,20 @@ internal class HostCardActions(
                     "reject-revision had nothing to revise (card $cardId)"
                 },
             )
-            if (!rejected) delivery.flipStaleChainCard(cardId, agentId)
+            if (rejected && cardId.startsWith("chain-")) {
+                // 团队链打回生成**新 chainId / 新 cardId**；旧 review_ready 卡若留在群里，
+                // 它的「采纳并应用修改」仍能合入已被打回的旧分支 —— patchByCard 无清理，
+                // 且 merge 对 chain- 卡有 applyBranch 兜底（真机 UX 轮现场）。
+                // 就地翻成不可操作的终态，横幅明说「以新卡为准」。
+                // 单兵打回是同 cardId 原位刷新（rev++），且工单已复活在活跃表，
+                // flipStaleChainCard 的 hasTicketForCard 保护会跳过它 —— 两条路径不冲突。
+                val supersededHint = bridgeBlocking("revision.superseded.hint", fallback = null) {
+                    controller.uiTexts.revisionSupersedesCard().ifBlank { null }
+                }
+                delivery.flipStaleChainCard(cardId, agentId, hint = supersededHint)
+            } else if (!rejected) {
+                delivery.flipStaleChainCard(cardId, agentId)
+            }
         } else if (actionId == "abandon-heal") {
             // 熔断卡的第二颗按钮：不重跑、不清理现场，翻成终局让人去桌面端接管。
             val kept = tickets()?.abandonHealByCard(cardId) == true
@@ -512,7 +527,65 @@ internal class HostCardActions(
                     "retry had nothing to restart (card $cardId)"
                 },
             )
-            if (!restarted) delivery.flipStaleChainCard(cardId, agentId)
+            if (!restarted) {
+                // **翻面横幅不许撒谎**：`retryByCard` 只认单兵工单表（activeTickets），
+                // 链工单的重试在链执行器那边（尚无恢复注册表）—— 卡是真受阻、
+                // 工单可能还活着，「已结束或宿主已重启」是假话。文案走 uiTexts 桥
+                // （编排层零硬编码文案）；桥没接（老壳/测试）回落通用措辞，不编空话。
+                val chainHint = if (cardId.startsWith("chain-")) {
+                    bridgeBlocking("chainRetry.hint", fallback = null) {
+                        controller.uiTexts.chainRetryUnsupported().ifBlank { null }
+                    }
+                } else {
+                    null
+                }
+                delivery.flipStaleChainCard(cardId, agentId, hint = chainHint)
+            }
+        } else if (actionId.startsWith(ATTACH_TEAM_ACTION_PREFIX)) {
+            // blocked 卡的主行动：「把这支还没入驻的队伍加进本群」（§3.5）。
+            //
+            // 群：编排器登记簿（活着时最准）→ 卡片行 `peerId`（宿主重启后唯一还在的）——
+            // 与合并分支同一条兜底。只认登记簿的话，重启后点这张卡就是「毫无反应」，
+            // 而这正是本仓反复踩过的那条（登记簿重启即空）。
+            val teamId = actionId.removePrefix(ATTACH_TEAM_ACTION_PREFIX).trim()
+            val actionRow = controller.state.value.messages.values
+                .asSequence()
+                .flatten()
+                .lastOrNull { row -> (row.renderCard?.get("cardId") as? JsonPrimitive)?.contentOrNull == cardId }
+            val group = tickets()?.groupForCard(cardId)
+                ?: actionRow?.peerId?.let { com.kapp.tenon.core.protocol.ConvId.groupIdOf(it) ?: it }
+            val attached = teamId.isNotEmpty() && group != null &&
+                controller.attachTeamToGroupEntry(teamId, group)
+            RelayLog.info(
+                "RELAY-INVOKE",
+                if (attached) {
+                    "attach-team: $teamId joined $group (card $cardId)"
+                } else {
+                    "attach-team: $teamId -> " + (group ?: "no group") + " failed (card $cardId)"
+                },
+            )
+            // **只有真加进去才翻面**：写失败还翻面 = 卡面说已处理、群里一个人没多。
+            if (attached) {
+                delivery.flipStaleChainCard(cardId, agentId)
+                tickets()?.forgetCardGroup(cardId)
+            }
+        } else if (actionId.startsWith(com.kapp.tenon.agent.StageChain.ACTION_REQUEST_REVIEW + "|")) {
+            // 单兵终态卡的「请 TA 复检」：另派一次纯审查（见 [DesktopWorkerOrchestrator.reviewByCard]）。
+            // token 由出卡侧编进动作串（`review-patch|<组员名>`）—— 动作帧只有 cardId +
+            // actionId 两个槽，卡上的 `labelArgs` 到不了这一侧。
+            val token = com.kapp.tenon.agent.StageChain.requestReviewTokenOf(actionId).orEmpty()
+            val asked = tickets()?.reviewByCard(cardId, token) == true
+            RelayLog.info(
+                "RELAY-INVOKE",
+                if (asked) {
+                    "request-review accepted by $decidedBy: $token (card $cardId)"
+                } else {
+                    "request-review had nothing to review: $token (card $cardId)"
+                },
+            )
+            // 派不出去就必须翻面：卡上那颗按钮点下去「毫无反应」是最贵的形态
+            // （人会以为是网络、再点第二次）。
+            if (!asked) delivery.flipStaleChainCard(cardId, agentId)
         } else if (cardId.startsWith("question-")) {
             RelayLog.info("RELAY-INVOKE", "question card " + cardId + " answered with \"" + actionId + "\" by " + decidedBy)
         } else if (tickets()?.followUpByCard(cardId, actionId) == true) {
@@ -530,9 +603,28 @@ internal class HostCardActions(
             if (sid == null) {
                 RelayLog.info("RELAY-INVOKE", "card action " + actionId + " for agent " + agentId + " has no session to land on (dropped)")
             } else {
-                bridgeBlockingUnit("plugin.action." + actionId) {
-                    plane().pluginAction(entry, sid, actionId, decidedBy)
+                // 动作「派到了插件」不等于「插件兑现了」。CLI/process/native 驱动的
+                // handleAction 直接抛「不支持卡片动作」，此前被桥接层的 catch 吞成一行
+                // 日志，手机端却已经广播了「已由 X 处理」—— 假终态 + 防重台账挡住重试。
+                // 这里把失败读成布尔，失败就如实把卡翻成 stale，让用户看到「这张卡过期了」
+                // 而不是一个永远兑现不了的「已处理」。bridge 的超时/异常都走 fallback=false。
+                val delivered = bridgeBlocking(
+                    what = "plugin.action." + actionId,
+                    fallback = false,
+                ) {
+                    try {
+                        plane().pluginAction(entry, sid, actionId, decidedBy)
+                        true
+                    } catch (t: Throwable) {
+                        RelayLog.info(
+                            "RELAY-INVOKE",
+                            "card action \"" + actionId + "\" not delivered by plugin " +
+                                entry.pluginId + ": " + (t.message ?: (t::class.simpleName ?: "unknown")),
+                        )
+                        false
+                    }
                 }
+                if (!delivered) delivery.flipStaleChainCard(cardId, agentId)
             }
         }
         }

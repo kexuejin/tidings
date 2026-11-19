@@ -19,19 +19,38 @@ import kotlin.test.assertTrue
  *
  * ## 反向探针
  *
- * 把 `"dsh"` 加进 `flagsByProfileKey`，`dshCannotSelectModelPerTask` 必须变红；
+ * 把 dsh 的 mechanism 改回 `NONE` ⇒ `dshIsSupportedButHasNoFlag` 红；
+ * 给 dsh 补一个假 `--model` 旗标 ⇒ 同上（构造约束会先拒绝）；
  * 把 `"agy"` 删掉，`supportedKeysAreExplicitlyListed` 必须变红。
  */
 class DriverModelFlagsTest {
 
     @Test
     fun supportedKeysAreExplicitlyListed() {
-        // dsh 的模型写在 profile 里；zcode 没有按次选模型的命令行参数（本机 --help 实测）。
-        // 增删这一行都必须同时确认「argv 里真的会出现」与「执行配置页的置灰逻辑」。
+        // **dsh 在集合里**：它没有 `--model` 旗标，但支持按次指定模型 —— 走官方 `--patch`
+        // 配置覆盖（本机实测：patch 写对时 dsh 真的用新模型跑完，拿到 "OK"；写不存在的 id
+        // 当场报 UNKNOWN_MODEL）。「支持」与「有旗标」是两件事，见 ModelMechanism。
+        // zcode 不在：它只能在应用内选模型，命令行没有任何通道。
         assertEquals(
-            setOf("claude", "codex", "agy", "opencode", "codebuddy"),
+            setOf("claude", "codex", "agy", "opencode", "codebuddy", "dsh"),
             DriverModelFlags.supportedKeys,
             "能按次指定模型的驱动集合变了：执行配置页的可用性与保存校验都读它",
+        )
+    }
+
+    @Test
+    fun dshIsSupportedButHasNoFlag() {
+        // 这条钉住「支持 ≠ 有旗标」这条接缝：把 dsh 的 mechanism 改回 NONE，
+        // 或给它补一个假旗标，都会让这里红。
+        assertTrue(DriverModelFlags.supports("dsh"), "dsh 支持按次指定模型（走 --patch）")
+        assertEquals(
+            CliDriverSpecs.ModelMechanism.CONFIG_PATCH,
+            DriverModelFlags.mechanismOf("dsh"),
+            "dsh 的传参通道是配置覆盖，不是旗标",
+        )
+        assertTrue(
+            DriverModelFlags.flagsFor("dsh", "claude-haiku-5-5").isEmpty(),
+            "dsh 没有旗标：给它拼一个 --model 会被它当成任务文本吞掉（比不生效更糟）",
         )
     }
 
@@ -45,7 +64,8 @@ class DriverModelFlagsTest {
 
     @Test
     fun unknownDriverIsNotSupported() {
-        listOf(null, "", "   ", "native", "no-such-cli", "dsh", "zcode").forEach { raw ->
+        // dsh 不在这条列表里：它支持按次指定（走 --patch），见 dshIsSupportedButHasNoFlag。
+        listOf(null, "", "   ", "native", "no-such-cli", "zcode").forEach { raw ->
             assertTrue(
                 !DriverModelFlags.supports(raw),
                 "未知驱动被当成支持模型（$raw）：缺席即不支持，不许有默认值",
@@ -76,14 +96,16 @@ class DriverModelFlagsTest {
     }
 
     @Test
-    fun dshCannotSelectModelPerTask() {
-        // dsh 的模型在 profile 配置里，命令行没有旗标：实测 `dsh --profile headless --help` 无 model 项。
-        assertTrue(!DriverModelFlags.supports("dsh"), "dsh 被登记成支持模型了 —— 它没有命令行旗标")
+    fun unsupportedDriverStillGetsAReason() {
+        // zcode 是真正没有按次通道的一家：只能在应用内选模型，命令行无参数。
+        // （dsh 曾在这条里，实测发现它走 --patch 能按次指定 —— 判据搬到
+        // dshIsSupportedButHasNoFlag，这条留给真正不支持的。）
+        assertTrue(!DriverModelFlags.supports("zcode"), "zcode 被登记成支持模型了 —— 它没有命令通道")
 
-        val reason = DriverModelFlags.unsupportedReason("dsh", "deepseek-chat")
-        assertNotNull(reason, "dsh 带模型没有给出拒绝原因：那就是静默跑默认模型")
+        val reason = DriverModelFlags.unsupportedReason("zcode", "glm-5.3")
+        assertNotNull(reason, "zcode 带模型没有给出拒绝原因：那就是静默跑默认模型")
         assertTrue(reason.contains("cannot select a model per task"), "诊断文案要能照着改：$reason")
-        assertTrue(reason.contains("dsh"), "诊断文案要点名是哪个驱动：$reason")
+        assertTrue(reason.contains("zcode"), "诊断文案要点名是哪个驱动：$reason")
     }
 
     @Test

@@ -69,4 +69,38 @@ class AgentIdentityMatchTest {
         assertTrue(sameAgent("dsh-a", null, "dsh"))
         assertTrue(sameAgent("dsh-b", null, "dsh"))
     }
+
+    // ------------------------------------------------------------ sameEmployee：身份尺（三层模型）
+
+    /** 同一个 employeeId 才认作同一个人；空格是噪声，trim 掉。 */
+    @Test
+    fun theSameEmployeeIdIsTheSamePerson() {
+        assertTrue(sameEmployee("emp-a", "emp-a"))
+        assertTrue(sameEmployee("  emp-a  ", "emp-a"))
+    }
+
+    /**
+     * **不同 employeeId 绝不归并** —— 哪怕底座看起来一样。
+     *
+     * 这正是洞 E：`sameAgent("dsh-a", "dsh-b")` 会 true，但两个真人必须各归各档。
+     */
+    @Test
+    fun differentEmployeeIdsAreDifferentPeopleEvenOnTheSameDriver() {
+        assertFalse(sameEmployee("emp-a", "emp-b"))
+        assertFalse(sameEmployee("dsh-a", "dsh-b"))
+    }
+
+    /** 大小写敏感：employeeId 是不透明键，不是展示名。 */
+    @Test
+    fun employeeIdComparisonIsCaseSensitive() {
+        assertFalse(sameEmployee("emp-A", "emp-a"))
+    }
+
+    /** 空身份一律不匹配（fail-closed：不能靠「两个都空就算同一个」蒙混）。 */
+    @Test
+    fun anEmptyEmployeeIdMatchesNothing() {
+        assertFalse(sameEmployee(null, "emp-a"))
+        assertFalse(sameEmployee("emp-a", null))
+        assertFalse(sameEmployee("", "  "))
+    }
 }

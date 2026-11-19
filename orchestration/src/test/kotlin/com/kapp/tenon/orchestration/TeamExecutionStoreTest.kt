@@ -58,18 +58,18 @@ class TeamExecutionStoreTest {
     }
 
     @Test
-    fun exactlyOneWorkerIsRequired() {
+    fun atLeastOneWorkerIsRequired() {
         val store = TeamExecutionStore(tmpFile())
+        // 多人能干活是合法的：那一单由谁下场是主理人的点将，编制不该替它锁死。
         val two = profile(members = listOf(
             member("m-a", TeamExecutionKinds.WORKER, "codex"),
             member("m-b", TeamExecutionKinds.WORKER, "claude"),
         ))
-        val rejected = assertIs<TeamExecutionSaveVerdict.Rejected>(store.save(two))
-        assertTrue(rejected.reasons.any { "exactly one worker" in it }, rejected.reasons.toString())
+        assertIs<TeamExecutionSaveVerdict.Saved>(store.save(two))
 
         val zero = profile(members = listOf(member("m-r", driverKey = "claude")))
-        val rejected2 = assertIs<TeamExecutionSaveVerdict.Rejected>(store.save(zero))
-        assertTrue(rejected2.reasons.any { "exactly one worker" in it })
+        val rejected = assertIs<TeamExecutionSaveVerdict.Rejected>(store.save(zero))
+        assertTrue(rejected.reasons.any { "at least one worker" in it }, rejected.reasons.toString())
     }
 
     /** reviewer 与 worker **异厂商**是硬规则（§3.4.3）；reviewer 之间可同厂商。 */

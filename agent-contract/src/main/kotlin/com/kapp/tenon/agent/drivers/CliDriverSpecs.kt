@@ -31,6 +31,19 @@ object CliDriverSpecs {
     enum class Role { WORKER, REVIEWER, BOTH }
 
     /**
+     * 按次指定模型走**哪种通道**。
+     *
+     * - [FLAG]：命令行旗标（codex `--model`、claude `--model`…）；
+     * - [CONFIG_PATCH]：没有旗标，走 CLI 自己的配置覆盖通道（dsh 的 `--patch`）。
+     *   **不是**「不支持」—— 用户照样能按次选模型，只是传参形态不同；
+     * - [NONE]：真的不支持（zcode 只能在应用里选）。
+     *
+     * 为什么要分出来：只看 `modelFlag != null` 会把 dsh 判成不支持，而它其实支持 ——
+     * 症状是界面上那一格被置灰、保存期被拒，用户配不了本可配的东西。
+     */
+    enum class ModelMechanism { FLAG, CONFIG_PATCH, NONE }
+
+    /**
      * 一家内置 CLI 的身份。
      *
      * [supportsPerTaskModel] 与 [modelFlag] 必须一致：支持却没旗标会在派生时给出空能力，
@@ -44,15 +57,34 @@ object CliDriverSpecs {
         val role: Role,
         val supportsPerTaskModel: Boolean,
         val modelFlag: String? = null,
+        /**
+         * 传参通道。默认按 [modelFlag] 推导：有旗标 = [ModelMechanism.FLAG]，否则
+         * [ModelMechanism.NONE]；dsh 这类「支持但走配置覆盖」的显式给 [ModelMechanism.CONFIG_PATCH]。
+         */
+        val modelMechanism: ModelMechanism? = null,
+        /**
+         * 盘面/下拉里的**短名**（方案 §3.3/§3.9）：null = 取 [displayName] 的第一个词。
+         * `DeepSeek Harness` 这类词组名需要显式短名，其余单词条自然取整词。
+         */
+        val shortName: String? = null,
         /** 干活棒优先序（数字小者优先）；null = 不参与自动组队。 */
         val workerPriority: Int? = null,
         /** 审核棒优先序（数字小者优先）；null = 不参与自动审核。 */
         val reviewerPriority: Int? = null,
     ) {
+        /** 实际通道：显式值优先，否则由旗标是否存在推导。 */
+        val effectiveModelMechanism: ModelMechanism
+            get() = modelMechanism
+                ?: if (modelFlag != null) ModelMechanism.FLAG else ModelMechanism.NONE
+
         init {
             require(key.isNotBlank()) { "driver spec key must not be blank" }
-            require(supportsPerTaskModel == (modelFlag != null)) {
-                "$key: supportsPerTaskModel and modelFlag must agree (absence means unsupported)"
+            // 「支持」与「有通道」必须一致；旗标只属于 FLAG 通道。
+            require(supportsPerTaskModel == (effectiveModelMechanism != ModelMechanism.NONE)) {
+                "$key: supportsPerTaskModel and modelMechanism must agree (NONE means unsupported)"
+            }
+            require((modelFlag != null) == (effectiveModelMechanism == ModelMechanism.FLAG)) {
+                "$key: modelFlag only belongs to FLAG mechanism"
             }
         }
     }
@@ -66,7 +98,13 @@ object CliDriverSpecs {
         Spec("claude", "Claude Code", "anthropic", Role.WORKER, true, "--model", workerPriority = 2, reviewerPriority = 3),
         Spec("agy", "Antigravity", "google", Role.WORKER, true, "--model", workerPriority = 4, reviewerPriority = 4),
         Spec("opencode", "OpenCode", "opencode", Role.BOTH, true, "--model", workerPriority = 3, reviewerPriority = 2),
-        Spec("dsh", "DeepSeek Harness", "deepseek", Role.BOTH, false, null, workerPriority = 5, reviewerPriority = 1),
+        // dsh 支持按次指定模型，但**没有 `--model` 旗标**：走它自己的 `--patch` 配置覆盖
+        // （实测可用；不存在的模型 id 会当场报 UNKNOWN_MODEL，不静默跑默认）。
+        Spec(
+            "dsh", "DeepSeek Harness", "deepseek", Role.BOTH, true, null,
+            modelMechanism = ModelMechanism.CONFIG_PATCH,
+            shortName = "DeepSeek", workerPriority = 5, reviewerPriority = 1,
+        ),
         Spec("codebuddy", "CodeBuddy", "tencent", Role.BOTH, true, "--model", workerPriority = 6, reviewerPriority = 5),
         Spec("zcode", "ZCode", "zhipu", Role.BOTH, false, null, workerPriority = 7, reviewerPriority = 6),
     )

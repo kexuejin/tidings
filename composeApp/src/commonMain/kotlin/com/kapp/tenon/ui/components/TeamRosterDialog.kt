@@ -19,6 +19,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -41,7 +42,9 @@ import org.jetbrains.compose.resources.StringResource
 import com.kapp.tenon.core.protocol.isTeam
 import com.kapp.tenon.core.protocol.newId
 import com.kapp.tenon.domain.TeamExecutionKindsUi
+import com.kapp.tenon.domain.DriverRosterEntryUi
 import com.kapp.tenon.domain.TeamExecutionMemberUi
+import com.kapp.tenon.domain.DriverModelCatalogEntryUi
 import com.kapp.tenon.domain.TeamExecutionPort
 import com.kapp.tenon.domain.TeamExecutionProfileUi
 import com.kapp.tenon.domain.TeamExecutionSaveResult
@@ -50,7 +53,6 @@ import com.kapp.tenon.generated.resources.common_cancel
 import com.kapp.tenon.generated.resources.common_close
 import com.kapp.tenon.generated.resources.team_roster_dialog_title_readonly
 import com.kapp.tenon.generated.resources.team_roster_apply_config
-import com.kapp.tenon.generated.resources.team_member_model_follow_leader
 import com.kapp.tenon.generated.resources.team_roster_readonly_hub_notice
 import com.kapp.tenon.generated.resources.team_roster_add_member
 import com.kapp.tenon.generated.resources.team_roster_alias_hint
@@ -86,12 +88,12 @@ import com.kapp.tenon.generated.resources.team_exec_custom_prompt_placeholder
 import com.kapp.tenon.generated.resources.team_exec_kind_reviewer
 import com.kapp.tenon.generated.resources.team_exec_kind_worker
 import com.kapp.tenon.generated.resources.team_exec_model_default
-import com.kapp.tenon.generated.resources.team_exec_model_placeholder
 import com.kapp.tenon.generated.resources.team_exec_no_drivers
 import com.kapp.tenon.generated.resources.team_exec_pick_driver
 import com.kapp.tenon.generated.resources.team_exec_prompt_badge
 import com.kapp.tenon.generated.resources.team_roster_seat_label
 import com.kapp.tenon.generated.resources.team_roster_slug_warning
+import com.kapp.tenon.ui.theme.DriverBrand
 import com.kapp.tenon.ui.theme.LocalAppSpacing
 import org.jetbrains.compose.resources.stringResource
 
@@ -221,6 +223,8 @@ fun TeamRosterDialog(
     }
     var execReasons by remember(selectedSeat) { mutableStateOf<List<String>>(emptyList()) }
     val driverCatalog = remember(selectedSeat) { executionPort?.driverCatalog().orEmpty() }
+    // 模型目录：打开编制才探（按驱动缓存），失败退化成手填。
+    val modelCatalog = rememberDriverModelCatalog(executionPort, driverCatalog)
 
     RelayDialog(
         onDismissRequest = onDismiss,
@@ -337,6 +341,7 @@ fun TeamRosterDialog(
                                     ExecutionConfigRow(
                                         member = execMembers[index],
                                         drivers = driverCatalog,
+                                        modelCatalog = modelCatalog,
                                         onKindChange = { kind ->
                                             execMembers = execMembers.updateExecAt(index) { it.copy(kind = kind) }
                                         },
@@ -591,19 +596,25 @@ private fun SeatSelector(
 }
 
 /**
- * 驱动展示名归一（将底层驱动标识转为用户友好的名称）。
+ * 底座**友好名**（方案 §3.3/§3.9 的收口）：先读名册（[LocalDriverRoster]，权威表 =
+ * `CliDriverSpecs.Spec.displayName` 经端口投影），名册读不到（手机/预览）时回落
+ * [DriverBrand.displayNameOf] —— 那是**唯一**一份回落表。本函数不再自带 `when`：
+ * 从前它与 `DriverBrand` 各抄一份，同一个键在盘面叫 `Codex`、在名录叫 `Codex CLI`。
+ *
+ * 名册由桌面壳从端口注入（[LocalDriverRoster]），UI 因此不需要 import `CliDriverSpecs`。
  */
-internal fun formatDriverName(key: String): String = when (key.trim().lowercase()) {
-    "codex" -> "Codex CLI"
-    "claude" -> "Claude CLI"
-    "agy" -> "Antigravity"
-    "dsh" -> "DeepSeek Harness"
-    "opencode" -> "OpenCode"
-    "codebuddy" -> "CodeBuddy CLI"
-    "zcode" -> "ZCode CLI"
-    "gemini" -> "Gemini CLI"
-    else -> key.ifBlank { "" }
+@Composable
+internal fun formatDriverName(key: String): String {
+    val roster = LocalDriverRoster.current
+    val hit = roster?.firstOrNull { it.key.equals(key.trim(), ignoreCase = true) }
+    return hit?.displayName ?: DriverBrand.displayNameOf(key)
 }
+
+/**
+ * 名册的**组合级单源**：桌面壳从 `TeamExecutionPort.driverRoster()` 注入一次，
+ * 全应用（盘面卡/下拉/名录副行/团队行）读同一份。null = 没有名册事实（手机/预览）。
+ */
+val LocalDriverRoster = compositionLocalOf<List<DriverRosterEntryUi>?> { null }
 
 @Composable
 private fun ReadOnlyMemberCard(
@@ -753,6 +764,7 @@ private fun MemberDraftRow(
 private fun ExecutionConfigRow(
     member: TeamExecutionMemberUi,
     drivers: Set<String>,
+    modelCatalog: Map<String, DriverModelCatalogEntryUi>?,
     onKindChange: (String) -> Unit,
     onDriverChange: (String) -> Unit,
     onPromptChange: (String?) -> Unit,
@@ -889,56 +901,17 @@ private fun ExecutionConfigRow(
             )
         }
         if (showModelInput) {
-            Column(
+            DriverModelPicker(
+                entry = modelCatalog?.get(member.driverKey.trim().lowercase()),
+                currentModel = currentModel,
+                onModelChange = onModelChange,
                 modifier = Modifier.fillMaxWidth().padding(top = sp.xs),
-                verticalArrangement = Arrangement.spacedBy(sp.xxs),
-            ) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(sp.xs),
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    val presets = listOf(
-                        null to stringResource(Res.string.team_member_model_follow_leader),
-                        "claude-3-5-sonnet" to "Claude 3.5",
-                        "gpt-4o" to "GPT-4o",
-                        "deepseek-chat" to "DeepSeek",
-                    )
-                    presets.forEach { (modelVal, label) ->
-                        val isSel = currentModel == modelVal
-                        Surface(
-                            shape = MaterialTheme.shapes.extraSmall,
-                            color = if (isSel) {
-                                MaterialTheme.colorScheme.primaryContainer
-                            } else {
-                                MaterialTheme.colorScheme.surfaceVariant
-                            },
-                            onClick = { onModelChange(modelVal) },
-                        ) {
-                            Text(
-                                text = label,
-                                style = MaterialTheme.typography.labelSmall,
-                                modifier = Modifier.padding(horizontal = sp.sm6, vertical = sp.xxs),
-                            )
-                        }
-                    }
-                }
-                OutlinedTextField(
-                    value = currentModel.orEmpty(),
-                    onValueChange = { raw -> onModelChange(raw.trim().take(80).ifBlank { null }) },
-                    placeholder = {
-                        Text(
-                            text = stringResource(Res.string.team_exec_model_placeholder),
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    textStyle = MaterialTheme.typography.bodySmall,
-                    singleLine = true,
-                )
-            }
+                showFollowDefault = driverSupportsPerTaskModel(member.driverKey),
+            )
         }
     }
 }
+
 
 @Composable
 private fun issueText(issue: TeamRosterIssue): String = when (issue.kind) {

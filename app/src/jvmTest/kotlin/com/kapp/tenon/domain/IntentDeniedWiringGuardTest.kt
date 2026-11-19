@@ -50,8 +50,11 @@ class IntentDeniedWiringGuardTest {
     fun theAnnouncementGoesThroughTheProtocolFramePath() {
         val body = deniedMethodBody()
         assertTrue(
-            body.contains("broadcastAgentState(groupId, agentId, AGENT_STATE_FAILED, text)"),
-            "回执必须走 broadcastAgentState（协议帧 + 本机同帧落库），不是再写一条本地 notice",
+            body.contains(
+                "broadcastAgentState(groupId, agentId, AGENT_STATE_FAILED, text, mentions = listOf(agentName))",
+            ),
+            "回执必须走 broadcastAgentState（协议帧 + 本机同帧落库），不是再写一条本地 notice；" +
+                "横幅必须带上被 @ 的 agent 名（mentions）—— 渲染层据此给「申请授权」一颗能寻址的按钮",
         )
         assertTrue(
             body.contains("host.uiTexts.agentActionDeniedNotice(actorName, agentName)"),

@@ -202,7 +202,17 @@ public interface DesktopPaneActions {
      * 默认空实现：手机没有宿主档案（档案只住宿主机），那一侧的详情页也不画入口 ——
      * 空实现 + 不画按钮是同一条纪律的两半，不做「点了没反应」的按钮。
      */
-    fun saveEmployeeProfile(agentId: String, employeeId: String?, name: String, duty: String) = Unit
+    fun saveEmployeeProfile(
+        agentId: String,
+        employeeId: String?,
+        name: String,
+        duty: String,
+        source: EmployeeCreationSource = EmployeeCreationSource.REGISTER_EXISTING,
+        /** null = 运行时这一栏没动（不替用户选默认）。 */
+        driverKey: String? = null,
+        /** null = 模型这一栏没动；空串 = 清空（回到驱动默认）；非空 = 设成它。 */
+        model: String? = null,
+    ) = Unit
 
     /**
      * **注销**一名员工的档案（员工「下编」）：逐群摘掉席位上的员工引用，再删档案。
@@ -219,6 +229,7 @@ public interface DesktopPaneActions {
      *
      * @param teamId null = 新建；非 null = 编辑该档案。
      * @param groupIds 新建 = 要加入的群（至少一个）；编辑 = 要**新增**加入的群（可空）。
+     * @param description 团队简介；编辑态从档案回填，保存时一并写回。
      *
      * 与 [saveEmployeeProfile] 同一条纪律：默认空实现 = 这个壳没有宿主档案面
      * （预览 / 手机）⇒ 界面也不画入口，不做「点了没反应」的按钮。
@@ -229,6 +240,7 @@ public interface DesktopPaneActions {
         leaderAgentId: String,
         members: List<TeamMemberDraft>,
         groupIds: List<String>,
+        description: String = "",
     ) = Unit
 
     /**
@@ -257,7 +269,6 @@ public interface DesktopPaneActions {
      */
     suspend fun generateTeamScaffold(
         need: String,
-        leaderKeys: Set<String>,
         defaults: TeamScaffoldDefaults,
     ): TeamScaffoldSpec? = null
 
@@ -268,6 +279,20 @@ public interface DesktopPaneActions {
      */
     val teamScaffoldAvailable: Boolean
         get() = false
+
+    /**
+     * MINT 建档（方案 §3.3「新建员工」表单的落点）：拒绝枚举**回表单字段**
+     * （token 被占 / 底座不在位），不横幅 —— 横幅说不出「哪个字段」。
+     *
+     * **为什么是可空字段而不是带默认值的方法**：返回值 `DeclarationRejection?` 里
+     * `null` 就是「成功」。写成 `fun …(): DeclarationRejection? = null` 的话，
+     * 「这个壳没有写通路」和「建档成功」是同一个值 —— 任何壳只要顺手把入口接上，
+     * 就会得到一颗点了就消失、其实什么都没建的按钮。所以「有没有这条通路」必须是
+     * **端口本身可空**：null = 没有 ⇒ 入口不画（不变量 3）。
+     */
+    val employeeMintWriter:
+        ((driverKey: String, model: String?, name: String, token: String, duty: String) -> DeclarationRejection?)?
+        get() = null
 
     /**
      * 团队执行档端口（团队执行方案 §6.3）：TeamRosterDialog 执行配置段的读写通路。

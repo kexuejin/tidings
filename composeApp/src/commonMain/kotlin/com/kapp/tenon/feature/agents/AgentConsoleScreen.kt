@@ -53,7 +53,10 @@ import com.kapp.tenon.navigation.resolveAgentSessionId
 import com.kapp.tenon.ui.ContentWidths
 import com.kapp.tenon.ui.EmptyState
 import com.kapp.tenon.ui.centerCapped
+import com.kapp.tenon.ui.components.rememberDriverModelCatalog
+import com.kapp.tenon.ui.components.LocalDriverRoster
 import com.kapp.tenon.ui.theme.LocalAppSpacing
+import com.kapp.tenon.domain.DriverAuthCheckUi
 import com.kapp.tenon.domain.model.AgentApprovalDecision
 import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
@@ -168,6 +171,13 @@ fun AgentConsoleScreen(
      */
     agentWorkstationPort: com.kapp.tenon.domain.AgentWorkstationPort? = null,
     onFindNodes: (() -> Unit)? = null,
+    /**
+     * 已连节点数（含本机）：**空态四档里「一台设备都没连」这一档的唯一判据**（§3.1）。
+     *
+     * null = 这个壳没传（预览帧）⇒ 不判那一档。**不许用 0 兜底**：「读不到」与
+     * 「一台都没连」是两个状态，把前者写成后者会让有设备的壳劝用户去配对。
+     */
+    connectedNodeCount: Int? = null,
     modifier: Modifier = Modifier,
     now: Long = nowMillis(),
     showHeader: Boolean = true,
@@ -218,18 +228,7 @@ fun AgentConsoleScreen(
      */
     onForgetEmployee: ((com.kapp.tenon.domain.AgentEmployeeProfileUi) -> Unit)? = null,
     /**
-     * 档案页的「新建档案」：`(选中的本机 agent)`。
-     *
-     * 档案**必须先挂在一个真实存在的本机 agent 上**，所以这条通路的入口是一张候选表
-     * （[com.kapp.tenon.domain.employeeProfileCandidates]），不是一张空表单。选完之后
-     * 弹的是与详情页同一个表单 —— 本屏只交人，不持有第二份表单状态。
-     *
-     * null = 这个壳没有档案写通路（手机：档案只住宿主机）⇒ 按钮与候选表都不画，
-     * 档案那一档也不会因为「空」而多出来。
-     */
-    onNewEmployeeProfile: ((com.kapp.tenon.domain.AgentEmployeeCandidateUi) -> Unit)? = null,
-    /**
-     * 保存一份**团队档案**：`(teamId, 名字, 领队, 名册, 要加入的群)`，teamId null = 新建。
+     * 保存一份**团队档案**：`(teamId, 名字, 领队, 名册, 要加入的群, 简介)`，teamId null = 新建。
      *
      * null = 这个壳没有团队档案面（手机：档案只住宿主机）⇒ 团队视角里不画
      * 「新建团队 / 编辑团队」—— 与员工档案同一条纪律（空实现 + 不画按钮是同一条纪律的两半）。
@@ -240,6 +239,7 @@ fun AgentConsoleScreen(
         leaderAgentId: String,
         members: List<com.kapp.tenon.core.protocol.TeamMemberDraft>,
         groupIds: List<String>,
+        description: String,
     ) -> Unit)? = null,
     /**
      * **解散**一份团队档案：`(teamId)`。
@@ -257,9 +257,16 @@ fun AgentConsoleScreen(
      */
     onGenerateTeam: (suspend (
         need: String,
-        leaderKeys: Set<String>,
         defaults: com.kapp.tenon.domain.TeamScaffoldDefaults,
     ) -> com.kapp.tenon.domain.TeamScaffoldSpec?)? = null,
+    /** MINT 建档（方案 §3.3）：null = 没有写通路（手机/预览）⇒「新建员工」入口不画。 */
+    onCreateEmployeeMint: ((
+        driverKey: String,
+        model: String?,
+        name: String,
+        token: String,
+        duty: String,
+    ) -> com.kapp.tenon.domain.DeclarationRejection?)? = null,
     onCancelTask: ((taskId: String) -> Unit)? = null,
     onRefresh: (() -> Unit)? = null,
     /**
@@ -325,6 +332,11 @@ fun AgentConsoleScreen(
     // 「新建档案」的选择器（选人 → 交给壳打开同一个表单）。放在本屏是因为候选表来自
     // 本屏已经算好的卡片流：壳那边再算一次就是第二份实体装配。
     var profileCreateOpen by remember { mutableStateOf(false) }
+    // 「新建员工」的写通路（MINT）：null = 这个壳没有（手机/预览）⇒ 入口与表单都不画。
+    val mintSubmit = onCreateEmployeeMint
+    // 运行时检测台账（方案 §3.2）：执行配置页发起、新建员工表单读同一份。
+    // 内存态，重开页面即清 —— 结果带 checkedAt，不跨会话留存。
+    var driverChecks by remember { mutableStateOf<Map<String, DriverAuthCheckUi>?>(null) }
 
     // 内部备选下钻状态：桌面端壳或未接入外层导航时提供自驱下钻支持
     var localDetailSessionId by remember { mutableStateOf<String?>(null) }
@@ -473,6 +485,7 @@ fun AgentConsoleScreen(
                         role = it.role,
                     )
                 },
+            description = profile?.description.orEmpty(),
         )
     }
 
@@ -496,6 +509,10 @@ fun AgentConsoleScreen(
             selectedTeamGroupId = effectiveTeamGroup,
             selectedTeamLeaderAgentId = effectiveTeamLeader,
             workstationPort = agentWorkstationPort,
+            // 空态四档（§3.1）：D 档判据是「已连节点数」，其余三档由名录与本机档案自己算
+            // （纯函数 `hubEmptyTier`）。「去看看节点」复用既有那一条回调。
+            connectedNodeCount = connectedNodeCount,
+            onOpenNodes = onFindNodes,
             orphanTeams = hubOrphanTeams,
             // 解散的写通路与详情页那把同一个（`onDissolveTeam` 来自桌面壳的档案面）；
             // 手机壳不接 ⇒ null ⇒ 孤儿段整段不画。
@@ -509,7 +526,8 @@ fun AgentConsoleScreen(
             onForgetEmployeeProfile = onForgetEmployee,
             // 「新建档案」的落点是**选择器**（本屏持有），不是壳：候选表由卡片流与档案表
             // 一起算（本屏已有 `hubCards`），壳只接「选完了、给这个人建档」这一步。
-            onNewEmployeeProfile = onNewEmployeeProfile?.let { { profileCreateOpen = true } },
+            // 「新建员工」的入口与表单同一个 gate：有 MINT 写通路才画（手机/预览没有）。
+            onCreateEmployee = mintSubmit?.let { { profileCreateOpen = true } },
             onOpenEntity = { card ->
                 explicitlyClearedEntity = false
                 localDetailSessionId = null
@@ -593,29 +611,33 @@ fun AgentConsoleScreen(
             groups = settingsSlice.settings.groups,
             selfNodeId = settingsSlice.settings.nodeId,
             port = execPort,
+            checks = driverChecks,
+            onChecks = { driverChecks = it },
             onDismiss = { execConfigOpen = false },
         )
     }
 
-    // 「新建档案」的候选表（本机、还没有档案、有身份键）：过滤规则住领域层
-    // （`employeeProfileCandidates`）—— 写路径的台账检查与本表必须是同一批人。
-    val newProfile = onNewEmployeeProfile
-    if (profileCreateOpen && newProfile != null) {
-        val candidates = remember(hubCards, settingsSlice) {
-            com.kapp.tenon.domain.employeeProfileCandidates(
-                cards = hubCards.orEmpty(),
-                selfNodeId = settingsSlice.settings.nodeId,
-            )
-        }
-        EmployeeProfileCreateDialog(
-            candidates = candidates,
-            onPick = { candidate ->
-                profileCreateOpen = false
-                newProfile(candidate)
+    // 「新建员工」表单（方案 §3.3，MINT）：员工是声明 + 配置，不要求「有实例在跑」——
+    // 旧的候选表（档案必须挂在已上报 agent 上）正是建人闭环的死锁形态，随 P1a 退役；
+    // 卡片详情的「登记为员工」（REGISTER_EXISTING）仍在原入口。
+    // 名册经 LocalDriverRoster（桌面壳注入）+ 端口检测台账；roster == null（手机/预览）
+    // 时表单画「先接一个运行时」，不画下拉。
+    if (profileCreateOpen && mintSubmit != null) {
+        // 模型目录：只在表单打开时探一次（端口侧按驱动缓存 TTL），与员工编辑/团队编制同源。
+        val createModelCatalog = rememberDriverModelCatalog(
+            teamExecutionPort,
+            teamExecutionPort?.driverCatalog().orEmpty(),
+        )
+        EmployeeCreateDialog(
+            roster = LocalDriverRoster.current,
+            authStates = driverChecks,
+            modelCatalog = createModelCatalog,
+            takenTokens = remember(settingsSlice) {
+                settingsSlice.settings.employeeProfiles.map { it.token }.toSet()
             },
+            onSubmit = mintSubmit,
+            onOpenExecutionConfig = { execConfigOpen = true },
             onDismiss = { profileCreateOpen = false },
-            // 候选为空时给一条真出路：节点页确认宿主在线，而不是一颗只能关掉的按钮。
-            onFindNodes = onFindNodes,
         )
     }
 
@@ -645,9 +667,10 @@ fun AgentConsoleScreen(
             leaders = leaderOptions,
             initialLeaderAgentId = editingTeam.leaderAgentId,
             initialMembers = editingTeam.members,
+            initialDescription = editingTeam.description,
             groups = groupOptions,
-            onSave = { name, leader, members, groupIds ->
-                onSaveTeam(editingTeam.profileKey, name, leader, members, groupIds)
+            onSave = { name, leader, members, groupIds, description ->
+                onSaveTeam(editingTeam.profileKey, name, leader, members, groupIds, description)
                 teamEditing = null
             },
             onDismiss = { teamEditing = null },
@@ -681,15 +704,14 @@ fun AgentConsoleScreen(
                 stringResource(Res.string.agent_team_role_reviewer),
             ),
         )
-        val leaderKeys = leaderOptions.map { it.agentKey }.toSet()
         TeamBuilderDialog(
             leaders = leaderOptions,
             groups = groupOptions,
-            onGenerate = { need -> generateTeam(need, leaderKeys, aiDefaults) },
+            onGenerate = { need -> generateTeam(need, aiDefaults) },
             onFindNodes = onFindNodes,
             onConfirm = { spec, groupIds ->
                 val reasons = mutableListOf<String>()
-                onSaveTeam(null, spec.teamTitle, spec.leaderAgentId, spec.toMemberDrafts(), groupIds)
+                onSaveTeam(null, spec.teamTitle, spec.leaderAgentId, spec.toMemberDrafts(), groupIds, "")
                 val port = teamExecutionPort
                 if (port != null) {
                     val declared = spec.members.map { it.agentId }.toSet()

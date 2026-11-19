@@ -162,4 +162,13 @@ data class AgentCardUi(
 
     /** 宿主最近一次心跳的墙钟毫秒（§六.1）。前端据此渲染「N 秒前心跳」，缺省 = 无心跳信息。 */
     val lastBeatTs: Long? = null,
+
+    /** 派单失败 blocked 卡分类码（方案 §3.5，如 `NO_DIRECTORY`/`TEAM_NOT_IN_GROUP`）。 */
+    val blockedCode: String? = null,
+    /** `TEAM_NOT_IN_GROUP` 对应的主行动关联团队 ID。 */
+    val attachTeamId: String? = null,
+    /** 运行时认证修复类型（方案 §3.6，TERMINAL_LOGIN / TOKEN_ENV / APP_MODEL）。 */
+    val remediationKind: String? = null,
+    /** 修复命令或变量名（如 `codex login` / `ANTHROPIC_API_KEY`）。 */
+    val remediationCommand: String? = null,
 )

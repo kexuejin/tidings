@@ -25,10 +25,12 @@ import kotlinx.serialization.Serializable
  * ## 它不是什么
  *
  * - **不是 agent 的创建**：agent 是「这台机器上真的有一个进程在跑」，身份来自宣告；
- *   档案只做**登记 + 命名**（[agentId] 必须能在本机台账里找到，见 `EmployeeProfileWritePath`）。
- *   做成空表单「新建员工」只会产出点了派单静默失败的幽灵。
+ *   档案是**声明 + 配置**（方案 §2②：员工是一份声明，不是等一个进程上线）。MINT 建档
+ *   只要求 [driverKey] 在 `driverCatalog()` 里（`EmployeeProfileWritePath`），不要求
+ *   「有实例在跑」——那正是建人闭环的死锁成因。没派过单的 MINT 员工 [agentId] 为空串。
  * - **不是全局对象**：它住在宿主机本机，不进任何协议帧；对端拿到的是席位上的快照。
- * - **不是派单目标**：派单只认 agentId（`@` token 或组员 token），员工档案不参与派单解析。
+ * - **是派单的配置来源**：派单期取值顺序 = 执行档 > 本档案的 [driverKey] + [model] > 拒绝；
+ *   两处都没有就拒绝，不回落默认驱动（不变量 1）。[agentId] 只做投递路由线索。
  *
  * ## 名字与 token 是两个字段
  *
@@ -37,9 +39,23 @@ import kotlinx.serialization.Serializable
  * token 在这里定**一次**，各群席位默认用它 —— 这样跨群同名；某个群撞名时才在该群用别名
  * （席位 `name` 与档案 [token] 不同，[employeeIsAliased] 判定）。
  *
+ * ## 三层正交（方案 §2②）
+ *
+ * **身份 = [employeeId]，配置 = [driverKey] + [model]，实例键只做路由**：任何新代码想
+ * 「从实例键反推是谁」或「造一个实例键当身份」，都在这条判据外（守卫测试
+ * `SameDriverSecondEmployeeTest` / `EmployeeIdentityClusteringTest`）。
+ *
  * @property employeeId 档案键，`emp-` 前缀，由本机分配。席位上的
- *   `VirtualAgentMember.employeeId` 指向它。
- * @property agentId 本机 agent 身份键（稳定；**换底座不改它**）。同一 agent 在本机只有一份档案。
+ *   `VirtualAgentMember.employeeId` 指向它。跨重启稳定、终身不变 —— 身份判定只用它。
+ * @property agentId 本机 agent **实例**键（`dsh-029bbbf3`）；现在是**路由线索**，不再是身份：
+ *   MINT 建的人还没派过单，这里是空串；首次成功派单后由宿主回填（纯观测，失败不回填、
+ *   不阻塞）。换底座不改身份，所以它也不再「终身不变」。**必须带默认值**：老 JSON 里没有
+ *   这个键时，缺默认值会让整份 settings 解码失败 ⇒ `nodeId` 被静默重发（见
+ *   `EmployeeProfileSettingsCompatTest`）。
+ * @property driverKey 用哪家跑（`codex` / `dsh`…，规范键）。MINT 建档必填且必须在
+ *   `driverCatalog()` 里；老数据为空串 ⇒ 派单期试一次 `resolveKey` 反解，解不出报
+ *   `NO_DRIVER`（不猜、不回落默认驱动）。**必须带默认值**（同上）。
+ * @property model 按次选模型；null = 跟随驱动默认。仅 `supportsPerTaskModel` 的驱动可非空。
  * @property name 显示名（可含中文）。长度见 `Limits.NICK`（与昵称同预算）。
  * @property token `@` 默认 token（小写 ASCII，`AgentMemberName.slug` 产出）。改 [name] 时
  *   默认**不动它** —— token 一漂，`@` 历史就断。
@@ -49,10 +65,12 @@ import kotlinx.serialization.Serializable
 @Serializable
 public data class EmployeeProfile(
     val employeeId: String,
-    val agentId: String,
+    val agentId: String = "",
     val name: String,
     val token: String,
     val duty: String = AgentDuties.DEFAULT_SINGLE,
+    val driverKey: String = "",
+    val model: String? = null,
     val rev: Int = 0,
     val updatedTs: Long = 0,
 ) {

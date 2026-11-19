@@ -142,9 +142,12 @@ class DesktopInvokeWiringGuardTest {
         // 在真机路径上整段消失 —— 「单测全绿、现场不存在」的旧形状。
         assertTrue(
             source.contains("created.resolveCliDriver(cliKey) != null") &&
-                source.contains("val cliKey = AgentProfiles.resolveKey("),
+                source.contains("val cliKey = dispatchDriverKey(") &&
+                source.contains("agentId = request.agentId"),
             "CLI 驱动回退没接，或群里点名的席位 ID 没归位到档案键 —— " +
-                "resolveCliDriver 拿到 dsh-a030882e 恒 null，真机派单落 NO_PLUGIN",
+                "resolveCliDriver 拿到 emp-…/dsh-a030882e 恒 null，真机派单落 NO_PLUGIN。" +
+                "归位必须走 dispatchDriverKey（档案 driverKey 优先、解不出原样带下去），" +
+                "直接 resolveKey(agentId) 会把身份键当配置键，MINT 建的人一律 cliDriver=null",
         )
         assertTrue(
             source.contains("agentKey = cliKey"),

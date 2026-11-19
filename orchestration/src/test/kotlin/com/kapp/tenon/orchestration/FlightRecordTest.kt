@@ -27,6 +27,104 @@ class FlightRecordTest {
         assertTrue(sanitized.contains("ghp_***"))
     }
 
+    /**
+     * 形状来源必须落盘且被脱敏：「这次为什么没有审查棒」是 0 审查棒唯一的事后证据。
+     * 老记录（本键不存在）按 null 解析，不升 schema 版本。
+     */
+    @Test
+    fun planDecisionIsRecordedSanitizedAndBackwardsCompatible() {
+        val base = FlightRecord(
+            taskId = "task-plan-1",
+            targetDirectory = "/Users/testdeveloper/repo",
+            metrics = FlightMetrics(totalDurationMs = 1000L),
+            hostEvidence = FlightEvidence(verifiedBy = FlightRecord.VERIFIED_BY_HOST_PROCESS),
+            planDecision = FlightPlanDecision(
+                source = FlightPlanDecision.SOURCE_LLM,
+                stageCount = 1,
+                reviewerCount = 0,
+                rationale = "low risk edit under /Users/testdeveloper/repo, token ghp_123456789012345678901234567890123456",
+            ),
+        )
+        val json = FlightRecord.toJson(base, userHome = FAKE_HOME)
+        assertTrue(json.contains("\"source\": \"llm\""))
+        assertTrue(json.contains("\"reviewerCount\": 0"))
+        assertFalse(json.contains(FAKE_HOME), "rationale 也要过同一套脱敏")
+        assertFalse(json.contains("123456789012345678901234567890123456"))
+
+        // 老记录：没有 planDecision 键 ⇒ null，不炸。
+        val legacy = """{"${'$'}schema":"tenon://eval/flight-record/v1","taskId":"t0",
+            |"targetDirectory":"~/r","metrics":{"totalDurationMs":1},
+            |"hostEvidence":{"verifiedBy":"host_process_exit"}}""".trimMargin()
+        val parsed = Json { ignoreUnknownKeys = true }.decodeFromString<FlightRecord>(legacy)
+        assertNull(parsed.planDecision)
+    }
+
+    /**
+     * **责任链的飞行记录**：链路径从前只留 `RelayLog` 几行（日志会轮转），于是
+     * 「这条链跑了几棒、各花多久、形状是谁定的」在盘上查不到。
+     *
+     * 两处**故意不填**是这条用例的重点：链没有宿主验收命令 ⇒ `exitCode` 必须为 null、
+     * `verifiedBy` 只能是 agent 自述。填 0 / host_process_exit 就是拿"没法证伪的 0"
+     * 冒充"宿主证明通过"。
+     */
+    @Test
+    fun chainRecordKeepsTheShapeAndRefusesToFakeHostEvidence() {
+        val stages = listOf(
+            com.kapp.tenon.agent.ChainStage(role = "coding", agentKey = "claude", instruction = "fix"),
+            com.kapp.tenon.agent.ChainStage(role = "review", agentKey = "dsh", instruction = "verify"),
+        )
+        val record = DesktopStageChain.chainFlightRecord(
+            chainId = "c-abc",
+            repoName = "weather-relay",
+            elapsedMs = 42_000L,
+            stages = stages,
+            // 返工：同一棒跑了两遍，phases 里就该有两行（不是"每棒一行"）。
+            phases = listOf(
+                FlightPhase("coding", 10_000L, "ok"),
+                FlightPhase("review", 8_000L, "failed"),
+                FlightPhase("coding", 9_000L, "ok"),
+                FlightPhase("review", 7_000L, "ok"),
+            ),
+            planTrace = FlightPlanDecision(
+                source = FlightPlanDecision.SOURCE_LLM,
+                stageCount = 2,
+                reviewerCount = 1,
+                rationale = "needs one independent check",
+                workerAgentId = "m-backend",
+                workerName = "backend",
+                anchorAgentId = "m-coder",
+            ).toChainTrace(),
+        )
+        assertEquals("c-abc", record.taskId)
+        assertEquals("weather-relay", record.targetDirectory)
+        assertEquals(4, record.phases.size, "返工不许被折成一条：那是花了几棒的唯一证据")
+        assertEquals(listOf("coding", "review", "coding", "review"), record.phases.map { it.phase })
+        assertNull(record.metrics.exitCode, "链没有宿主验收命令 ⇒ 退出码不许填 0")
+        assertEquals(FlightRecord.VERIFIED_BY_AGENT_SELF_REPORT, record.hostEvidence.verifiedBy)
+        val plan = assertNotNull(record.planDecision)
+        assertEquals(FlightPlanDecision.SOURCE_LLM, plan.source)
+        assertEquals(2, plan.stageCount)
+        assertEquals(1, plan.reviewerCount)
+        assertEquals("m-backend", plan.workerAgentId, "点将之后承办人不是锚点，必须留下来")
+        assertEquals("m-coder", plan.anchorAgentId)
+    }
+
+    /** 不经团队编排的链（HTTP 路由 / 模板链）：如实没有 planDecision，不编一个 `compiled`。 */
+    @Test
+    fun aChainWithoutTeamOrchestrationHasNoPlanDecision() {
+        val record = DesktopStageChain.chainFlightRecord(
+            chainId = "c-http",
+            repoName = "repo",
+            elapsedMs = 1L,
+            stages = listOf(com.kapp.tenon.agent.ChainStage("a", "codex", "x")),
+            phases = emptyList(),
+            planTrace = null,
+        )
+        assertNull(record.planDecision)
+        assertNull(record.metrics.exitCode)
+        assertTrue(record.phases.isEmpty())
+    }
+
     @Test
     fun serializationProducesConformingJson() {
         val record = FlightRecord(

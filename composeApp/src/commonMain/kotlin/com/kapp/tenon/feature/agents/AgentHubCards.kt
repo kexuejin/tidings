@@ -5,11 +5,13 @@ package com.kapp.tenon.feature.agents
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -20,6 +22,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.kapp.tenon.core.protocol.AVATAR_LEGACY_INITIAL_VALUE
 import com.kapp.tenon.domain.ActivityFreshness
 import com.kapp.tenon.domain.AgentHubArtifactUi
@@ -36,16 +40,17 @@ import com.kapp.tenon.generated.resources.conv_inbox_ws_badge_unknown_kind
 import com.kapp.tenon.generated.resources.conv_inbox_ws_open_chat
 import com.kapp.tenon.generated.resources.hub_activity_last_format
 import com.kapp.tenon.generated.resources.hub_activity_offline_format
-import com.kapp.tenon.generated.resources.hub_agent_meta_format
+import com.kapp.tenon.generated.resources.hub_agent_workspaces_format
 import com.kapp.tenon.generated.resources.ic_settings
 import com.kapp.tenon.generated.resources.hub_agent_role_team
 import com.kapp.tenon.generated.resources.hub_agent_section_title
 import com.kapp.tenon.generated.resources.hub_artifact_latest_tag
-import com.kapp.tenon.generated.resources.hub_workstation_format
 import com.kapp.tenon.generated.resources.ic_chat_bubble
+import com.kapp.tenon.ui.theme.DriverBrand
 import com.kapp.tenon.generated.resources.ic_file
 import com.kapp.tenon.generated.resources.workspace_latest_activity_format
 import com.kapp.tenon.ui.components.AppIconButton
+import com.kapp.tenon.ui.components.LocalDriverRoster
 import com.kapp.tenon.ui.components.MutedTag
 import com.kapp.tenon.ui.components.PeerAvatar
 import com.kapp.tenon.ui.components.PendingPill
@@ -274,15 +279,33 @@ private fun AgentHubRow(
                 }
                 if (compact) HubStatusSlot(card)
             }
-            val meta = hubRowMeta(card, compact, workstation)
+            val driverKey = workstation?.driverKey?.ifBlank { null } ?: card.driverKey.ifBlank { null }
+            val rosterEntry = driverKey?.let { key -> LocalDriverRoster.current?.firstOrNull { it.key == key } }
+            val shortName = rosterEntry?.shortName ?: driverKey?.let { DriverBrand.shortNameOf(it) } ?: workstation?.driverLabel ?: driverKey
+            val vendor = rosterEntry?.vendor ?: driverKey?.let { DriverBrand.vendorOf(it) }
+            val tint = vendor?.let { DriverBrand.tintOf(it) }
+
+            val meta = hubRowMeta(card, compact, workstation, shortName)
             if (meta != null) {
-                Text(
-                    text = meta,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(sp.xs),
+                ) {
+                    if (!card.isTeam && tint != null) {
+                        Box(
+                            modifier = Modifier
+                                .size(12.dp)
+                                .background(tint, CircleShape),
+                        )
+                    }
+                    Text(
+                        text = meta,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
             if (!compact) {
                 val busySessionId = card.rows.firstOrNull { it.kind == AgentHubRowKind.BUSY }?.sessionId
@@ -397,45 +420,34 @@ internal fun HubActivityLine(at: Long, online: Boolean, now: Long) {
 }
 
 /**
- * 行内副行：**工位**（驱动 + 宿主名）+ 项目目录数与群数。
- *
- * ## 三段各自的「缺失就整段不写」
- *
- * - 驱动名读不到（端口 null / 非本机 / 多值）⇒ 只写宿主名 —— **不写「未知」**：
- *   这是「本端读不到」，不是「这个员工没有底座」，两者在界面上不该长得一样。
- * - 宿主名读不到（节点表还不认识这台宿主）⇒ 不拿 hostId 顶替 —— 身份键不是名字，
- *   与 `AgentSessionUi.displayTitle` 不退回 sessionId 是同一条纪律。此时驱动名照写：
- *   它自己是完整的事实。
- * - 目录数与群数只在宽态写（窄列放不下），两格都为 0 才整句不画。
- *
- * 三段都没有时整行不画（不是画一行空文本）。
+ * 行内副行（方案 §5 名录行规格）：
+ * - 本机行（宽态）：运行时短名 · 目录数（前置 12dp logo）
+ * - 远端行（宽态）：只有目录数（宿主名由段头承担；运行时不在本机；不画群）
+ * - 窄列（268）：只画一段：本机 = 运行时短名，远端 = 目录数
+ * - 团队行：无 logo，目录数
  */
 @Composable
 private fun hubRowMeta(
     card: AgentHubUi,
     compact: Boolean,
     workstation: AgentWorkstationUi?,
+    shortName: String?,
 ): String? {
-    val hostPart = card.hostName?.takeIf { it.isNotBlank() }
-    // 驱动名优先写真名（`Codex`），档案表里没有这个名字才退回键本身 —— 键是事实，
-    // 编一个展示名不是。两者都没有 ⇒ 这一段不写。
-    val driverPart = workstation?.let { ws ->
-        (ws.driverLabel?.takeIf { it.isNotBlank() } ?: ws.driverKey)
-            .takeIf { it.isNotBlank() }
-    }
-    val stationPart = when {
-        driverPart != null && hostPart != null ->
-            stringResource(Res.string.hub_workstation_format, driverPart, hostPart)
-        driverPart != null -> driverPart
-        else -> hostPart
-    }
-    val metaPart = if (!compact && (card.workspaceCount > 0 || card.groupCount > 0)) {
-        // 两格都填（0 也是编制事实）；只有两格全空（一个目录没挂、一个群没进）才整句不画。
-        stringResource(Res.string.hub_agent_meta_format, card.workspaceCount, card.groupCount)
+    val isLocal = workstation != null || card.driverKey.isNotBlank()
+    val wsText = if (card.workspaceCount > 0) {
+        stringResource(Res.string.hub_agent_workspaces_format, card.workspaceCount)
     } else {
         null
     }
-    return listOfNotNull(stationPart, metaPart).joinToString(" · ").ifBlank { null }
+    return if (!card.isTeam) {
+        if (isLocal && shortName != null) {
+            if (compact || wsText == null) shortName else "$shortName · $wsText"
+        } else {
+            wsText
+        }
+    } else {
+        wsText
+    }
 }
 
 /**

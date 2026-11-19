@@ -237,7 +237,10 @@ internal class RelayControllerAgentInvokeComponent(private val host: AgentDomain
 
     /** 从落库的卡片行回填判定台账（重启后「已由 X 处理」不许凭空消失）。 */
     fun rebuildActionLedger() {
-        actionLedger.rebuildFrom(host.state.value.messages.values.flatten().mapNotNull { it.card })
+        // 必须读 renderCard（cardPayload ?: card）：翻面写入的是 cardPayload，card 是
+        // 首帧锚、永远停在原 state。只读 card 会让重启后 decidedBy/decidedActionId 全丢，
+        // 已决卡可被二次判定（与 BoardCardLocalPersistenceTest 的读字段纪律同源）。
+        actionLedger.rebuildFrom(host.state.value.messages.values.flatten().mapNotNull { it.renderCard })
     }
 
     /** 派单（发起方）：登记租约 + 发帧 / 本机执行 —— 全在 [RelayControllerAgentInvokeLeases]。 */
@@ -775,7 +778,9 @@ internal class RelayControllerAgentInvokeComponent(private val host: AgentDomain
             )
             val text = runCatching { host.uiTexts.agentActionDeniedNotice(actorName, agentName) }
                 .getOrNull().orEmpty()
-            broadcastAgentState(groupId, agentId, AGENT_STATE_FAILED, text)
+            // 横幅带上被 @ 的 agent 名：渲染层据此给「申请授权」一颗能寻址的按钮
+            // （§4 #7 分类 + 入口）。对端的拒绝横幅与发送侧的申请入口互相补位。
+            broadcastAgentState(groupId, agentId, AGENT_STATE_FAILED, text, mentions = listOf(agentName))
         }
     }
 
@@ -859,7 +864,9 @@ internal class RelayControllerAgentInvokeComponent(private val host: AgentDomain
             // 文案取不到也照落库：**帧本身**（agentState=failed）就是那条事实，
             // 界面层会在正文为空时补一句本地兜底（见 `AgentStateBannerRow`）。
             // 线上那一份则要求非空（协议对群文本 `text` 的判据），见 broadcastAgentState。
-            broadcastAgentState(groupId, agentId, AGENT_STATE_FAILED, text)
+            // 横幅带上被 @ 的 agent 名：渲染层据此给「申请授权」一颗能寻址的按钮
+            // （§4 #7 分类 + 入口）。对端的拒绝横幅与发送侧的申请入口互相补位。
+            broadcastAgentState(groupId, agentId, AGENT_STATE_FAILED, text, mentions = listOf(agentName))
         }
     }
 
@@ -943,7 +950,14 @@ internal class RelayControllerAgentInvokeComponent(private val host: AgentDomain
      * 以 agent 署名发一条只带执行状态的群文本（`agentState` 键 M1 已在白名单，
      * 不新增协议键）。本机落库与线上同帧同 id —— 与 [broadcastBoardCard] 同一纪律。
      */
-    internal suspend fun broadcastAgentState(groupId: String, agentId: String, state: String, text: String) {
+    internal suspend fun broadcastAgentState(
+        groupId: String,
+        agentId: String,
+        state: String,
+        text: String,
+        /** 横幅行的动作寻址（§4 #7）：失败横幅带被 @ 的 agent 名，渲染层据此给申请入口。 */
+        mentions: List<String> = emptyList(),
+    ) {
         val st = host.state.value
         val meta = st.settings.groups.firstOrNull { it.groupId == groupId } ?: return
         if (st.selfNodeId !in meta.members) return
@@ -961,6 +975,7 @@ internal class RelayControllerAgentInvokeComponent(private val host: AgentDomain
                 delivery = null,
                 senderId = sender,
                 agentState = state,
+                mentions = mentions,
             ),
             incoming = true,
         )
@@ -983,6 +998,7 @@ internal class RelayControllerAgentInvokeComponent(private val host: AgentDomain
                 senderId = sender,
                 envelopeId = envelopeId,
                 agentState = state,
+                mentions = mentions,
             )
         }
     }

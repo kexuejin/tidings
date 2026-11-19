@@ -41,12 +41,20 @@ public data class TeamProfile(
     val name: String,
     val leaderAgentId: String,
     val members: List<TeamMemberInfo> = emptyList(),
+    /** 团队简介（本机档案字段，不进协议帧）。旧档案缺这个键时反序列化为""。 */
+    val description: String = "",
     val rev: Int = 0,
     val updatedTs: Long = 0,
 ) {
-    /** 名册 → 编辑期草稿（写路径与投影重建共用一份转换，别处不再手抄）。 */
+    public companion object {
+        /** 简介长度上限：与编辑框一致，域层也必须挡住绕过 UI 的写入。 */
+        public const val MAX_DESCRIPTION_LENGTH: Int = 255
+    }
+    /** 名册 → 编辑期草稿（写路径与投影重建共用一份转换，别处不再手抄）。人设随行。 */
     public fun rosterDrafts(): List<TeamMemberDraft> =
-        members.map { TeamMemberDraft(agentId = it.agentId, name = it.name, role = it.role) }
+        members.map {
+            TeamMemberDraft(agentId = it.agentId, name = it.name, role = it.role, prompt = it.prompt)
+        }
 }
 
 /** 按 [teamId] 找档案；null = 没有这份档案（调用方如实区分「没有」与「空名册」）。 */

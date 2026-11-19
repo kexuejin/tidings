@@ -467,10 +467,9 @@
     <string name="hub_agent_section_title">智能体</string>
     <string name="hub_agent_role_single">单兵</string>
     <string name="hub_agent_role_team">团队 %1$d 人</string>
-    <string name="hub_agent_meta_format">%1$d 个项目目录 · 服务 %2$d 个群</string>
+    <string name="hub_agent_workspaces_format">%1$d 个目录</string>
     <!-- 工位：「用什么驱动 (在哪台机器上)」。驱动名在前 —— 它是「这个人怎么干活」，机器是它的位置。
          括号用半角：里面装的是主机名（拉丁字符），全角括号会在中英混排里多出两格空隙。 -->
-    <string name="hub_workstation_format">%1$s (%2$s)</string>
     <!-- 卡片底部的「最近交付」标签。措辞只报事实：协议里没有产物的成败位，
          所以这里不写「成功」—— 它说的是「最近收到一件叫 X 的产物」。 -->
     <string name="hub_artifact_latest_tag">最近交付：%1$s</string>
@@ -481,7 +480,6 @@
     <!-- 第三档：**登记簿**（不是第三份运行时名录）。名录回答「谁在跑」，这一档回答
          「谁登记过、@ 是什么、在几个群里」—— 档案先于任何群存在，也能在席位撤光之后
          继续存在，所以它必须有自己不依赖运行时状态的落点。 -->
-    <string name="hub_view_profiles">档案</string>
     <!-- 团队卡：领队与人数都是**本团队**的事实（协议里名字/角色挂在席位上，换团队换一份）。 -->
     <string name="hub_team_leader_format">领队 %1$s</string>
     <string name="hub_team_size_format">%1$d 人</string>
@@ -511,8 +509,7 @@
     <!-- 执行配置（规范 §4.0）：一张「团队 × 员工」的矩阵。入口在智能体页目录卡上方，
          只有拿得到执行档端口（宿主本机）时才画。 -->
     <string name="exec_config_entry">执行配置</string>
-    <string name="exec_config_catalog_title">本机底座</string>
-    <string name="exec_config_catalog_none">这台电脑上没有检测到可用底座</string>
+    <string name="exec_config_catalog_title">本机运行时</string>
     <string name="exec_config_catalog_hint">登录由各家命令行工具自己管理；执行失败时会在会话里提示。</string>
     <string name="exec_config_title">执行配置</string>
     <string name="exec_config_subtitle_format">这台电脑 · %1$d 个底座在位</string>
@@ -545,7 +542,7 @@
     <string name="agent_employee_dialog_title_edit">编辑员工</string>
     <string name="agent_employee_name_label">员工名</string>
     <string name="agent_employee_name_hint">可含中文，例如「前端小王」</string>
-    <string name="agent_employee_duty_label">职责</string>
+    <string name="agent_employee_duty_label">角色预设 / 标签</string>
     <string name="agent_employee_token_hint">群里 @ 用的名字由员工名自动生成，不随改名变动。</string>
     <string name="agent_employee_unavailable">这个智能体还没上报身份，暂时无法登记。等它连上宿主再试。</string>
     <string name="agent_employee_scope_label">谁能调用</string>
@@ -555,7 +552,6 @@
     <string name="agent_employee_scope_members_hint">这个群里的任何成员 @ 它，都会真的在这台机器上跑命令。确定这个群里的成员都可信再开。</string>
     <string name="agent_employee_scope_rejected">「谁能调用」没改成：这次设置没有写进本机，这个员工仍是原来的档位。</string>
     <string name="agent_employee_save">保存</string>
-    <string name="agent_employee_subject_format">登记对象：%1$s</string>
     <string name="employee_profile_saved">员工档案已保存：%1$s</string>
     <string name="employee_profile_saved_aliased">员工档案已保存：%1$s（在 %2$s 用的是本群别名）</string>
     <string name="employee_profile_rejected">员工档案没有保存：名字不合法，或这个智能体已经有档案了。</string>
@@ -570,10 +566,6 @@
     <string name="agent_profile_empty">还没有登记过员工。给本机智能体起个名字，它就成了一名员工。</string>
     <string name="agent_profile_new">新建档案</string>
     <string name="agent_profile_edit">编辑档案</string>
-    <string name="agent_profile_new_hint">选一个本机智能体，给它起个员工名。可以先建档，之后再让它进群。</string>
-    <string name="agent_profile_new_empty">档案必须挂在一个已上报的本机智能体上。这台机器现在还没有任何智能体上报身份，所以还没有可建档的对象。</string>
-    <string name="agent_profile_new_empty_hint">先确认宿主在线；智能体连上后会自动出现在这里，再回来建档。</string>
-    <string name="agent_profile_new_meta_format">%1$s · %2$s</string>
     <string name="agent_profile_forget">注销档案</string>
     <string name="agent_profile_forget_body">「%1$s」的档案会被删除。</string>
     <string name="agent_profile_forget_hint">它仍留在原来的群里，@ 名字不变；只是不再有员工名。</string>
@@ -1162,6 +1154,9 @@
     <!-- 停止：把「中止」从一句要背下来的咒语（stop/abort/cancel/停/取消）变成卡上的一点。
          喊错一个字就等于没停、而且界面一声不吭 —— 真机 18:47 实测。 -->
     <string name="card_action_abort">中止任务</string>
+    <string name="card_action_approve_prototype">确认并开始开发</string>
+    <string name="card_action_heal_steer">补充指示并重试</string>
+    <string name="card_action_heal_abandon">放弃并保留现场</string>
     <string name="agent_live_log_title">实时输出</string>
     <string name="approval_focus_action">立即审批</string>
     <string name="approval_focus_subtitle">有智能体在等你授权，处理之后才会继续执行</string>
@@ -1944,6 +1939,7 @@
     <string name="card_status_aborted">已停止</string>
     <string name="card_status_prototype">待确认</string>
     <string name="card_status_merged">已合并</string>
+    <string name="card_status_proposed">提议中</string>
     <string name="card_type_task_board">工单任务</string>
     <string name="card_type_diff_review">代码审查</string>
     <string name="card_type_prototype">原型方案</string>
@@ -1955,6 +1951,7 @@
     <string name="card_type_status">状态通知</string>
     <string name="card_type_timeout">执行超时</string>
     <string name="card_type_assignment">任务分派</string>
+    <string name="card_type_assistant_quest">支线任务</string>
     <!-- 卡片右上角的版本小字：原位刷新时让「这是第几版」可读，而不是默默变形。 -->
     <string name="card_progress_label">进展 %1$d%</string>
     <!-- 审批锁三态的后两态（§5.3）：本机乐观置灰后的等待说明，与宿主判定后的全员提示。 -->
@@ -2110,17 +2107,25 @@
     <string name="team_member_role_badge">分工职责</string>
     <string name="team_member_prompt_title">个性化指令 / 人设要求</string>
     <string name="team_member_model_title">基座模型与引擎</string>
-    <string name="team_member_model_follow_leader">跟随领队模型 (推荐)</string>
-    <string name="team_member_model_custom_toggle">高级模型配置</string>
     <string name="team_member_save_config">保存角色配置</string>
     <string name="team_member_leader_desc">团队统一对外窗口，负责任务拆解与分发调度</string>
     <string name="team_member_worker_desc">负责核心任务编写与修改，承接具体实施工作</string>
     <string name="team_member_reviewer_desc">负责代码审核与质量把关，指出问题但不直接修改代码</string>
     <string name="team_member_driver_label">执行引擎</string>
     <string name="team_member_model_label">基座模型</string>
+    <string name="team_model_follow_default">跟随驱动默认</string>
+    <string name="team_model_catalog_unknown">这家驱动当下列不出模型（未安装/未登录/超时），可直接手填模型 id</string>
+    <string name="team_model_catalog_loading">正在读取模型目录…</string>
+    <string name="team_model_custom_toggle">手填模型 id</string>
+    <string name="team_model_show_all">展开全部 %1$d 个</string>
+    <string name="team_model_show_less">收起</string>
+    <string name="employee_create_model_of_driver">%1$s 可用的模型</string>
+    <string name="employee_create_token_edit">改</string>
     <string name="team_member_prompt_label">人设与提示词 (选填)</string>
     <string name="team_member_prompt_hint">输入该角色的工作准则、技能专长或补充要求…</string>
     <string name="team_member_edit_roster">编辑团队名册</string>
+    <string name="team_member_agent_id_format">角色代号：%1$s</string>
+    <string name="team_detail_groups_empty">这支队伍还没有加入任何群聊</string>
     <string name="team_member_no_execution_host">当前设备未托管该团队的执行环境，仅供查看</string>
     <string name="team_roster_max_members">最多 %1$d 人</string>
     <string name="team_roster_remove_member">删除</string>
@@ -2159,8 +2164,22 @@
     <string name="agent_team_regenerate">重新生成</string>
     <string name="agent_team_preview_leader">领队</string>
     <string name="agent_team_preview_members">队员</string>
-    <string name="agent_team_prompt_label">人设提示词（落执行档）</string>
-    <string name="agent_team_prompt_hint">给这名成员的执行指引；留空用默认模板</string>
+    <string name="agent_team_prompt_label">工作指导指令与人设规范</string>
+    <string name="agent_team_prompt_hint">为该成员定制执行规范与要求，留空使用标准规范</string>
+    <string name="agent_team_inspirations_title">建队灵感示例</string>
+    <string name="agent_team_template_fullstack">🚀 全栈敏捷开发组</string>
+    <string name="agent_team_template_fullstack_prompt">组建一支全栈特性开发团队，由架构师负责任务拆解与编排，配备业务编码与代码审查成员</string>
+    <string name="agent_team_template_quality">🛡️ 质量守卫与审计组</string>
+    <string name="agent_team_template_quality_prompt">组建一支质量守卫与代码审查小组，负责多轮交叉代码 review 与合规安全检查</string>
+    <string name="agent_team_template_test">🧪 自动化测试突击队</string>
+    <string name="agent_team_template_test_prompt">组建自动化测试专项团队，负责单测补齐、回归用例编写与接口健壮性验证</string>
+    <string name="team_profile_leader_focus_title">队长智能体</string>
+    <string name="team_profile_leader_focus_desc">由该领队承接外部派单，统筹协同组员分工并推进交付</string>
+    <string name="team_profile_leader_role_desc">队长接收分配给此小队的所有任务并协调团队。</string>
+    <string name="team_profile_members_sub_desc">队长可向这些协同成员委派子任务。</string>
+    <string name="team_profile_add_preset_chip">+ 添加 %1$s</string>
+    <string name="team_profile_desc_label">小队描述</string>
+    <string name="team_profile_desc_hint">描述这个小队负责什么...</string>
     <string name="agent_team_kind_worker">执行</string>
     <string name="agent_team_kind_reviewer">审查</string>
     <string name="agent_team_groups_label">加入群（至少选一个）</string>
@@ -2171,13 +2190,23 @@
     <string name="agent_team_role_coder">编码</string>
     <string name="agent_team_role_tester">测试</string>
     <string name="agent_team_role_reviewer">审查</string>
-    <string name="team_profile_dialog_title_new">新建团队</string>
+    <string name="agent_duty_lead">团队统筹</string>
+    <string name="agent_duty_coder">业务开发</string>
+    <string name="agent_duty_reviewer">代码审查</string>
+    <string name="agent_duty_tester">质量测试</string>
+    <string name="agent_duty_analyst">架构分析</string>
+    <string name="agent_duty_writer">技术写作</string>
+    <string name="agent_duty_ops">运维部署</string>
+    <string name="agent_duty_assistant">通用助手</string>
+    <string name="team_profile_dialog_title_new">创建小队</string>
     <string name="team_profile_dialog_title_edit">编辑团队</string>
-    <string name="team_profile_name_label">团队名</string>
-    <string name="team_profile_name_hint">例如「支付改造组」，可含中文</string>
+    <string name="team_profile_name_label">名称</string>
+    <string name="team_profile_name_hint">例如：前端团队</string>
     <string name="team_profile_leader_label">领队</string>
     <string name="team_profile_leader_hint">任务派给领队，由它分给组员</string>
-    <string name="team_profile_members_label">组员</string>
+    <string name="team_profile_leader_select_placeholder">选择一个队长智能体</string>
+    <string name="team_profile_member_select_placeholder">添加智能体或协同成员</string>
+    <string name="team_profile_members_label">附加成员（可选）</string>
     <string name="team_profile_member_name_label">组内名</string>
     <string name="team_profile_member_role_label">角色</string>
     <string name="team_profile_member_add">加一名组员</string>
@@ -2190,7 +2219,7 @@
     <string name="team_profile_groups_optional">不勾也可以：先存档，之后再从群信息的「添加团队」加进去。不进群的队伍在群里和手机上都看不到，@ 也到不了它。</string>
     <string name="team_profile_prereq_body">团队必须有一个本机领队才能执行任务。领队只能从本机已上报的智能体里选，不能手填。</string>
     <string name="team_profile_no_leaders">这台机器还没有任何智能体上报身份。先确认宿主在线，智能体连上后会自动出现在领队候选里。</string>
-    <string name="team_profile_save_new">创建团队</string>
+    <string name="team_profile_save_new">创建小队</string>
     <string name="team_profile_save_edit">保存团队</string>
     <string name="team_profile_group_section">添加团队</string>
     <string name="team_profile_group_section_hint">把一支已经建好的团队整体加进本群。</string>
@@ -2225,6 +2254,10 @@
     <string name="orchestration_stage_impl_2">自愈验证</string>
     <string name="orchestration_stage_impl_3">终审合并</string>
     <string name="orchestration_team_ready">团队已就位：%1$s 主理，%2$d 秒后自动开工；也可立即执行或取消</string>
+    <string name="orchestration_unreviewed_notice">未经独立审查</string>
+    <string name="orchestration_picked_worker">本单由 %1$s 承办</string>
+    <string name="orchestration_chain_retry_unsupported">链式工单暂不支持一键重试：按卡上「受阻」指引处理后，重新 @ 团队派单</string>
+    <string name="orchestration_revision_supersedes_card">这一版已被打回，新链正在重跑；请以新卡为准，旧卡不再接受操作</string>
     <string name="orchestration_diff_ready_prompt">改动已就绪，等你合并</string>
     <string name="orchestration_diff_ready_detail">改动已就绪：%1$s（+%2$d −%3$d）</string>
     <string name="orchestration_answered_no_changes">完成，未改动任何文件</string>
@@ -2342,6 +2375,8 @@
     <string name="card_action_reply">回复微调</string>
     <string name="card_action_resume">恢复执行</string>
     <string name="card_action_merge">合入主分支</string>
+    <string name="card_action_request_review">请 %1$s 复检</string>
+    <string name="card_action_reject_revision">打回</string>
     <string name="card_action_retry">重新运行</string>
     <string name="card_action_override">群主强制重试</string>
     <string name="quest_input_dialog_title">回复支线提问</string>
@@ -2414,4 +2449,82 @@
     <string name="set_external_chat_desc">默认关闭；开启后外部节点可通过 agent 协议向本机发起单聊 (受限流防护)</string>
     <string name="set_automation_entry_title">自动化任务控制台</string>
     <string name="set_automation_entry_desc">管理定时任务计划与无人值守合流</string>
+    <string name="employee_create_title">新建员工</string>
+    <string name="employee_create_intro">为数字员工配置身份、职责与 AI 模型底座，即可接入团队协同。</string>
+    <string name="employee_create_field_driver">AI 模型底座</string>
+    <string name="employee_create_field_name">名字</string>
+    <string name="employee_create_field_token">群里 @ 它</string>
+    <string name="employee_create_token_hint">名字是中文时派生不出，这里可以直接改。</string>
+    <string name="employee_create_token_taken">这个 @ 名用不了（被占用，或含不支持的字符），换一个</string>
+    <string name="employee_create_name_required">先给它起个名字</string>
+    <string name="employee_create_failed">没建成，换个名字或底座再试</string>
+    <string name="employee_create_field_model">模型</string>
+    <string name="employee_create_model_default">跟随默认</string>
+    <string name="employee_create_field_duty">职责</string>
+    <string name="employee_create_dir_hint">工作空间将由入驻的协作群聊统一确定。</string>
+    <string name="employee_create_submit">创建员工</string>
+    <string name="employee_create_no_driver">这台电脑还没有可用的底座，先接一个。</string>
+    <string name="employee_create_driver_placeholder">选择模型底座</string>
+    <string name="employee_create_driver_single">本机只有这一个</string>
+    <string name="employee_create_driver_need_login">它还没登录，建完去执行配置检测登录</string>
+    <string name="employee_create_driver_more">没有所需的底座？前往执行配置接入更多模型</string>
+    <string name="employee_create_preset_label">常用角色预设</string>
+    <string name="employee_preset_coder">业务开发</string>
+    <string name="employee_preset_coder_duty">负责业务逻辑实现、代码编写与特性迭代</string>
+    <string name="employee_preset_reviewer">代码审查</string>
+    <string name="employee_preset_reviewer_duty">负责架构守卫、代码 Diff 审查与安全合规把关</string>
+    <string name="employee_preset_tester">质量测试</string>
+    <string name="employee_preset_tester_duty">负责编写单元测试、回归验证与边界用例覆盖</string>
+    <string name="employee_preset_architect">架构规划</string>
+    <string name="employee_preset_architect_duty">负责系统模块拆解、技术方案设计与任务编排</string>
+    <string name="hub_section_local">这台电脑</string>
+    <string name="hub_empty_not_running_title">员工都还没开始跑</string>
+    <string name="hub_empty_not_running_body">建一支队，或直接派一次单</string>
+    <string name="hub_empty_no_device_title">一台设备都还没连上</string>
+    <string name="hub_empty_no_device_body">先在节点页配对，再回来看这里</string>
+    <string name="hub_empty_no_employee_title">还没有员工</string>
+    <string name="hub_empty_no_employee_body">建一个员工，接上本机的运行时，它就能开始接活</string>
+    <string name="hub_empty_only_remote_title">只有别的设备在跑</string>
+    <string name="hub_empty_only_remote_body">这台电脑还没有员工；下面这些来自其他设备</string>
+    <string name="driver_state_available">可用</string>
+    <string name="driver_state_login">需要登录</string>
+    <string name="driver_state_model">需要选模型</string>
+    <string name="driver_state_missing">未安装</string>
+    <string name="driver_state_unknown">检测不到</string>
+    <string name="driver_action_check">检测</string>
+    <string name="driver_action_recheck">重查</string>
+    <string name="driver_action_check_all">全部检测</string>
+    <string name="driver_checking">检测中…</string>
+    <string name="driver_action_copy_login">复制命令</string>
+    <string name="driver_action_install">安装说明</string>
+    <string name="driver_action_open_app">打开应用</string>
+    <string name="driver_login_hint">在终端运行 %1$s</string>
+    <string name="driver_check_ago">%1$s 前检测</string>
+    <string name="driver_check_stale">结果可能已过期</string>
+    <string name="team_builder_reuse_badge">已有员工</string>
+    <string name="team_builder_new_badge">新建</string>
+    <string name="team_builder_reuse_summary">复用 %1$d 个已有员工 · 新建 %2$d 个</string>
+    <string name="team_builder_reuse_locked">名字跟着员工档案走</string>
+    <string name="team_builder_reuse_offline">当前离线</string>
+    <string name="team_builder_driver_gone">%1$s 的运行时已不在，这一棒改用 %2$s</string>
+    <string name="team_builder_use_missed">%1$d 行没找到对应的员工，已跳过</string>
+    <string name="team_builder_use_conflict">%1$d 行和领队或别的组员重了，已跳过</string>
+    <string name="team_builder_prereq_title">还没有员工可以当领队</string>
+    <string name="team_builder_prereq_body">先建一个员工，再让它带队。</string>
+    <string name="team_builder_create_employee">新建员工</string>
+    <string name="team_profile_leader_empty_cta">先建一个员工</string>
+    <string name="dispatch_blocked_no_driver">这个员工用哪个运行时跑，定不下来</string>
+    <string name="dispatch_blocked_no_directory">这个群还没绑项目目录</string>
+    <string name="dispatch_blocked_dir_denied">这台电脑没被授权访问这个目录</string>
+    <string name="dispatch_blocked_not_authorized">你没有调用它的权限</string>
+    <string name="dispatch_blocked_target_missing">这个名字已经不在了</string>
+    <string name="dispatch_blocked_team_not_in_group">这支队伍还没加进这个群</string>
+    <string name="dispatch_blocked_team_not_in_group_action">把队加进这个群</string>
+    <string name="dispatch_blocked_bind_workspace_action">去绑定项目目录</string>
+    <string name="dispatch_blocked_driver_missing">这个运行时不在这台电脑上</string>
+    <string name="dispatch_blocked_title">没派出去</string>
+    <string name="dispatch_blocked_details">其余原因</string>
+    <string name="remediation_token_env">缺少凭证 · 设置环境变量 %1$s</string>
+    <string name="remediation_copy_var">复制变量名</string>
+    <string name="remediation_app_model">还没选模型 · 打开应用选一个</string>
 </resources>

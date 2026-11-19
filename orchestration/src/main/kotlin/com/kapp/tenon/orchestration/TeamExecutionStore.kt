@@ -64,7 +64,15 @@ data class TeamExecutionProfile(
     val updatedAt: Long,
     val members: List<TeamExecutionMemberSpec>,
 ) {
-    val worker: TeamExecutionMemberSpec? get() = members.firstOrNull { it.isWorker }
+    /**
+     * **全员可干活的人**（`kind = worker`）。1 人 = 唯一干活人；N 人 = 候选池，本单谁干
+     * 由主理人按任务点将（见 `PlannerChainGate`）。顺序即编制顺序，`first()` 是**默认**
+     * 锚点 —— `@团队名` / `@主理人` 仍落到它，主理人不改就还是旧行为。
+     */
+    val workers: List<TeamExecutionMemberSpec> get() = members.filter { it.isWorker }
+
+    /** 默认干活人（编制首位）。点将未生效时的一切回落都读这一格。 */
+    val worker: TeamExecutionMemberSpec? get() = workers.firstOrNull()
     val reviewers: List<TeamExecutionMemberSpec> get() = members.filter { !it.isWorker }
 }
 
@@ -87,21 +95,25 @@ sealed interface TeamExecutionSaveVerdict {
  *
  * @param declaredMemberIds 该席位线格式 `teamMembers` 的 agentId 全集；null = 暂无声明
  *   可比对（跳过 ⊆ 校验，读取侧还有悬空兜底）。
+ * @param knownModels 各驱动**当下真的列出**的模型 id（`driverKey → ids`），来自宿主侧的
+ *   模型目录探测。null / 缺键 = 没探到（放行）；已知但不含该模型 ⇒ 拒。判据必须是
+ *   「已知且不含」而不是「不在表里」—— 后者会把离线、未登录、解析失败时的合法模型全拒掉。
  */
 object TeamExecutionValidation {
 
     fun validate(
         profile: TeamExecutionProfile,
         declaredMemberIds: Set<String>? = null,
+        knownModels: Map<String, Set<String>>? = null,
     ): List<String> {
         val reasons = mutableListOf<String>()
         val members = profile.members
-        val workers = members.filter { it.isWorker }
-        if (workers.size != 1) {
-            reasons.add(
-                "exactly one worker required (found " + workers.size + ": " +
-                    workers.joinToString(",") { it.agentId } + ")",
-            )
+        val workers = profile.workers
+        // **0 人不行，多人合法**：`kind` 声明的是「这个人能不能干活」，不是「谁是唯一干活人」。
+        // 多人都标 worker 时，本单由谁下场是主理人的点将（`PlannerChainGate`），编制不该
+        // 替它锁死；但一个人都不能干活就没得派 —— 那一档仍在保存期拒。
+        if (workers.isEmpty()) {
+            reasons.add("at least one worker required (found 0)")
         }
         if (members.size > Limits.TEAM_MEMBERS_MAX) {
             reasons.add("team size exceeds limit (" + members.size + " > " + Limits.TEAM_MEMBERS_MAX + ")")
@@ -128,8 +140,9 @@ object TeamExecutionValidation {
                         "(got " + m.models.size + ")",
                 )
             }
-            // 驱动能力事实：不支持按次指定模型的驱动（dsh 的模型写在 profile 配置里，
-            // 命令行没有旗标）填了模型必须当场拒 —— 否则用户以为选了模型，实际跑默认。
+            // 驱动能力事实：不支持按次指定模型的驱动（zcode 只能在应用内选）填了模型
+            // 必须当场拒 —— 否则用户以为选了模型，实际跑默认。
+            // 注意 dsh **不在此列**：它没有旗标但支持按次指定（走 --patch 配置覆盖）。
             if (m.models.any { it.isNotBlank() } && !DriverModelFlags.supports(m.driverKey)) {
                 reasons.add(
                     "member " + m.agentId + ": driver '" + m.driverKey +
@@ -142,16 +155,33 @@ object TeamExecutionValidation {
                     reasons.add("member " + m.agentId + ": illegal model id '" + model.take(70) + "'")
                 }
             }
+            // 目录已知但不含该模型 ⇒ 保存期拒（拦住「填了个不存在的值，跑到 CLI 才失败」）。
+            // 目录缺失 / 该驱动 UNKNOWN / 从没探过（knownModels == null）一律放行：
+            // 「没验到」不是「验坏了」，离线时拒掉全部合法模型是更贵的缺陷。
+            val catalogIds = knownModels?.let { ids ->
+                AgentProfiles.normalizeKey(m.driverKey)?.let(ids::get)
+            }
+            if (catalogIds != null) {
+                m.models.filter { it.isNotBlank() && it !in catalogIds }.forEach { bad ->
+                    reasons.add(
+                        "member " + m.agentId + ": model '" + bad.take(70) +
+                            "' is not in driver '" + m.driverKey + "' catalog",
+                    )
+                }
+            }
         }
-        val worker = workers.singleOrNull()
-        if (worker != null) {
-            val workerVendor = AgentProfiles.vendorOf(worker.driverKey)
-            members.filter { !it.isWorker }.forEach { reviewer ->
-                val reviewerVendor = AgentProfiles.vendorOf(reviewer.driverKey)
+        // **异厂商审核对「每一位」可干活的人成立**（不是只对第一位）：点将可以把任何
+        // worker 推到链首，只跟默认那位比厂商，等于给「换个人干」留了一条同厂商自审的
+        // 后门。判据放宽一格的代价是保存期偶尔多拒一次配置，换来的是「存下来的组合
+        // 一定派得出去」—— 与 `StageChainGate` 的运行期判据同向。
+        members.filter { !it.isWorker }.forEach { reviewer ->
+            val reviewerVendor = AgentProfiles.vendorOf(reviewer.driverKey)
+            workers.forEach { candidate ->
+                val workerVendor = AgentProfiles.vendorOf(candidate.driverKey)
                 if (workerVendor != null && reviewerVendor == workerVendor) {
                     reasons.add(
-                        "reviewer " + reviewer.agentId + " must be a different vendor than worker (" +
-                            workerVendor + ")",
+                        "reviewer " + reviewer.agentId + " must be a different vendor than worker " +
+                            candidate.agentId + " (" + workerVendor + ")",
                     )
                 }
             }
@@ -207,8 +237,12 @@ class TeamExecutionStore(
      * 保存（同主键覆盖）。[declaredMemberIds] 非空时额外校验档 ⊆ 声明（§3.4.6）。
      * 返回 [TeamExecutionSaveVerdict.Rejected] = 结构非法或写盘失败，**绝不吞掉**。
      */
-    fun save(profile: TeamExecutionProfile, declaredMemberIds: Set<String>? = null): TeamExecutionSaveVerdict {
-        val reasons = TeamExecutionValidation.validate(profile, declaredMemberIds)
+    fun save(
+        profile: TeamExecutionProfile,
+        declaredMemberIds: Set<String>? = null,
+        knownModels: Map<String, Set<String>>? = null,
+    ): TeamExecutionSaveVerdict {
+        val reasons = TeamExecutionValidation.validate(profile, declaredMemberIds, knownModels)
         if (reasons.isNotEmpty()) {
             RelayLog.info(TAG, "save rejected: " + reasons.joinToString("; "))
             return TeamExecutionSaveVerdict.Rejected(reasons)

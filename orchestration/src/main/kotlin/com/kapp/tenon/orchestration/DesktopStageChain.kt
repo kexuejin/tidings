@@ -3,9 +3,14 @@
 package com.kapp.tenon.orchestration
 
 import com.kapp.tenon.agent.AgentChainDispatcher
+import com.kapp.tenon.agent.ChainRetry
+import com.kapp.tenon.agent.ChainPlanTrace
 import com.kapp.tenon.agent.ChainProgress
 import com.kapp.tenon.agent.ChainStage
 import com.kapp.tenon.agent.ControlPlane
+import com.kapp.tenon.agent.DeterministicStepDecider
+import com.kapp.tenon.agent.EscalatingStepDecider
+import com.kapp.tenon.agent.LeaderBrief
 import com.kapp.tenon.agent.ReviewPipeline
 import com.kapp.tenon.agent.ReviewVerdict
 import com.kapp.tenon.agent.ReviewerAudit
@@ -46,6 +51,26 @@ import kotlinx.coroutines.withContext
  * 3. **一链一卡**：`cardId = chain-<id>`，rev 单调递增，走既有的 T-2d 原位替换 ——
  *    手机上同一个位置反复刷新，不刷屏。
  */
+/** 链的恢复注册表记录（重试按同形状同参数重派）。 */
+private data class ChainLaunch(
+    val groupId: String?,
+    val repoPath: String,
+    val title: String,
+    val stages: List<ChainStage>,
+    val target: String?,
+    val module: String?,
+    val context: String?,
+    val leader: LeaderBrief?,
+    val planTrace: ChainPlanTrace?,
+    /**
+     * 打回反馈：非空时重派把它作为硬约束前置进每一棒 instruction。首发为 null；
+     * 一次打回后连同新 chainId 一起存进新记录（单次授权，见 reject）。
+     */
+    val revision: String? = null,
+    /** 打回机会是否已用：与单兵 steeringUsed 同纪律，只允许一次，第二次拒收转人工。 */
+    val revisionUsed: Boolean = false,
+)
+
 object DesktopStageChain {
 
     /** 一棒最多给下游 2000 字原文，剩下交给 [com.kapp.tenon.agent.StageChain.summarize] 压到 200。 */
@@ -62,20 +87,104 @@ object DesktopStageChain {
         sessionExemptOf: ((sessionId: String) -> Boolean)? = null,
         /** 盲区账本记录器（G2）：链级 blocked 也是终局事实，只记录。 */
         onBlindSpot: (kind: String, title: String?, detail: String?) -> Unit = { _, _, _ -> },
-    ): AgentChainDispatcher = AgentChainDispatcher { groupId, repoPath, title, stages, target, module, context ->
-        val host = plane() ?: return@AgentChainDispatcher null
-        val repo = repoPath?.takeIf { it.isNotBlank() } ?: return@AgentChainDispatcher null
-        if (!isGitRepo(repo)) return@AgentChainDispatcher null
-        val chainId = "c" + System.currentTimeMillis().toString(36)
-        scope.launch {
-            runCatching { runChain(host, controller, chainId, groupId, repo, title, stages, sessionExemptOf, onBlindSpot, target, module, context) }
-                .onFailure {
-                    val reason = it.message ?: it::class.simpleName ?: "unknown"
-                    onBlindSpot("chain-crashed", title.take(60), reason.take(200))
-                    RelayLog.info("CHAIN", chainId + " aborted: " + reason)
+    ): AgentChainDispatcher = object : AgentChainDispatcher, ChainRetry {
+        // **链的恢复注册表**（§真机 UX 轮：链受阻卡上「重试」曾是无源之按钮）。
+        // 记录首发参数，重试按**同形状同参数**重派（新 chainId —— 旧卡停在终态当
+        // 历史，新链有自己的卡与分支；复用 id 会让去重台账与 worktree 分支打架）。
+        private val launched =
+            java.util.concurrent.ConcurrentHashMap<String, ChainLaunch>()
+
+        override suspend fun start(
+            groupId: String?,
+            repoPath: String?,
+            title: String,
+            stages: List<ChainStage>,
+            target: String?,
+            module: String?,
+            context: String?,
+            leader: LeaderBrief?,
+            planTrace: ChainPlanTrace?,
+        ): String? {
+            val host = plane() ?: return null
+            val repo = repoPath?.takeIf { it.isNotBlank() } ?: return null
+            if (!isGitRepo(repo)) return null
+            val chainId = "c" + System.currentTimeMillis().toString(36)
+            launched[chainId] = ChainLaunch(
+                groupId, repo, title, stages, target, module, context, leader, planTrace,
+            )
+            scope.launch {
+                runCatching {
+                    runChain(
+                        host, controller, chainId, groupId, repo, title, stages,
+                        sessionExemptOf, onBlindSpot, target, module, context, leader, planTrace,
+                    )
                 }
+                    .onFailure {
+                        val reason = it.message ?: it::class.simpleName ?: "unknown"
+                        onBlindSpot("chain-crashed", title.take(60), reason.take(200))
+                        RelayLog.info("CHAIN", chainId + " aborted: " + reason)
+                    }
+            }
+            return chainId
         }
-        chainId
+
+        override fun retry(chainId: String): Boolean {
+            val launch = launched[chainId] ?: return false
+            val host = plane() ?: return false
+            if (!isGitRepo(launch.repoPath)) return false
+            val newId = "c" + System.currentTimeMillis().toString(36)
+            launched[newId] = launch
+            scope.launch {
+                runCatching {
+                    runChain(
+                        host, controller, newId, launch.groupId, launch.repoPath, launch.title,
+                        launch.stages, sessionExemptOf, onBlindSpot,
+                        launch.target, launch.module, launch.context, launch.leader, launch.planTrace,
+                    )
+                }
+                    .onFailure {
+                        val reason = it.message ?: it::class.simpleName ?: "unknown"
+                        onBlindSpot("chain-crashed", launch.title.take(60), reason.take(200))
+                        RelayLog.info("CHAIN", newId + " retry aborted: " + reason)
+                    }
+            }
+            RelayLog.info("CHAIN", "retry dispatched: " + chainId + " -> " + newId)
+            return true
+        }
+
+        override fun reject(chainId: String, feedback: String): Boolean {
+            val launch = launched[chainId] ?: return false
+            // 与单兵 HealSteering 同一套单次授权：已打回过 / 空反馈一律拒收（fail-closed）。
+            val grant = HealSteering.grantOnce(feedback, launch.revisionUsed) ?: return false
+            val host = plane() ?: return false
+            if (!isGitRepo(launch.repoPath)) return false
+            val newId = "c" + System.currentTimeMillis().toString(36)
+            launched[newId] = launch.copy(
+                revision = grant.instruction,
+                revisionUsed = true,
+            )
+            scope.launch {
+                runCatching {
+                    runChain(
+                        host, controller, newId, launch.groupId, launch.repoPath, launch.title,
+                        launch.stages, sessionExemptOf, onBlindSpot,
+                        launch.target, launch.module, launch.context, launch.leader, launch.planTrace,
+                        revision = grant.instruction,
+                    )
+                }
+                    .onFailure {
+                        val reason = it.message ?: it::class.simpleName ?: "unknown"
+                        onBlindSpot("chain-crashed", launch.title.take(60), reason.take(200))
+                        RelayLog.info("CHAIN", newId + " reject aborted: " + reason)
+                    }
+            }
+            RelayLog.info(
+                "CHAIN",
+                "reject dispatched: " + chainId + " -> " + newId +
+                    " (attempt " + grant.attempt + "/" + grant.maxAllowed + ")",
+            )
+            return true
+        }
     }
 
     private suspend fun runChain(
@@ -85,13 +194,36 @@ object DesktopStageChain {
         groupId: String?,
         repo: String,
         title: String,
-        stages: List<ChainStage>,
+        rawStages: List<ChainStage>,
         sessionExemptOf: ((sessionId: String) -> Boolean)? = null,
         onBlindSpot: (kind: String, title: String?, detail: String?) -> Unit = { _, _, _ -> },
         target: String? = null,
         module: String? = null,
         context: String? = null,
+        leader: LeaderBrief? = null,
+        /** 形状来源：团队派单带下来；null = 这条链不经团队编排。 */
+        planTrace: ChainPlanTrace? = null,
+        /**
+         * 打回反馈（人「为什么不满意」）：非空时作为硬约束前置进每一棒的
+         * instruction —— 打回必须变成下一轮每棒都要满足的验收标准，而不是聊过
+         * 就丢的话。null（首发 / 普通 retry）= 现状一字不变。
+         */
+        revision: String? = null,
     ) {
+        // 打回反馈前置：用 copy 派生新 stages，后续所有引用（reviewStages/statuses/
+        // 交接判据）自然带着约束。rawStages 不变 —— 注册表里的首发参数保持纯净，
+        // 下一次 retry 仍是原始形状。
+        val stages = if (revision.isNullOrBlank()) rawStages else rawStages.map { stage ->
+            stage.copy(
+                instruction = "HUMAN REJECTION FEEDBACK (satisfy every point — this is the acceptance criteria for this round):\n" +
+                    revision + "\n\n—— ORIGINAL TASK ——\n" + stage.instruction,
+            )
+        }
+        val startedAt = System.currentTimeMillis()
+        // 逐次执行的耗时（含返工：同一棒跑两遍就是两条），落飞行记录的 phases。
+        // 并发隔离棒在 Default 线程上投递，所以收口在这把锁里。
+        val phaseLock = Any()
+        val stagePhases = mutableListOf<FlightPhase>()
         var rev = 0
         val statuses = stages.map { it.role to "pending" }.toMutableList()
 
@@ -155,9 +287,35 @@ object DesktopStageChain {
             pendingChecks = emptyList()
         }
 
+        /**
+         * 这条链的飞行记录。
+         *
+         * 从前只有 `RelayLog` 的 `CHAIN` 几行 —— 单棒派单有记录、责任链没有，
+         * 于是「这条链跑了几棒、各花多久、形状是谁定的」在盘上查不到（日志会轮转）。
+         * 证据分级如实写 `agent_self_report`：链的结论来自审查棒的 VERDICT 行，
+         * 不是宿主跑的验收命令 —— 退出码留 null，不拿 0 冒充通过。
+         *
+         * 写失败只留一行日志（[FlightRecorder.record] 自己会记）：链的结论已经发出去了，
+         * 不该因为观测面坏掉把结果吞掉。
+         */
+        fun writeFlight() {
+            FlightRecorder.record(
+                chainFlightRecord(
+                    chainId = chainId,
+                    repoName = File(repo).name,
+                    elapsedMs = (System.currentTimeMillis() - startedAt).coerceAtLeast(0L),
+                    stages = stages,
+                    phases = synchronized(phaseLock) { stagePhases.toList() },
+                    planTrace = planTrace,
+                ),
+                outputDir = File(controller.dataDirectory, "flight-records"),
+            )
+        }
+
         val dirty = git(repo, "status", "--porcelain")?.trim().orEmpty()
         if (dirty.isNotEmpty()) {
             publish("blocked", "Working tree not clean (" + dirty.lineSequence().count() + " changes); please commit or stash first")
+            writeFlight()
             return
         }
         val origin = git(repo, "rev-parse", "--abbrev-ref", "HEAD")?.trim()
@@ -175,6 +333,7 @@ object DesktopStageChain {
         chainWorktree.parentFile?.mkdirs()
         if (git(repo, "worktree", "add", "-b", branch, chainWorktree.absolutePath, "HEAD") == null) {
             publish("blocked", "Cannot create worktree for " + branch + " (already exists on " + (origin ?: "?") + "?)")
+            writeFlight()
             return
         }
         try {
@@ -189,11 +348,28 @@ object DesktopStageChain {
         }
 
         var handoffSpoken = false
+        // 主理人在场时：规约仍排在前面（常规流转零延迟），只有它判不了才升级给 lead。
+        // leader == null ⇒ 逐字走既有路径（`review = ReviewPipeline()` 的行为不变）。
+        val pipeline = ReviewPipeline()
+        val leaderDecider = leader?.let {
+            EscalatingStepDecider(DeterministicStepDecider(pipeline), TeamStepDecider(it))
+        }
         val runner = StageChainRunner(
             headSha = { repoPath -> git(repoPath, "rev-parse", "HEAD")?.trim() },
             runStage = { stage, prompt, repoPath ->
+                val stageStartedAt = System.currentTimeMillis()
                 val run = runOneStage(host, controller, groupId, stage, prompt, repoPath, repo) { delivered ->
                     recordArtifacts(delivered)
+                }
+                // 逐次记录（返工 = 同一棒两条）：飞行记录要能回答「哪一棒慢、哪一棒返工」。
+                synchronized(phaseLock) {
+                    stagePhases.add(
+                        FlightPhase(
+                            phase = stage.role,
+                            durationMs = (System.currentTimeMillis() - stageStartedAt).coerceAtLeast(0L),
+                            status = if (run.ok) "ok" else "failed",
+                        ),
+                    )
                 }
                 // 棒间交接发言（P0b）：Worker 棒（首棒）执行完毕且成功，且存在后续审查棒时，
                 // 由 Worker 席位在群内广播 1 条拟人化交棒发言。整条责任链上限 1 条，避免刷屏。
@@ -258,8 +434,16 @@ object DesktopStageChain {
                     }
                 }
             },
-            review = ReviewPipeline(),
+            review = if (leaderDecider == null) pipeline else null,
             verdictOf = { it.verdict },
+            decider = leaderDecider,
+            onDecision = { record ->
+                // 每一步「谁决定的、决定了什么」都留一条日志：卡面接上之前，
+                // 「为什么又返工了」至少要能事后查清。
+                RelayLog.info("CHAIN", chainId + " step#" + record.stageIndex + " " + record.stageRole +
+                    " -> " + record.action + " by " + record.decidedBy +
+                    (record.reason?.let { " (" + it.take(120) + ")" } ?: ""))
+            },
         )
 
         try {
@@ -268,10 +452,12 @@ object DesktopStageChain {
             runner.run(chainId, chainWorktree.absolutePath, title, reviewStages)
         } catch (t: Throwable) {
             publish("blocked", "Stage chain interrupted: " + (t.message ?: t::class.simpleName))
+            writeFlight()
             return
         }
         RelayLog.info("CHAIN", chainId + " finished on branch " + branch +
             " (origin " + (origin ?: "?") + " untouched)")
+        writeFlight()
         } finally {
             // 收尾：worktree 删掉、**分支留着**（机主要看就是在 chain/<id> 上）。
             // 清理失败只留日志 —— 链的结论已经发出去了，不该因为清理不干净把结果吞掉。
@@ -585,6 +771,46 @@ object DesktopStageChain {
 
     /** 卡片发送方 id 里的 agentId。链不是任何一个席位，用固定串标出来源。 */
     private const val CHAIN_AGENT_ID = "tenon-chain"
+
+    /**
+     * 链的飞行记录（纯函数，便于钉住）。
+     *
+     * 与单棒那条的两处**故意不同**，都是「不冒充」：
+     * - `exitCode` 留 null：链没有宿主跑的验收命令，结论来自审查棒的 `VERDICT` 行；
+     * - `verifiedBy = agent_self_report`：同上，审查通过是 agent 说的话，不是宿主进程的退出码。
+     * - `patchSizeBytes = 0`：链的交付是分支上的提交，不是一份可量的 patch。
+     *
+     * `planTrace` 为 null（HTTP 路由 / 模板链）时 `planDecision` 也如实为 null ——
+     * 这时候"形状是谁定的"这个问题的答案是「这次派单根本没有团队编排这一层」。
+     */
+    internal fun chainFlightRecord(
+        chainId: String,
+        repoName: String,
+        elapsedMs: Long,
+        stages: List<ChainStage>,
+        phases: List<FlightPhase>,
+        planTrace: ChainPlanTrace?,
+    ): FlightRecord = FlightRecord(
+        taskId = chainId,
+        targetDirectory = repoName,
+        metrics = FlightMetrics(
+            totalDurationMs = elapsedMs,
+            patchSizeBytes = 0L,
+        ),
+        phases = phases,
+        hostEvidence = FlightEvidence(verifiedBy = FlightRecord.VERIFIED_BY_AGENT_SELF_REPORT),
+        planDecision = planTrace?.let { trace ->
+            FlightPlanDecision(
+                source = trace.source,
+                stageCount = stages.size,
+                reviewerCount = (stages.size - 1).coerceAtLeast(0),
+                rationale = trace.rationale,
+                workerAgentId = trace.workerAgentId,
+                workerName = trace.workerName,
+                anchorAgentId = trace.anchorAgentId,
+            )
+        },
+    )
 
     /**
      * 链 worktree 的根：系统临时目录下按产品分一层。

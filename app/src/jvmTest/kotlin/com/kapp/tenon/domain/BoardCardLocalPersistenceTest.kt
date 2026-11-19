@@ -223,4 +223,72 @@ class BoardCardLocalPersistenceTest {
         assertEquals("2", (updatedCard["rev"] as? JsonPrimitive)?.content)
         host.stop()
     }
+
+    /**
+     * 已合并的卡不许被更晚到的中间态帧刷回去。
+     *
+     * rev 单调只挡旧帧，挡不住「rev 更高但状态更早」的帧：自愈重跑或迟到的 Card 事件
+     * 带 `working`/`review_ready` 打在同一 cardId 上，一旦落库就把 `merged` 刷回进行中，
+     * 而翻面时按钮已摘 —— 用户再也点不到正确出口。终态优先于 rev。
+     */
+    @Test
+    fun aMergedCardIsNotRegressedByALaterIntermediateFrame() = runBlocking {
+        val host = controller()
+        val groupId = host.createGroup("mesh", listOf(phoneNode))!!
+        host.invokeCtl.broadcastBoardCard(groupId, "gpu-runner", cardOf("diff-t1", 1, "review_ready"))
+        host.invokeCtl.broadcastBoardCard(groupId, "gpu-runner", cardOf("diff-t1", 1, "merged"))
+        assertEquals(
+            "merged",
+            (host.cardRows(groupId).single().renderCard?.get("state") as? JsonPrimitive)?.content,
+            "前提：先真的合并成功",
+        )
+
+        // 迟到/重跑的中间态帧（rev 传 9，远高于既有）
+        host.invokeCtl.broadcastBoardCard(groupId, "gpu-runner", cardOf("diff-t1", 9, "working"))
+
+        assertEquals(
+            "merged",
+            (host.cardRows(groupId).single().renderCard?.get("state") as? JsonPrimitive)?.content,
+            "已合并是终态，不许被更高 rev 的 working 刷回去",
+        )
+        host.stop()
+    }
+
+    /**
+     * 重启回填判定台账必须读 `renderCard`（= cardPayload ?: card），不能只读首帧 `card`。
+     *
+     * 翻面写入的是 cardPayload，`decidedBy`/`decidedActionId` 只在那里；只读 card 会让
+     * 重启后判定记录全丢，已决卡可被二次判定。
+     */
+    @Test
+    fun rebuildingTheDecisionLedgerReadsTheFlippedPayload() = runBlocking {
+        val host = controller()
+        val groupId = host.createGroup("mesh", listOf(phoneNode))!!
+        host.invokeCtl.broadcastBoardCard(groupId, "gpu-runner", cardOf("diff-t1", 1, "review_ready"))
+        // 模拟翻面：新载荷带判定人 + 判定动作（写在 cardPayload，card 锚不动）
+        host.invokeCtl.broadcastBoardCard(
+            groupId,
+            "gpu-runner",
+            buildJsonObject {
+                put("cardId", "diff-t1")
+                put("rev", 5)
+                put("type", "diff-review")
+                put("state", "merged")
+                put("title", "repo 改好了，等你合并")
+                put("decidedBy", "carol")
+                put("decidedActionId", "merge-patch")
+            },
+        )
+        val before = assertNotNull(host.cardRows(groupId).single().renderCard)
+        assertEquals("carol", (before["decidedBy"] as? JsonPrimitive)?.content, "前提：判定落在最新载荷")
+
+        host.invokeCtl.rebuildActionLedger()
+
+        assertEquals(
+            "carol",
+            host.invokeCtl.actionLedger.decidedBy("diff-t1", "merge-patch"),
+            "重启回填必须从 cardPayload 读判定（只读首帧 card 会让已决卡被二次判定）",
+        )
+        host.stop()
+    }
 }

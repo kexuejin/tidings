@@ -22,6 +22,8 @@ data class TeamMemberDraft(
     /** 角色标签（编码/审查/测试…），自由文本。 */
     val role: String,
     val isNew: Boolean = false,
+    /** 团队范围的人设提示词（方案 §3.4.1）：随名册落档（[TeamMemberInfo.prompt]），可空。 */
+    val prompt: String? = null,
 )
 
 /** 校验问题落在哪一行、哪个字段。 */

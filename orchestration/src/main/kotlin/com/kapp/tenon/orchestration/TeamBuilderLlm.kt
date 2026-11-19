@@ -37,22 +37,39 @@ object TeamBuilderLlm {
     /** 与 PlannerLlm 同一预算：过了这个数，用户等一张预览卡的时间已经不划算。 */
     private const val DEFAULT_TIMEOUT_MS = 20_000L
 
-    /** 拆解提示词：岗位名册写死在 system 里，LLM 只在词汇表内做决策。 */
-    private fun systemPrompt(leaderKeys: Set<String>, driverKeys: Set<String>): String {
-        val leaders = leaderKeys.joinToString(", ")
+    /**
+     * 拆解提示词：**名册按「一人一行」渲染**（方案 §3.4.1）—— 从「一串键」变成
+     * 「token · 职责 · 运行时 · 在线」，LLM 才有资格从现有的人里挑一支队。
+     * 行内全是 ASCII（token/duty/driver/online）；档案中文名不进 prompt（CJK 不放 prompt）。
+     */
+    private fun systemPrompt(roster: com.kapp.tenon.domain.TeamScaffoldRoster, driverKeys: Set<String>): String {
+        val leaders = roster.leaders.joinToString("\n") { candidate ->
+            val state = when (candidate.online) {
+                true -> "online"
+                false -> "offline"
+                null -> "unknown"
+            }
+            "- token=${candidate.token} duty=${candidate.duty.ifBlank { "general" }} " +
+                "driver=${candidate.driverKey} state=$state (id=${candidate.agentKey})"
+        }
         val drivers = driverKeys.joinToString(", ") { key ->
             val vendor = AgentProfiles.vendorOf(key) ?: "unknown"
             "$key(vendor=$vendor)"
         }
         return """
             You are the team-builder assistant of the host orchestrator.
-            Design a team roster from the user's need.
-            Leader candidates (use exactly one as "leader"): $leaders
+            Design a team roster from the user's need, preferring the existing employees below.
+            Leader candidates (use exactly one as "leader", value = its id): $leaders
             Execution drivers: $drivers
             Rules:
+            - Prefer "use" rows: {"use":"<token or id>","kind":"worker|reviewer","prompt":"..."} reuses an existing employee.
+            - Reused members keep their own driver; do not re-assign their driver.
+            - For brand-new members use {"name":"...","role":"...","driver":"<driver key>","kind":"...","prompt":"..."}.
             - 2-5 members; exactly one member with kind=worker, the rest kind=reviewer.
-            - Every member "driver" must be one of the listed driver keys.
+            - New member "driver" must be one of the listed driver keys.
             - Reviewer drivers must be a different vendor than the worker driver.
+            - Never nominate the leader itself as a member; never nominate the same employee twice.
+            - If a "use" target does not exist, just omit that row (do not invent a new one for it).
             - "name" is a lowercase ascii slug (a-z, 0-9, hyphen), unique in the team.
             - "role" is a short human label for the duty; write it in Chinese.
             - "prompt" is that member's persona system prompt; write it in Chinese.
@@ -61,8 +78,8 @@ object TeamBuilderLlm {
               should focus the review on what the role label implies. 2-4 sentences.
             - "teamName" is a short Chinese team name.
             Output JSON only, no explanation:
-            {"teamName":"...","leader":"<leader key>",
-             "members":[{"name":"...","role":"...","prompt":"...","driver":"<driver key>","kind":"worker|reviewer"}]}
+            {"teamName":"...","leader":"<leader id>",
+             "members":[{"use":"...","kind":"...","prompt":"..."} or {"name":"...","role":"...","prompt":"...","driver":"<driver key>","kind":"worker|reviewer"}]}
         """.trimIndent()
     }
 
@@ -74,13 +91,15 @@ object TeamBuilderLlm {
      */
     fun draft(
         need: String,
-        leaderKeys: Set<String>,
+        roster: com.kapp.tenon.domain.TeamScaffoldRoster,
         driverKeys: Set<String>,
         timeoutMs: Long = DEFAULT_TIMEOUT_MS,
         apiKey: String? = DshCredentials.resolve(),
         http: (endpoint: String, apiKey: String, body: String, timeoutMs: Long) -> String? = ::postChat,
     ): String? {
-        if (need.isBlank() || leaderKeys.isEmpty() || driverKeys.isEmpty()) return null
+        // 洞 B 契约：无可领队者 = LLM 层也直接 null（领队无来源），调用方回落模板、
+        // 模板再 null ⇒ 生成层 null（主行动=新建员工）。
+        if (need.isBlank() || roster.leaders.isEmpty() || driverKeys.isEmpty()) return null
         val key = apiKey?.trim()?.takeIf { it.isNotEmpty() } ?: return null
         val body = buildJsonObject {
             put("model", MODEL)
@@ -95,7 +114,7 @@ object TeamBuilderLlm {
                         JsonObject(
                             mapOf(
                                 "role" to JsonPrimitive("system"),
-                                "content" to JsonPrimitive(systemPrompt(leaderKeys, driverKeys)),
+                                "content" to JsonPrimitive(systemPrompt(roster, driverKeys)),
                             ),
                         ),
                         JsonObject(

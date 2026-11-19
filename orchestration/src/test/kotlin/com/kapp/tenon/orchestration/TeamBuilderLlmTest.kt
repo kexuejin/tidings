@@ -13,7 +13,17 @@ import kotlin.test.assertTrue
  */
 class TeamBuilderLlmTest {
 
-    private val leaders = setOf("dsh", "codex")
+    // A5 之后 draft 吃**复用池**（roster）：领队候选从池派生（洞 B 契约）。
+    private val roster = com.kapp.tenon.domain.TeamScaffoldRoster(
+        listOf(
+            com.kapp.tenon.domain.TeamScaffoldCandidate(
+                agentKey = "dsh", label = "l", token = "l-dsh", duty = "coder", driverKey = "dsh",
+            ),
+            com.kapp.tenon.domain.TeamScaffoldCandidate(
+                agentKey = "codex", label = "l2", token = "l-codex", duty = "reviewer", driverKey = "codex",
+            ),
+        ),
+    )
     private val drivers = setOf("dsh", "codex", "claude")
 
     private fun openAiResponse(content: String): String = """
@@ -26,9 +36,9 @@ class TeamBuilderLlmTest {
         val http: (String, String, String, Long) -> String? = { _, _, _, _ ->
             called = true; null
         }
-        assertNull(TeamBuilderLlm.draft("", leaders, drivers, apiKey = "k", http = http))
-        assertNull(TeamBuilderLlm.draft("need", emptySet(), drivers, apiKey = "k", http = http))
-        assertNull(TeamBuilderLlm.draft("need", leaders, emptySet(), apiKey = "k", http = http))
+        assertNull(TeamBuilderLlm.draft("", roster, drivers, apiKey = "k", http = http))
+        assertNull(TeamBuilderLlm.draft("need", com.kapp.tenon.domain.TeamScaffoldRoster(emptyList()), drivers, apiKey = "k", http = http))
+        assertNull(TeamBuilderLlm.draft("need", roster, emptySet(), apiKey = "k", http = http))
         assertTrue(!called, "结构性拒绝必须发生在任何网络调用之前")
     }
 
@@ -38,8 +48,8 @@ class TeamBuilderLlmTest {
         val http: (String, String, String, Long) -> String? = { _, _, _, _ ->
             called = true; null
         }
-        assertNull(TeamBuilderLlm.draft("need", leaders, drivers, apiKey = "  ", http = http))
-        assertNull(TeamBuilderLlm.draft("need", leaders, drivers, apiKey = null, http = http))
+        assertNull(TeamBuilderLlm.draft("need", roster, drivers, apiKey = "  ", http = http))
+        assertNull(TeamBuilderLlm.draft("need", roster, drivers, apiKey = null, http = http))
         assertTrue(!called, "无 key 是零成本判断，不许打一次网才失败")
     }
 
@@ -55,7 +65,7 @@ class TeamBuilderLlmTest {
             seenBody = body
             openAiResponse(payload)
         }
-        assertEquals(payload, TeamBuilderLlm.draft("need", leaders, drivers, apiKey = "k", http = http))
+        assertEquals(payload, TeamBuilderLlm.draft("need", roster, drivers, apiKey = "k", http = http))
         assertEquals("https://api.deepseek.com/chat/completions", seenEndpoint)
         assertEquals("k", seenKey)
         assertTrue(seenBody!!.contains("\"json_object\""), "响应格式钉 json_object")
@@ -65,21 +75,21 @@ class TeamBuilderLlmTest {
     @Test
     fun httpFailureAndMalformedResponseDegradeToNull() {
         assertNull(
-            TeamBuilderLlm.draft("need", leaders, drivers, apiKey = "k") { _, _, _, _ -> null },
+            TeamBuilderLlm.draft("need", roster, drivers, apiKey = "k") { _, _, _, _ -> null },
             "非 2xx = null（调用方回落模板）",
         )
         assertNull(
-            TeamBuilderLlm.draft("need", leaders, drivers, apiKey = "k") { _, _, _, _ ->
+            TeamBuilderLlm.draft("need", roster, drivers, apiKey = "k") { _, _, _, _ ->
                 throw java.net.SocketTimeoutException("t")
             },
             "超时/异常 = null，不外抛",
         )
         assertNull(
-            TeamBuilderLlm.draft("need", leaders, drivers, apiKey = "k") { _, _, _, _ -> "not json" },
+            TeamBuilderLlm.draft("need", roster, drivers, apiKey = "k") { _, _, _, _ -> "not json" },
             "响应畸形 = null",
         )
         assertNull(
-            TeamBuilderLlm.draft("need", leaders, drivers, apiKey = "k") { _, _, _, _ ->
+            TeamBuilderLlm.draft("need", roster, drivers, apiKey = "k") { _, _, _, _ ->
                 openAiResponse("")
             },
             "空 content = null",

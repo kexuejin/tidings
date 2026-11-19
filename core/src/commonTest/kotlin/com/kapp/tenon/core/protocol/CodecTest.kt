@@ -7,6 +7,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 import kotlin.test.fail
 
@@ -67,6 +68,31 @@ class CodecTest {
             Codec.decodeTcp(env("msg", payload)) !is DecodeResult.Ok,
             "只给 sessionId 不给 cursor 的帧必须被拒",
         )
+    }
+
+    /**
+     * **发送侧不产出注定被拒的帧**（AGENTS §3 的不变量，落到唯一构造点）：
+     * `groupTextPayload` 对不成对的会话归属必须当场拒绝，而不是编码成功、
+     * 落库成功、发出去之后在对端静默消失（真机现场：终态卡的群广播 acked=false
+     * → 入队 → 队列重放自解码也拒 → 从队列删除并标 failed，卡片永不翻面）。
+     * 接收侧的拒收由 [aSessionWithoutCursorIsRejected] 守着 —— 两侧各守一半。
+     */
+    @Test
+    fun theBuilderRefusesAnUnpairedSessionAttribution() {
+        val ex = assertFailsWith<IllegalArgumentException> {
+            Codec.groupTextPayload("hi", "grp-1", 1, agentSessionId = "s-abc")
+        }
+        assertTrue(
+            ex.message.orEmpty().contains("paired"),
+            "报错要说清是成对判据被违反：${ex.message}",
+        )
+        // 反向（只给 cursor）同样拒绝：判据是「成对」，不是「sessionId 优先」。
+        assertFailsWith<IllegalArgumentException> {
+            Codec.groupTextPayload("hi", "grp-1", 1, agentCursor = 7L)
+        }
+        // 成对时照常产出（既有行为不受影响）。
+        val paired = Codec.groupTextPayload("hi", "grp-1", 1, agentSessionId = "s-abc", agentCursor = 7L)
+        assertTrue(paired.toString().contains("agentSessionId"), paired.toString())
     }
 
     @Test

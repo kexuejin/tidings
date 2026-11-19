@@ -100,6 +100,43 @@ class ContextCapsuleErgonomicsTest {
     // ── 3. 粘帖不误触发 ─────────────────────────────────────────────────
 
     @Test
+    fun aLongerTokenIsNotReadAsThePrefixToken() {
+        // 真机 UX 轮现场：候选里同时有员工 `@e2e` 与团队 `@e2e-team`，用户点了
+        // 整队行 —— 胶囊的裸子串匹配把 `@e2e-team` 读成 `@e2e`，员工的意图帧
+        // 劫走整队派单（宿主的团队链路整个被跳过，工单落到了一个员工头上）。
+        // 词边界与 mentionsToken 同源（core 的 mentionSpans）：前缀不是命中。
+        val employee = CapsuleAgentInfo(
+            agentToken = "@e2e",
+            agentName = "e2e",
+            agentId = "emp-e2e-01",
+            hostNodeId = "host-1",
+            isTeam = false,
+            workspaces = emptyList(),
+            defaultWsId = null,
+        )
+        val team = devLead.copy(agentToken = "@e2e-team", agentName = "e2e-team")
+        val both = mapOf(employee.agentToken to employee, team.agentToken to team)
+        assertNull(
+            firstAgentMentionToken("@e2e-team 干个活", setOf(employee.agentToken)),
+            "池里只有员工：@e2e-team 不是 @e2e 的命中（词边界），绝不返回前缀员工",
+        )
+        assertEquals(
+            "@e2e-team",
+            firstAgentMentionToken("@e2e-team 干个活", both.keys),
+            "整队 token 在池里 ⇒ 绑整队",
+        )
+        // 反向：`@e2e` 后面接的不是标识符字符，才是员工命中。
+        assertEquals("@e2e", firstAgentMentionToken("@e2e 干个活", both.keys))
+        // 逐字键入路径同样不得劫持：draft 里出现 @e2e-team 时胶囊绑整队（不绑 @e2e）。
+        val state = typeOut("@e2e-team 干个活", both)
+        assertEquals(team, state.agent)
+        assertNull(
+            typeOut("@e2e-team 干个活", mapOf(employee.agentToken to employee)).agent,
+            "池里只有员工：@e2e-team 不构成 @e2e 的命中 ⇒ 不唤起（宿主按整队语义解析）",
+        )
+    }
+
+    @Test
     fun pastedTextMentioningAnAgentDoesNotTrigger() {
         // 一次插入一整段（delta 远大于键入粒度）= 粘帖：即使里面带着 @agent 也不弹。
         assertEquals(

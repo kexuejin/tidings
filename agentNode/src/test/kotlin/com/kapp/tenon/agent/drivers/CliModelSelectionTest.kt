@@ -78,13 +78,14 @@ class CliModelSelectionTest {
     @Test
     fun unsupportedDriverFailsLoudlyAndNeverSpawns() = runBlocking {
         val dir = tempDir()
-        // dsh 的模型写在 profile 配置里，命令行没有旗标 —— 指定模型必须响亮失败。
+        // zcode 是真正没有按次通道的一家（只能在应用内选模型）。
+        // dsh 曾在这里，实测发现它走 `--patch` 能按次指定 —— 换掉了。
         val driver = CliSubprocessDriver(
-            "dsh-cli",
-            "DeepSeek Harness (CLI)",
+            "zcode-cli",
+            "ZCode (CLI)",
             capturingScript(dir),
-            argSpec = { prompt -> listOf("--profile", "headless", "--json", prompt) },
-        ).withModel("deepseek-chat")
+            argSpec = { prompt -> listOf("-p", prompt, "--mode", "yolo", "--json") },
+        ).withModel("glm-5.3")
 
         val events = mutableListOf<DriverEvent>()
         val handle = driver.openSession("", null)
@@ -128,4 +129,54 @@ class CliModelSelectionTest {
             "模型没进 argv：${File(dir, "argv.txt").readText()}",
         )
     }
+    // ---------------------------------------------------------------- dsh：配置覆盖通道
+
+    @Test
+    fun dshSendsPatchBeforeProfileAndCarriesModel() {
+        val args = CliSubprocessDriver.dshArgs(
+            prompt = "做点事",
+            model = "claude-haiku-5-5",
+            patchPath = "/tmp/x.yml",
+        )
+        // `--patch` 是**启动器**选项，必须排在 `--profile` 之前。
+        // 本机实测：放后面 dsh 报 `unknown option '--patch'` 并退出 1 ——
+        // 那个报错看着像参数拼错，实际是位置错了。这条就是把它钉住。
+        assertTrue(
+            args.indexOf("--patch") < args.indexOf("--profile"),
+            "--patch 必须在 --profile 之前，实际：$args",
+        )
+        assertEquals("/tmp/x.yml", args[args.indexOf("--patch") + 1])
+        // prompt 仍是最后一个位置参数。
+        assertEquals("做点事", args.last())
+    }
+
+    @Test
+    fun dshWithoutModelHasNoPatchFlag() {
+        val args = CliSubprocessDriver.dshArgs("做点事", model = null, patchPath = null)
+        assertFalse(args.contains("--patch"), "没指定模型时不该带 --patch：$args")
+        assertEquals(listOf("--profile", "headless", "--json", "做点事"), args)
+    }
+
+    @Test
+    fun dshPatchWritesAllThreeFields() {
+        // `--patch` 是**整块替换**而不是字段合并：只写 model 会把 provider 弄丢，
+        // dsh 启动即失败（本机实测：退出码非 0、无输出）。这条钉住「三字段写全」。
+        val content = CliSubprocessDriver.dshModelPatch("claude-haiku-5-5")
+        assertTrue(content.contains("provider: dsh-opencode-go"), "缺 provider：$content")
+        assertTrue(content.contains("model: claude-haiku-5-5"), "缺 model：$content")
+        assertTrue(content.contains("reasoningEffort:"), "缺 reasoningEffort：$content")
+        assertTrue(content.contains("- id: agent-default-model"), "缺块 id：$content")
+    }
+
+    @Test
+    fun dshPatchFileIsStablePerModel() {
+        // 同一个模型 → 同一路径同一内容（幂等，不堆临时文件）；不同模型 → 不同路径。
+        val a = File(CliSubprocessDriver.dshPatchFileFor("claude-haiku-5-5"))
+        val b = File(CliSubprocessDriver.dshPatchFileFor("claude-haiku-5-5"))
+        val c = File(CliSubprocessDriver.dshPatchFileFor("deepseek-v4.1-flash"))
+        assertEquals(a.absolutePath, b.absolutePath, "同模型应复用同一个 patch 文件")
+        assertTrue(a.absolutePath != c.absolutePath, "不同模型不能共用 patch 文件")
+        assertTrue(a.isFile && a.readText().contains("claude-haiku-5-5"))
+    }
+
 }

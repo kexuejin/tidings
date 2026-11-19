@@ -196,6 +196,33 @@ class TeamPromptRoutingTest {
     }
 
     /**
+     * **同位前缀撞名不是歧义**（真机 UX 轮现场）：员工席位 token `e2e` 是团队名
+     * `e2e-team` 的前缀 —— `-` 在 mentionsToken 的边界判据里是标点，短 token 在
+     * 整队 mention 里假命中 ⇒ 旧判据把它读成「团队名与成员同时被点到」的歧义，
+     * **静默不执行**（连发送端提示都没有）。最长命中优先：被团队名区间覆盖的
+     * member/seat 命中让位，整队语义落地。
+     */
+    @Test
+    fun aMemberTokenCoveredByTheTeamMentionYieldsTheTeam() {
+        val employee = VirtualAgentMember(
+            agentId = "emp-e2e-01", hostNodeId = self, name = "e2e",
+            entityType = EntityTypes.SINGLE, employeeId = "emp-e2e-01",
+        )
+        val g = group(employee, namedTeam(teamId = "team-e2e", teamName = "e2e-team"))
+        val pool = groupParticipantRows(ctx(employee, namedTeam(teamId = "team-e2e", teamName = "e2e-team"))).mentionKeys
+        val target = resolvePromptTarget("@e2e-team 干个活", g, pool)
+        val team = assertIs<PromptTarget.Team>(target)
+        assertEquals("team-e2e", team.teamId, "同位前缀撞名 ⇒ 整队（不是歧义、更不是那个员工）")
+        // 反向不受影响：真点员工照样解析到员工。
+        val member = assertIs<PromptTarget.Seat>(resolvePromptTarget("@e2e 干个活", g, pool))
+        assertEquals("emp-e2e-01", member.seat.agentId)
+        // 真两意图（区间不重叠）仍旧歧义。
+        assertIs<PromptTarget.Ambiguous>(
+            resolvePromptTarget("@e2e-team 让 @coder 修", g, pool),
+        )
+    }
+
+    /**
      * `@团队名` 必须真的**唤醒路由**（不只是解析出目标）。
      *
      * 这一条与 [teamNameJoinsTheMentionPool] 是两处依赖：池里没有团队名时
@@ -210,5 +237,73 @@ class TeamPromptRoutingTest {
             AgentPromptRoute.Local,
             route(text = "@开发团队 修登录", agentKinds = pool, targetHostIsSelf = true, localAgentPresent = true, remoteAgentPresent = false),
         )
+    }
+}
+
+/**
+ * §4-8b：队还没进这个群 —— token 命中**本机团队档案**。修复前路由层无席位就不唤醒
+ * （候选里连整队行都没有，手打 token 也是「点了没反应」）；现在档案 token 进路由池
+ * （不进候选），路由出 ProfileTeam，编排层接住后出 blocked 卡带「把队加进这个群」。
+ */
+class TeamProfileNotAttachedRoutingTest {
+
+    private val self = "host-self"
+
+    private fun group() = GroupMeta(
+        groupId = "g1", name = "n", members = listOf(self), rev = 1,
+        updatedBy = self, updatedTs = 1, virtualAgents = emptyList(),
+    )
+
+    private fun ctx() = SenderIdentityContext(selfNodeId = self, group = group())
+
+    private fun profile() = com.kapp.tenon.domain.TeamProfile(
+        teamId = "team-e2e",
+        name = "e2e-team",
+        leaderAgentId = "e2e-team-lead",
+        members = listOf(TeamMemberInfo("m-e2e-coder", "coder", "编码")),
+    )
+
+    @Test
+    fun aProfileTokenWakesTheRoutingEvenWithoutASeat() {
+        val profiles = listOf(profile())
+        // 群里只有一个无关员工席位；团队席位不存在。
+        // 与生产调用点同口径：路由池 = 席位池 + 档案 token（候选池不含档案 token）。
+        val pool = groupParticipantRows(ctx()).mentionKeys +
+            com.kapp.tenon.domain.TeamProfileMention.mentionTokensOf(profiles)
+        val target = resolvePromptTarget(
+            "@e2e-team 干个活",
+            group(), pool,
+            profiles,
+        )
+        val profileTeam = assertIs<PromptTarget.ProfileTeam>(target)
+        assertEquals("team-e2e", profileTeam.team.teamId)
+    }
+
+    @Test
+    fun theProfilePoolDoesNotLeakIntoCandidateTokens() {
+        // 档案 token 只进路由池（调用方拼），mentionKeys（= 候选）必须不含它：
+        // 没入驻的队不出现在 @ 候选里，唯一语义「加进来」走 blocked 卡主行动。
+        assertTrue("e2e-team" !in groupParticipantRows(ctx()).mentionKeys)
+        assertTrue("e2e-team" in com.kapp.tenon.domain.TeamProfileMention.mentionTokensOf(listOf(profile())))
+    }
+
+    @Test
+    fun anAttachedTeamStillWinsOverTheProfileFallback() {
+        // 席位在（正常入驻）：整队目标照旧走 Team，档案兜底不掺和。
+        val seated = GroupMeta(
+            groupId = "g1", name = "n", members = listOf(self), rev = 1,
+            updatedBy = self, updatedTs = 1,
+            virtualAgents = listOf(
+                VirtualAgentMember(
+                    agentId = "e2e-team-lead", hostNodeId = self, name = "e2e-team-lead",
+                    entityType = EntityTypes.TEAM, teamId = "team-e2e", teamName = "e2e-team",
+                    teamMembers = listOf(TeamMemberInfo("m-e2e-coder", "coder", "编码")),
+                ),
+            ),
+        )
+        val pool = groupParticipantRows(SenderIdentityContext(selfNodeId = self, group = seated)).mentionKeys
+        val target = resolvePromptTarget("@e2e-team 干个活", seated, pool, listOf(profile()))
+        val team = assertIs<PromptTarget.Team>(target)
+        assertEquals("team-e2e", team.teamId)
     }
 }

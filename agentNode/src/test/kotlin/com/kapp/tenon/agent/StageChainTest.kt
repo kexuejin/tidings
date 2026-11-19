@@ -917,4 +917,57 @@ class StageChainTest {
             patch.delete(); patch.parentFile.delete()
         }
     }
+
+    @Test
+    fun aSingleShotCardOffersWhoShouldReviewItWhileAChainCardDoesNot() {
+        // 「这活该找谁审」是单兵卡独有的问题：责任链的审查棒本来就在链上，再问一次
+        // 「谁来审」等于把已经答过的题再问一遍。
+        val base = ChainProgress(
+            chainId = "single1",
+            rev = 2,
+            state = "review_ready",
+            title = "修好顶栏溢出",
+            percent = 100,
+        )
+        val chainCard = assertNotNull(StageChain.cardOf(base)["actions"]).toString()
+        assertTrue(chainCard.contains("merge-patch"), "合并仍在：$chainCard")
+        assertFalse(
+            chainCard.contains(StageChain.ACTION_REQUEST_REVIEW),
+            "没有审查员可问就不许出这颗按钮（画一个点不动的出口比不画更糟）：$chainCard",
+        )
+
+        val withReviewer = StageChain.cardOf(
+            base.copy(reviewBy = ChainReviewTarget(token = "qa", name = "质量")),
+        )
+        val actions = assertNotNull(withReviewer["actions"]) as JsonArray
+        assertEquals(3, actions.size, "合并 + 复检 + 打回，三颗（打回是横幅承诺过的出口）：$actions")
+        assertEquals(
+            "merge-patch",
+            (actions[0] as JsonObject)["actionId"]?.toString()?.trim('"'),
+            "合并排在前面 —— 那才是主路径",
+        )
+        val review = actions[1] as JsonObject
+        assertEquals(
+            "review-patch|qa",
+            review["actionId"]?.toString()?.trim('"'),
+            "组员名编进动作串（动作帧只有 cardId + actionId 两个槽）",
+        )
+        assertEquals("card.action.request_review", review["labelKey"]?.toString()?.trim('"'))
+        assertTrue(
+            review["labelArgs"].toString().contains("质量"),
+            "「请谁」必须随卡下来，否则三颗按钮并排时人还得回去翻编制：$review",
+        )
+        assertNull(review["approval"], "复检不是审批门：不给 approval，别把可选动作画成必须点头")
+    }
+
+    @Test
+    fun theReviewActionRoundTripsAndRefusesLookalikeIds() {
+        assertEquals("qa", StageChain.requestReviewTokenOf(StageChain.requestReviewActionId(" qa ")))
+        assertNull(StageChain.requestReviewTokenOf("merge-patch"), "别的动作不许被当成复检")
+        assertNull(StageChain.requestReviewTokenOf("review-patch|"), "空 token 不许派给任何人")
+        assertNull(
+            StageChain.requestReviewTokenOf("review-patched|qa"),
+            "前缀必须整词匹配：错一个字就是「点合并跑了复检」",
+        )
+    }
 }

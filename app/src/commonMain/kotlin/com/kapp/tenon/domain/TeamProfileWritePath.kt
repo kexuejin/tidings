@@ -54,6 +54,7 @@ sealed interface TeamProfileCommand {
         val leaderAgentId: String,
         val members: List<com.kapp.tenon.core.protocol.TeamMemberDraft>,
         val groupIds: List<String>,
+        val description: String = "",
         val teamId: String? = null,
         override val actor: DeclarationActor,
         override val origin: DeclarationOrigin = DeclarationOrigin.AGENT_HUB,
@@ -69,6 +70,7 @@ sealed interface TeamProfileCommand {
         val teamId: String,
         val name: String? = null,
         val members: List<com.kapp.tenon.core.protocol.TeamMemberDraft>? = null,
+        val description: String? = null,
         override val actor: DeclarationActor,
         override val origin: DeclarationOrigin = DeclarationOrigin.AGENT_HUB,
     ) : TeamProfileCommand
@@ -150,6 +152,10 @@ private fun RelayController.createTeam(
     }
     val leader = cmd.leaderAgentId.trim()
     if (leader.isEmpty()) return TeamProfileResult.Rejected(DeclarationRejection.ARGUMENT_INVALID)
+    val description = cmd.description.trim()
+    if (description.length > TeamProfile.MAX_DESCRIPTION_LENGTH) {
+        return TeamProfileResult.Rejected(DeclarationRejection.ARGUMENT_INVALID)
+    }
     if (cmd.members.isEmpty()) return TeamProfileResult.Rejected(DeclarationRejection.ARGUMENT_INVALID)
     val groups = cmd.groupIds.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
     // **「先建档、后加群」是一等路径**（与员工档案的 `Create` 同一条口径）：空群 = 只写档案、
@@ -181,7 +187,9 @@ private fun RelayController.createTeam(
         teamId = teamId,
         name = name,
         leaderAgentId = leader,
-        members = cmd.members.map { TeamMemberInfo(it.agentId, it.name, it.role) },
+        // 人设属于名册的一行（§2②）：草稿的 prompt 随行落档，派单期浇 customPrompt。
+        members = cmd.members.map { TeamMemberInfo(it.agentId, it.name, it.role, it.prompt) },
+        description = description,
         rev = 1,
         updatedTs = nowMillis(),
     )
@@ -204,14 +212,20 @@ private fun RelayController.updateTeam(
     if (newName != null && (newName.isEmpty() || newName.length > Limits.TEAM)) {
         return TeamProfileResult.Rejected(DeclarationRejection.NAME_INVALID)
     }
-    if (newName == null && cmd.members == null) {
+    val description = cmd.description?.trim()
+    if (description != null && description.length > TeamProfile.MAX_DESCRIPTION_LENGTH) {
         return TeamProfileResult.Rejected(DeclarationRejection.ARGUMENT_INVALID)
     }
-    val members = cmd.members?.map { TeamMemberInfo(it.agentId, it.name, it.role) } ?: profile.members
+    if (newName == null && cmd.members == null && description == null) {
+        return TeamProfileResult.Rejected(DeclarationRejection.ARGUMENT_INVALID)
+    }
+    val members = cmd.members?.map { TeamMemberInfo(it.agentId, it.name, it.role, it.prompt) }
+        ?: profile.members
     if (members.isEmpty()) return TeamProfileResult.Rejected(DeclarationRejection.ARGUMENT_INVALID)
     val updated = profile.copy(
         name = newName ?: profile.name,
         members = members,
+        description = description ?: profile.description,
         rev = profile.rev + 1,
         updatedTs = nowMillis(),
     )
@@ -343,6 +357,7 @@ public fun RelayController.saveTeamProfileEntry(
     leaderAgentId: String,
     members: List<com.kapp.tenon.core.protocol.TeamMemberDraft>,
     groupIds: List<String>,
+    description: String = "",
     origin: DeclarationOrigin = DeclarationOrigin.AGENT_HUB,
 ) {
     val self = _state.value.selfNodeId
@@ -354,6 +369,7 @@ public fun RelayController.saveTeamProfileEntry(
                 leaderAgentId = leaderAgentId,
                 members = members,
                 groupIds = groupIds,
+                description = description,
                 actor = actor,
                 origin = origin,
             ),
@@ -364,6 +380,7 @@ public fun RelayController.saveTeamProfileEntry(
                 teamId = teamId,
                 name = name,
                 members = members,
+                description = description,
                 actor = actor,
                 origin = origin,
             ),
@@ -475,12 +492,15 @@ public fun RelayController.dissolveTeamProfileEntry(
  *
  * 名册不重填 —— 这正是「群添加可以直接添加一个团队」与「一个个加人」的差别：
  * 组员随档案过来，群里立刻出现一条团队席位（含领队与全部组员）。
+ *
+ * @return true = 席位真的写进了这个群。**宿主侧动作（blocked 卡的主行动）要拿它决定
+ *   翻不翻面** —— 失败还翻面就是「卡说已处理、群里一个人没多」。
  */
 public fun RelayController.attachTeamToGroupEntry(
     teamId: String,
     groupId: String,
     origin: DeclarationOrigin = DeclarationOrigin.AGENT_HUB,
-) {
+): Boolean {
     val self = _state.value.selfNodeId
     val result = applyTeamProfile(
         TeamProfileCommand.AddToGroups(
@@ -490,7 +510,7 @@ public fun RelayController.attachTeamToGroupEntry(
             origin = origin,
         ),
     )
-    when (result) {
+    return when (result) {
         is TeamProfileResult.Applied ->
             if (result.failedGroupIds.isEmpty()) {
                 info(
@@ -500,6 +520,7 @@ public fun RelayController.attachTeamToGroupEntry(
                         aliasedGroupCount = result.aliasedGroupIds.size,
                     ),
                 )
+                true
             } else {
                 warn(
                     BannerMessage.TeamProfileSaved(
@@ -509,8 +530,12 @@ public fun RelayController.attachTeamToGroupEntry(
                         aliasedGroupCount = result.aliasedGroupIds.size,
                     ),
                 )
+                false
             }
-        is TeamProfileResult.Rejected -> warn(BannerMessage.TeamProfileRejected)
+        is TeamProfileResult.Rejected -> {
+            warn(BannerMessage.TeamProfileRejected)
+            false
+        }
     }
 }
 

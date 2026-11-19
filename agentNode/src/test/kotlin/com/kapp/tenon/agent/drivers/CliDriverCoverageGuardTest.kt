@@ -22,13 +22,27 @@ class CliDriverCoverageGuardTest {
 
     private fun live(path: String): String = GuardSourceScan.stripComments(GuardSourceScan.read(path))
 
-    /** 取函数体（从签名到**行首无缩进**的收尾大括号；when 的收尾有缩进，不会误截）。 */
+    /**
+     * 取函数体：从签名起按**括号配对**收到与之配对的收尾大括号。
+     *
+     * 早先按「行首无缩进的 `}`」截断，只够用在类里独占一行的顶层函数上；换成
+     * `= when (…) { … }` 这种表达式体后，`when` 的收尾也缩进、类收尾才是列 0，
+     * 于是一路吃到文件末尾，把邻居函数也算了进来（守卫会因别人的表而变绿）。
+     */
     private fun bodyOf(source: String, signature: String): String {
         val start = source.indexOf(signature).takeIf { it >= 0 }
             ?: throw AssertionError("找不到函数签名：$signature")
-        val tail = source.substring(start)
-        val end = tail.indexOf("\n}").takeIf { it >= 0 } ?: tail.length
-        return tail.substring(0, end)
+        var depth = 0
+        for (i in start until source.length) {
+            when (source[i]) {
+                '{' -> depth++
+                '}' -> {
+                    depth--
+                    if (depth == 0) return source.substring(start, i + 1)
+                }
+            }
+        }
+        throw AssertionError("函数体没有收尾大括号：$signature")
     }
 
     @Test
@@ -68,11 +82,26 @@ class CliDriverCoverageGuardTest {
 
     @Test
     fun uiDisplayNamesCoverEverySpecKey() {
+        // 回落显示名只有一份手写表：`DriverBrand.displayNameOf`（名册读不到时才用得上）。
+        // 从前 `formatDriverName` 里还抄了一份 `when`，两份表必然漂（`Codex CLI` vs `Codex`），
+        // 所以那份抄件被删了 —— 这张表就是唯一的落点。
         // UI 显示名是通用函数，允许为历史/外部 agentKind 多留映射；但每家内置 CLI 必须有。
-        val code = live("composeApp/src/commonMain/kotlin/com/kapp/tenon/ui/components/TeamRosterDialog.kt")
-        val body = bodyOf(code, "internal fun formatDriverName")
+        val code = live("composeApp/src/commonMain/kotlin/com/kapp/tenon/ui/theme/DriverBrand.kt")
+        val body = bodyOf(code, "fun displayNameOf(driverKey: String): String = when")
         val keys = Regex("\"([a-z0-9]+)\" ->").findAll(body).map { it.groupValues[1] }.toSet()
         val missing = CliDriverSpecs.keys - keys
-        assertTrue(missing.isEmpty(), "formatDriverName 缺了内置 CLI 的友好名：$missing")
+        assertTrue(missing.isEmpty(), "DriverBrand.displayNameOf 缺了内置 CLI 的回落名：$missing")
+
+        // 反向钉子：`formatDriverName` 不许再长出第二份手写表（只许读名册 + 回落这一处）。
+        val roster = live("composeApp/src/commonMain/kotlin/com/kapp/tenon/ui/components/TeamRosterDialog.kt")
+        val format = bodyOf(roster, "internal fun formatDriverName")
+        assertTrue(
+            "DriverBrand.displayNameOf" in format,
+            "formatDriverName 必须回落到 DriverBrand.displayNameOf，别再手写第二份表",
+        )
+        assertTrue(
+            Regex("\"([a-z0-9]+)\" ->").findAll(format).none(),
+            "formatDriverName 里不许再出现手写键表（两份表必然漂）",
+        )
     }
 }

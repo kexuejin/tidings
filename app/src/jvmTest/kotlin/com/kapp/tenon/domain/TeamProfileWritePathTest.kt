@@ -203,6 +203,36 @@ class TeamProfileWritePathTest {
         assertEquals("dsh-lead", seatOf(controller, "g1")?.name, "团队名不是 @ token，不许顶掉领队席位名")
     }
 
+    // ------------------------------------------------------------ 简介是档案的一部分
+
+    @Test
+    fun descriptionRoundTripsThroughCreateAndUpdate() {
+        val controller = controller().also { seed(it) }
+        val created = controller.applyTeamProfile(createCommand().copy(description = "  负责端侧交付  "))
+        assertTrue(created is TeamProfileResult.Applied, "建档应当成功，实际 $created")
+        assertEquals("负责端侧交付", controller.state.value.settings.teamProfiles.single().description)
+
+        controller.applyTeamProfile(
+            TeamProfileCommand.Update(
+                teamId = "tm-test",
+                description = "改后的简介",
+                actor = DeclarationActor.Human(self),
+            ),
+        )
+        assertEquals("改后的简介", controller.state.value.settings.teamProfiles.single().description)
+    }
+
+    @Test
+    fun overlongDescriptionIsRejectedWithoutTouchingTheProfile() {
+        val controller = controller().also { seed(it) }
+        val rejected = controller.applyTeamProfile(
+            createCommand().copy(description = "x".repeat(TeamProfile.MAX_DESCRIPTION_LENGTH + 1)),
+        )
+        assertTrue(rejected is TeamProfileResult.Rejected, "超长简介必须被拒，实际 $rejected")
+        assertEquals(DeclarationRejection.ARGUMENT_INVALID, rejected.reason)
+        assertTrue(controller.state.value.settings.teamProfiles.isEmpty(), "拒绝时一个字都不许落档")
+    }
+
     @Test
     fun renamingKeepsEveryGroupRevisionAdvancing() {
         val controller = controller().also { seed(it) }

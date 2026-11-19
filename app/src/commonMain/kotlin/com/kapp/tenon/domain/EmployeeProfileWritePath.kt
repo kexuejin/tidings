@@ -7,6 +7,7 @@ import com.kapp.tenon.core.protocol.AgentDuties
 import com.kapp.tenon.core.protocol.AgentMemberName
 import com.kapp.tenon.core.protocol.Limits
 import com.kapp.tenon.core.protocol.sameAgent
+import com.kapp.tenon.core.protocol.sameEmployee
 import kotlin.random.Random
 
 /**
@@ -22,14 +23,28 @@ import kotlin.random.Random
  * 各自广播。**不是跨群事务** —— 某群失败不回滚别群，结果里如实带
  * [EmployeeProfileResult.Applied.failedGroupIds]，下次重建收敛。
  *
- * ## 「创建员工」不是「创建 agent」
+ * ## 「创建员工」是「声明 + 配置」，不是「创建 agent」
  *
- * agent 是「这台机器上真的有一个进程在跑」，身份来自宣告；本文件只做**登记 + 命名**。
- * 所以 [Create] 会尽量确认 [EmployeeProfileCommand.Create.agentId] 在本机台账里：
- * 台账**有条目时**必须命中（防止在已知 agent 之外瞎造幽灵员工）；台账为空时放行
- * （手机、冷启动、测试都没有运行时条目 —— 那时拒绝只会让人连名字都存不下来），
- * 界面据此如实提示「该 agent 尚未上报」。
+ * 员工是一份声明，不是等一个进程上线（方案 §2②）：[Create] 按来源档分流预校验 ——
+ * [EmployeeCreationSource.MINT] 只要求 `driverKey` 在该机 `driverCatalog()` 里，不要求
+ * 「有实例在跑」（那正是建人闭环的死锁成因）；[EmployeeCreationSource.REGISTER_EXISTING]
+ * 登记一条**已有**实例，台账有条目时必须命中（防幽灵员工），`driverKey` 缺省由实例键反解一次。
+ * 建出的档案自带 `driverKey` + `model`（配置），`agentId` 只是路由线索（MINT 为空串，
+ * 首次成功派单后由宿主回填，纯观测）。
  */
+/**
+ * 建员工的来源档（方案 §3.3 / §2②）。两档共用 [EmployeeProfileCommand.Create] 与同一份档案
+ * 结构，差别只在**预校验**：
+ *
+ * - [REGISTER_EXISTING]：登记一个**已有** agent —— 台账非空时 agentId 必须命中（防幽灵员工）；
+ * - [MINT]：凭空造一个员工 —— 不要求台账命中（台账非空也能建，这是同底座多人的前提），
+ *   但要求底座在 `driverCatalog()` 里（防建出一个派不出去的底座）。
+ */
+enum class EmployeeCreationSource {
+    REGISTER_EXISTING,
+    MINT,
+}
+
 sealed interface EmployeeProfileCommand {
 
     val actor: DeclarationActor
@@ -40,33 +55,56 @@ sealed interface EmployeeProfileCommand {
      *
      * 不给 [groupIds] = 只建档、不进任何群（「先把人建好，之后再决定进哪个群」）。
      *
-     * @param token `@` 默认 token；null = 由名字派生（`slug(名字)`，空则回落 `kind-职责`），
+     * @param token `@` 默认 token；null = 由名字派生（`slug(名字)`，空则回落 `运行时-职责`），
      *   再在本机档案池里取唯一。给了就必须已是归一形态（否则拒绝，不静默改写）。
+     * @param driverKey 用哪家跑（规范键）。**MINT 必填**且必须在该机 `driverCatalog()` 里；
+     *   REGISTER_EXISTING 可空 —— 空时由 [agentId] 反解一次（老数据兼容，A7），解不出就落空串，
+     *   派单期如实报 `NO_DRIVER`。
+     * @param model 按次选模型；null = 跟随驱动默认。
+     * @param agentId 本机 agent 实例键（路由线索）。**MINT 允许为空**（还没派过单，A1）；
+     *   REGISTER_EXISTING 必须给出。首次成功派单后由宿主回填（纯观测）。
      * @param employeeId 测试可注入；生产传 null 由本机分配（`emp-…`）。
      */
     data class Create(
         val name: String,
-        val agentId: String,
+        val agentId: String = "",
         val duty: String? = null,
         val groupIds: List<String> = emptyList(),
         val agentKind: String? = null,
         val token: String? = null,
         val employeeId: String? = null,
+        val driverKey: String = "",
+        val model: String? = null,
+        /** 来源档；默认登记已有 agent（保持既有调用方行为），MINT 由新建员工表单显式指定。 */
+        val source: EmployeeCreationSource = EmployeeCreationSource.REGISTER_EXISTING,
         override val actor: DeclarationActor,
         override val origin: DeclarationOrigin = DeclarationOrigin.AGENT_HUB,
     ) : EmployeeProfileCommand
 
     /**
-     * 改名 / 改 token / 改职责。改动**对所有引用群同时生效**。
+     * 改名 / 改 token / 改职责 / 换运行时与模型。改动**对所有引用群同时生效**。
      *
      * **改 [name] 默认不动 token**：token 是 `@` 后面要打的东西，一漂群里所有人的输入习惯就断。
      * 要改 token 必须显式给 —— 那是对所有引用群的显式重建（含本群别名）。
+     *
+     * ## [model] 的三态（缺了任何一态都会「改不动」或「悄悄改」）
+     *
+     * - `null` = **这个字段没动**（其余字段照改）；
+     * - 非空串 = 设成这个模型；
+     * - 空串（或 [clearModel]）= **清空**，回到驱动默认。
+     *
+     * 界面把「输入框被清空」发成空串、把「没碰这一栏」发成 null —— 两者不能都发 null，
+     * 否则模型设上去就再也清不掉。换 [driverKey] 而未给 [model] 时模型**一并清空**：
+     * 模型名是驱动私有的（`claude-3-5-sonnet` 喂给 codex 只会失败），沿用旧值不是"保留"是"投毒"。
      */
     data class Update(
         val employeeId: String,
         val name: String? = null,
         val token: String? = null,
         val duty: String? = null,
+        val driverKey: String? = null,
+        val model: String? = null,
+        val clearModel: Boolean = false,
         override val actor: DeclarationActor,
         override val origin: DeclarationOrigin = DeclarationOrigin.AGENT_HUB,
     ) : EmployeeProfileCommand
@@ -145,15 +183,35 @@ private fun RelayController.createEmployee(
         return EmployeeProfileResult.Rejected(DeclarationRejection.NAME_INVALID)
     }
     val agentId = cmd.agentId.trim()
-    if (agentId.isEmpty()) return EmployeeProfileResult.Rejected(DeclarationRejection.ARGUMENT_INVALID)
-    // 一个 agent 在本机只有一份档案：再建就是两份名字抢同一个身份。
-    // 用 sameAgent（前缀归一）而不是精确相等 —— 否则 `dsh` 与 `dsh-029bbbf3` 会落成两份，
-    // 而投影会把它们并到同一张卡上，于是同一张卡出现两个员工名。
-    if (profiles.any { sameAgent(it.agentId, null, agentId) }) {
-        return EmployeeProfileResult.Rejected(DeclarationRejection.EMPLOYEE_EXISTS)
+    // MINT 的 agentId 允许为空（A1：还没派过单，纯路由线索留白）；REGISTER_EXISTING 必须给出
+    // 实例键 —— 它登记的就是「那条已知实例」。
+    if (agentId.isEmpty() && cmd.source != EmployeeCreationSource.MINT) {
+        return EmployeeProfileResult.Rejected(DeclarationRejection.ARGUMENT_INVALID)
     }
-    // 台账**有条目时**必须命中（防止幽灵员工）；空台账放行（手机/冷启动/测试）。
-    if (!agentIsKnownOrUnknown(self, agentId)) {
+    // 配置字段（方案 §0.1-7）：底座是档案里的显式字段，不再从实例键猜。
+    // - MINT：driverKey 必填，且必须在该机 driverCatalog() 里 —— 建档当场校验，
+    //   不建「派不出去」的员工；agentId 不参与校验（不要求「有实例在跑」，那是死锁成因）。
+    // - REGISTER_EXISTING：driverKey 可空 —— 空时由 agentId 反解一次（A7 老数据兼容），
+    //   解不出落空串，派单期如实报 NO_DRIVER（不猜、不回落默认驱动）。
+    val driverKey = cmd.driverKey.trim()
+    val effectiveDriverKey = when (cmd.source) {
+        EmployeeCreationSource.MINT -> {
+            if (driverKey.isEmpty()) return EmployeeProfileResult.Rejected(DeclarationRejection.ARGUMENT_INVALID)
+            if (driverInCatalogOf?.invoke(driverKey) == false) {
+                return EmployeeProfileResult.Rejected(DeclarationRejection.DRIVER_UNAVAILABLE)
+            }
+            driverKey
+        }
+        EmployeeCreationSource.REGISTER_EXISTING ->
+            driverKey.ifBlank { driverKeyResolveOf?.invoke(agentId).orEmpty() }
+    }
+    // 注意：这里**不按 agentId 查重**（三层正交模型，方案 §2② / §3.0）。
+    // 同一底座可以建多个员工（不同名字 / 职责），agentId 只是路由线索、不是身份。
+    // 旧的 `sameAgent` 前缀查重把同底座第二个人判成 EMPLOYEE_EXISTS（洞 E），已删除。
+    // 真正的重复只在下面按 employeeId 精确判断——那是本机分配的身份锚，天然唯一。
+    // - MINT 凭空造人：不查台账（台账非空也能建 —— 这是同底座多人的前提）。
+    // - REGISTER_EXISTING 登记已有 agent：台账有条目时必须命中（防幽灵员工），空台账放行。
+    if (cmd.source == EmployeeCreationSource.REGISTER_EXISTING && !agentIsKnownOrUnknown(self, agentId)) {
         return EmployeeProfileResult.Rejected(DeclarationRejection.EMPLOYEE_UNKNOWN)
     }
 
@@ -166,16 +224,19 @@ private fun RelayController.createEmployee(
         explicit
     } ?: defaultEmployeeToken(
         name = name,
-        agentKind = cmd.agentKind ?: agentKindOf(self, agentId),
+        // token 回落的形状是「运行时-职责」（§0.1-6，如 claude-coder）：MINT 用 driverKey
+        // 当 kind（此时还没有实例键），REGISTER_EXISTING 才有机会用 agentKind/agentId。
+        agentKind = cmd.agentKind ?: effectiveDriverKey.ifBlank { agentKindOf(self, agentId) },
         agentId = agentId,
         duty = cmd.duty,
         taken = taken,
     )
 
     val employeeId = cmd.employeeId?.trim()?.takeIf { it.isNotEmpty() } ?: allocateEmployeeId()
-    if (profiles.any { it.employeeId == employeeId }) {
-        // 注入的 id 撞了既是测试写错，也说明调用方在乱造键：拒绝而不是覆盖别人的档案。
-        return EmployeeProfileResult.Rejected(DeclarationRejection.ARGUMENT_INVALID)
+    if (profiles.any { sameEmployee(it.employeeId, employeeId) }) {
+        // 唯一的撞名：同一个 employeeId 重复建档（精确相等）。同底座第二人是合法的，不在这里拦。
+        // 生产 id 由 allocateEmployeeId 分配、天然唯一；能撞上说明调用方显式复用了别人的键。
+        return EmployeeProfileResult.Rejected(DeclarationRejection.EMPLOYEE_EXISTS)
     }
     val groups = cmd.groupIds.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
     val denied = employeeTargetGroups(self, actorNode, groups)
@@ -187,6 +248,8 @@ private fun RelayController.createEmployee(
         name = name,
         token = token,
         duty = AgentDuties.normalize(cmd.duty),
+        driverKey = effectiveDriverKey,
+        model = cmd.model?.trim()?.takeIf { it.isNotEmpty() },
         rev = 1,
         updatedTs = nowMillis(),
     )
@@ -204,7 +267,7 @@ private fun RelayController.updateEmployee(
 ): EmployeeProfileResult {
     val profile = profiles.byEmployeeId(cmd.employeeId)
         ?: return EmployeeProfileResult.Rejected(DeclarationRejection.EMPLOYEE_UNKNOWN)
-    if (cmd.name == null && cmd.token == null && cmd.duty == null) {
+    if (cmd.name == null && cmd.token == null && cmd.duty == null && cmd.driverKey == null && cmd.model == null && !cmd.clearModel) {
         return EmployeeProfileResult.Rejected(DeclarationRejection.ARGUMENT_INVALID)
     }
     val newName = cmd.name?.trim()
@@ -221,10 +284,24 @@ private fun RelayController.updateEmployee(
             return EmployeeProfileResult.Rejected(DeclarationRejection.NAME_INVALID)
         }
     }
+    val newDriverKey = cmd.driverKey?.trim()?.takeIf { it.isNotEmpty() }
+    if (newDriverKey != null && driverInCatalogOf?.invoke(newDriverKey) == false) {
+        return EmployeeProfileResult.Rejected(DeclarationRejection.DRIVER_UNAVAILABLE)
+    }
+    // 换运行时（且没显式给模型）⇒ 模型一并清空：见 Update 的 KDoc，旧模型名是驱动私有的。
+    val driverChanged = newDriverKey != null && newDriverKey != profile.driverKey
+    val newModel = when {
+        cmd.clearModel -> null
+        cmd.model != null -> cmd.model.trim().takeIf { it.isNotEmpty() }
+        driverChanged -> null
+        else -> profile.model
+    }
     val updated = profile.copy(
         name = newName ?: profile.name,
         token = newToken ?: profile.token,
         duty = cmd.duty?.let { AgentDuties.normalize(it) } ?: profile.duty,
+        driverKey = newDriverKey ?: profile.driverKey,
+        model = newModel,
         rev = profile.rev + 1,
         updatedTs = nowMillis(),
     )
@@ -282,7 +359,11 @@ private fun RelayController.forgetEmployee(
                 groupId = groupId,
                 // 按**席位**的身份键定位（档案里可能是短 id，见 [seatAgentIdFor]）：
                 // 用档案里的字符串去摘，短 id 那档会 SEAT_MISSING —— 引用留着、档案却删了。
-                agentId = seatAgentIdFor(groupId, profile) ?: profile.agentId,
+                // employeeId 随行：同底座两人同群的席位 agentId 相同（kind 级键），
+                // 只按 agentId 定位会摘错人（A4）。
+                agentId = seatAgentIdFor(groupId, profile)
+                    ?: profile.agentId.ifBlank { profile.driverKey },
+                employeeId = profile.employeeId,
                 actor = cmd.actor,
                 origin = cmd.origin,
             ),
@@ -314,6 +395,9 @@ public fun RelayController.saveEmployeeProfileEntry(
     name: String,
     duty: String,
     origin: DeclarationOrigin = DeclarationOrigin.AGENT_HUB,
+    source: EmployeeCreationSource = EmployeeCreationSource.REGISTER_EXISTING,
+    driverKey: String? = null,
+    model: String? = null,
 ) {
     val state = _state.value
     val self = state.selfNodeId
@@ -333,6 +417,9 @@ public fun RelayController.saveEmployeeProfileEntry(
                 duty = duty,
                 groupIds = existingGroups,
                 agentKind = agentKindOf(self, agentId),
+                driverKey = driverKey.orEmpty(),
+                model = model,
+                source = source,
                 actor = actor,
                 origin = origin,
             ),
@@ -343,6 +430,9 @@ public fun RelayController.saveEmployeeProfileEntry(
                 employeeId = employeeId,
                 name = name,
                 duty = duty,
+                driverKey = driverKey,
+                model = model,
+                clearModel = model != null && model.isBlank(),
                 actor = actor,
                 origin = origin,
             ),
@@ -452,16 +542,20 @@ private fun RelayController.attachEmployeeToGroups(
         // 目标席位按**身份**定位：档案里可能是短 id（`dsh`），而席位上写的是完整实例 id
         // （`dsh-029bbbf3`）—— 精确比会把这条席位当成「不存在」，于是就地再建一条，
         // 同一个 agent 在一个群里变成两条席位。见 [seatAgentIdFor]。
+        // MINT 档案没有实例键：席位上落 **kind 级键（= driverKey）**——与派单帧的
+        // `agentId` 语义同源（§2② 证据 2），两个 MINT 员工同底座同群靠席位 `employeeId`
+        // 区分（A4），不靠实例键。
         val seatAgentId = seatAgentIdFor(groupId, profile)
+            ?: profile.agentId.ifBlank { profile.driverKey }
         val result = applyDeclaration(
             GroupDeclarationCommand.AttachEmployee(
                 groupId = groupId,
-                agentId = seatAgentId ?: profile.agentId,
+                agentId = seatAgentId,
                 employeeId = profile.employeeId,
                 employeeName = profile.name,
                 token = profile.token,
                 forceToken = forceToken,
-                agentKind = agentKindOf(self, seatAgentId ?: profile.agentId),
+                agentKind = agentKindOf(self, seatAgentId),
                 duty = profile.duty,
                 baseRev = if (actor is DeclarationActor.Agent) baseRev else null,
                 actor = actor,
@@ -501,11 +595,19 @@ private fun RelayController.groupsReferencingEmployeeIds(employeeId: String): Li
  * 档案里存的可能是短 id（`dsh`，登记时取自卡片聚类的代表键），而席位上写的是完整实例 id
  * （`dsh-029bbbf3`，入驻时由 agent 自报）—— 席位写路径的 `localSeat` 是**精确比**，
  * 拿短 id 去定位会 `SEAT_MISSING`：改名到不了这个群、注销摘不掉这条引用，
- * 而横幅照样是绿的。上一轮修 `planJoinSeat` 时用的是同一条判据（`sameAgent` 归一）。
+ * 而横幅照样是绿的。
  *
- * 两段查找，先精后粗：
- * 1. **认引用**（`employeeId` 相等）—— 最精确，且正是「这条席位属于这份档案」的定义；
- * 2. **认身份**（[sameAgent]）—— 首次挂档案时席位还没有引用，靠它找到那条席位。
+ * **三段判据**（方案 §2②，多于一条时绝不认 —— 那是把 A 的席位给 B 的唯一路径）：
+ *
+ * 1. **认引用**（席位 `employeeId` 相等）—— 最精确，且正是「这条席位属于这份档案」的定义；
+ *    MINT 员工的席位永远带引用，所以这一段对它是常态路径。
+ * 2. **首次挂档案**：无引用且该群本机**恰有一条**席位 `agentId` 精确相等 → 命中；
+ * 3. **同 head 归一**：精确没命中时按 [sameAgent] 再认一次 —— **恰有一条**才认；
+ *    命中多条 = 「席位待确认」，返回 null 不猜（调用方就地再入驻，派单期走
+ *    blocked 卡「去群编制确认」，方案 §4 第 17 条）。
+ *
+ * MINT 档案 [EmployeeProfile.agentId] 为空串：[sameAgent] 对空 wanted fail-closed，
+ * ②③ 天然不命中 —— 没派过单的人没有可认的席位，正确。
  *
  * null = 本群没有它的席位（`AttachEmployee` 会就地入驻）。
  */
@@ -515,8 +617,12 @@ private fun RelayController.seatAgentIdFor(groupId: String, profile: EmployeePro
         .firstOrNull { it.groupId == groupId }
         ?.virtualAgents.orEmpty()
         .filter { it.hostNodeId == self }
-    return seats.firstOrNull { it.employeeId == profile.employeeId }?.agentId
-        ?: seats.firstOrNull { sameAgent(it.agentId, null, profile.agentId) }?.agentId
+    seats.firstOrNull { it.employeeId == profile.employeeId }?.agentId?.let { return it }
+    if (profile.agentId.isBlank()) return null
+    val exact = seats.filter { it.agentId.equals(profile.agentId, ignoreCase = true) }
+    if (exact.size == 1) return exact.single().agentId
+    val same = seats.filter { sameAgent(it.agentId, null, profile.agentId) }
+    return if (same.size == 1) same.single().agentId else null
 }
 
 /** 档案落盘：设置里只此一处写 `employeeProfiles`（守卫 `EmployeeProfileWriteGuardTest` 钉住）。 */
@@ -528,3 +634,33 @@ private fun RelayController.persistEmployeeProfiles(next: List<EmployeeProfile>)
 /** 分配档案键：`emp-` + 时间基 36 进制 + 4 位随机，够本机唯一（不跨机，不需要全局唯一）。 */
 private fun allocateEmployeeId(): String =
     "emp-" + nowMillis().toString(36) + "-" + Random.nextInt(0x1000, 0x10000).toString(16)
+
+/**
+ * MINT 建档内部实现（[RelayController.employeeMintWriter] 的命令面）：
+ * 拒绝枚举回表单字段，不横幅 —— 表单要按字段标错。
+ */
+internal fun RelayController.mintEmployeeEntry(
+    driverKey: String,
+    model: String?,
+    name: String,
+    token: String,
+    duty: String,
+): DeclarationRejection? =
+    when (
+        val result = applyEmployeeProfile(
+            EmployeeProfileCommand.Create(
+                name = name,
+                agentId = "", // MINT：还没派过单（A1），首次成功派单后由宿主回填
+                driverKey = driverKey,
+                model = model,
+                token = token.takeIf { it.isNotBlank() },
+                duty = duty,
+                source = EmployeeCreationSource.MINT,
+                actor = DeclarationActor.Human(_state.value.selfNodeId),
+                origin = DeclarationOrigin.AGENT_HUB,
+            ),
+        )
+    ) {
+        is EmployeeProfileResult.Applied -> null
+        is EmployeeProfileResult.Rejected -> result.reason
+    }

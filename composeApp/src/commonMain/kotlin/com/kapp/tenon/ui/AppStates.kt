@@ -26,6 +26,7 @@ import com.kapp.tenon.ui.theme.ComponentSizes
 import com.kapp.tenon.ui.theme.IconSizes
 import com.kapp.tenon.ui.theme.LocalAppSpacing
 import com.kapp.tenon.ui.components.AppOutlinedButton
+import com.kapp.tenon.ui.components.AppTextButton
 import com.kapp.tenon.ui.components.AppButton
 
 /**
@@ -62,6 +63,11 @@ internal fun EmptyGlyph(icon: Painter, modifier: Modifier = Modifier) {
  * 与 [MessageState]（左对齐，服务错误类）分工：空态是「页面级结论」，
  * 居中排版把它从「一段没排版的文字」变成「有设计感的状态页」。
  * [icon] 传 null 时退化为无图形的居中版——小空态（筛选无结果）不必硬配图标。
+ *
+ * [secondaryLabel]/[onSecondary] 是**第二出路**（方案 §3.1 的空态四档里有三档给了两条）：
+ * 主行动改变判据，副行动是「另一件此刻正当的事」（例如「新建员工」+「执行配置」）。
+ * 层级靠**描边 > 文本**承担，不把主行动改成实心 —— 这个组件被十几个屏调用，
+ * 为一个新参数改既有空态的重心，等于让所有旧空态的视觉一起变。
  */
 @Composable
 fun EmptyState(
@@ -70,6 +76,8 @@ fun EmptyState(
     message: String? = null,
     actionLabel: String? = null,
     onAction: (() -> Unit)? = null,
+    secondaryLabel: String? = null,
+    onSecondary: (() -> Unit)? = null,
     icon: Painter? = null,
 ) {
     Column(
@@ -97,6 +105,9 @@ fun EmptyState(
         }
         if (actionLabel != null && onAction != null) {
             AppOutlinedButton(text = actionLabel, onClick = onAction)
+        }
+        if (secondaryLabel != null && onSecondary != null) {
+            AppTextButton(text = secondaryLabel, onClick = onSecondary)
         }
     }
 }

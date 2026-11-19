@@ -18,7 +18,14 @@ import kotlin.test.assertTrue
  */
 class TeamScaffoldTest {
 
-    private val leaders = setOf("dsh", "codex")
+    // A5/复用契约之后 parse 吃**复用池**：领队候选从池派生（洞 B）。这里的池形状
+    // 等价于旧 leaderKeys（两个可领队者），不测 use 行（那是 TeamScaffoldReuseTest 的事）。
+    private val roster = TeamScaffoldRoster(
+        listOf(
+            TeamScaffoldCandidate("dsh", "L1", "l-dsh", "coder", "dsh"),
+            TeamScaffoldCandidate("codex", "L2", "l-codex", "reviewer", "codex"),
+        ),
+    )
     private val drivers = setOf("dsh", "codex", "claude")
 
     /** 固定 id 生成器：测试只关心形状（m-<slug>-xxxx）与唯一性，不关心随机值。 */
@@ -31,13 +38,23 @@ class TeamScaffoldTest {
         fallbackReviewerDriver: String? = "claude",
     ): TeamScaffoldSpec? = TeamScaffoldParser.parse(
         raw = raw,
-        leaderKeys = leaders,
+        roster = roster,
         driverKeys = drivers,
         fallbackWorkerDriver = fallbackWorkerDriver,
         fallbackReviewerDriver = fallbackReviewerDriver,
         defaultTeamName = "New Team",
         defaultRole = "member",
+        vendorOf = { key -> if (key in drivers) key + "-vendor" else null },
         newAgentId = fixedId,
+    )?.spec
+
+    private fun fallbackRoster(leaderKey: String = "dsh") = TeamScaffoldRoster(
+        listOf(
+            TeamScaffoldCandidate(
+                agentKey = leaderKey, label = "L", token = "l-" + leaderKey, duty = "coder",
+                driverKey = leaderKey,
+            ),
+        ),
     )
 
     @Test
@@ -91,7 +108,7 @@ class TeamScaffoldTest {
     }
 
     @Test
-    fun workerCountIsEnforcedToExactlyOne() {
+    fun workerCountIsAtLeastOneButMayBeMore() {
         val zero = parse(
             "{\"teamName\":\"T\",\"leader\":\"dsh\",\"members\":[" +
                 "{\"name\":\"a\",\"role\":\"r\",\"driver\":\"claude\",\"kind\":\"reviewer\"}," +
@@ -100,14 +117,18 @@ class TeamScaffoldTest {
         assertNotNull(zero)
         assertEquals(listOf("a"), zero.members.filter { it.kind == TeamExecutionKindsUi.WORKER }.map { it.name })
 
+        // 多 worker **保留**：那是点将的候选池（主理人按任务挑一个下场），
+        // 悄悄降级成 reviewer 等于把模型写的「两个都能干」改掉，用户看不到这处改写。
         val many = parse(
             "{\"teamName\":\"T\",\"leader\":\"dsh\",\"members\":[" +
                 "{\"name\":\"a\",\"role\":\"r\",\"driver\":\"dsh\",\"kind\":\"worker\"}," +
                 "{\"name\":\"b\",\"role\":\"r\",\"driver\":\"codex\",\"kind\":\"worker\"}]}",
         )
         assertNotNull(many)
-        assertEquals(listOf("a"), many.members.filter { it.kind == TeamExecutionKindsUi.WORKER }.map { it.name })
-        assertEquals(TeamExecutionKindsUi.REVIEWER, many.members.first { it.name == "b" }.kind)
+        assertEquals(
+            listOf("a", "b"),
+            many.members.filter { it.kind == TeamExecutionKindsUi.WORKER }.map { it.name },
+        )
     }
 
     @Test
@@ -196,10 +217,11 @@ class TeamScaffoldTest {
         val spec = assertNotNull(
             TeamScaffoldFallback.template(
                 need = "weather app prototype",
-                leaderAgentId = "dsh",
+                roster = fallbackRoster("dsh"),
                 workerDriver = "codex",
                 reviewerDriver = "claude",
                 defaults = TeamScaffoldDefaults(teamTitle = "Team", role = "member"),
+                vendorOf = { key -> if (key in drivers) key + "-vendor" else null },
                 newAgentId = fixedId,
             ),
         )
@@ -221,10 +243,11 @@ class TeamScaffoldTest {
         val spec = assertNotNull(
             TeamScaffoldFallback.template(
                 need = "weather app prototype",
-                leaderAgentId = "dsh",
+                roster = fallbackRoster("dsh"),
                 workerDriver = "codex",
                 reviewerDriver = "claude",
                 defaults = TeamScaffoldDefaults(teamTitle = "Team", role = "member"),
+                vendorOf = { key -> if (key in drivers) key + "-vendor" else null },
                 newAgentId = fixedId,
             ),
         )
@@ -255,7 +278,7 @@ class TeamScaffoldTest {
             TeamScaffoldParser.parse(
                 raw = "{\"teamName\":\"\",\"leader\":\"dsh\",\"members\":" +
                     "[{\"name\":\"a\",\"role\":\"r\",\"driver\":\"dsh\",\"kind\":\"worker\"}]}",
-                leaderKeys = leaders,
+                roster = roster,
                 driverKeys = drivers,
                 fallbackWorkerDriver = "codex",
                 fallbackReviewerDriver = "claude",
@@ -288,10 +311,11 @@ class TeamScaffoldTest {
         )
         val spec = TeamScaffoldFallback.template(
             need = "make an android app",
-            leaderAgentId = "dsh",
+            roster = fallbackRoster("dsh"),
             workerDriver = "codex",
             reviewerDriver = "claude",
             defaults = defaults,
+            vendorOf = { key -> if (key in drivers) key + "-vendor" else null },
             newAgentId = fixedId,
         )
         assertNotNull(spec)
@@ -309,10 +333,11 @@ class TeamScaffoldTest {
         seq = 0
         val again = TeamScaffoldFallback.template(
             need = "make an android app",
-            leaderAgentId = "dsh",
+            roster = fallbackRoster("dsh"),
             workerDriver = "codex",
             reviewerDriver = "claude",
             defaults = defaults,
+            vendorOf = { key -> if (key in drivers) key + "-vendor" else null },
             newAgentId = fixedId,
         )
         assertEquals(spec.members.map { it.name }, again?.members?.map { it.name })
@@ -322,9 +347,10 @@ class TeamScaffoldTest {
     fun fallbackWithoutUsableDriverPairRefuses() {
         assertNull(
             TeamScaffoldFallback.template(
-                need = "n", leaderAgentId = "dsh", workerDriver = "",
+                need = "n", roster = fallbackRoster("dsh"), workerDriver = "",
                 reviewerDriver = "claude",
                 defaults = TeamScaffoldDefaults(teamTitle = "T", role = "member"),
+                vendorOf = { key -> if (key in drivers) key + "-vendor" else null },
                 newAgentId = fixedId,
             ),
         )

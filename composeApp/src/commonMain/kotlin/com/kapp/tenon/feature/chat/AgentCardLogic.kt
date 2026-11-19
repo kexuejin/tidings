@@ -81,6 +81,10 @@ object CardTypeRegistry {
         // 求方向卡（`askPrototypeDirection`）：横幅问「调整还是新任务」，两个按钮是唯一出口。
         // 不走 options —— options 装的是「回给 agent 的预设文本」，装不下「去向」语义。
         "direction-ask" to setOf(CardBlock.Banner, CardBlock.ButtonGroup),
+        // 支线任务卡（`AssistantQuestCardPayload`）：横幅报进度/结论，步骤块给阶段，
+        // 按钮组是它的动作面（打开作战室 / 调整 / 合并 / 取消 / 重试）。缺这一档的后果
+        // 与其它几类相同 —— 徽标印英文原文，且注册表与徽标守卫对不上。
+        "assistant_quest" to setOf(CardBlock.Banner, CardBlock.StepList, CardBlock.ButtonGroup),
     )
 
     /** 查建议构成；未知 type（含 null / 空白）返回 null = 没有建议，不是拒绝。 */
@@ -254,9 +258,44 @@ const val SYSTEM_ACTION_REJECT_REVISION = "reject-revision"
  * 的 `isActionVisible`）—— 没落到就整颗不画，不留死按钮。
  */
 const val SYSTEM_ACTION_OPEN_PROTOTYPE = "open-prototype"
+const val SYSTEM_ACTION_BIND_WORKSPACE = "bind-workspace"
 
 /** 这条动作是否由客户端本地兑现（是 ⇒ 不置 pending、不派发给宿主）。 */
-fun isLocalCardAction(actionId: String): Boolean = actionId == SYSTEM_ACTION_OPEN_PROTOTYPE
+fun isLocalCardAction(actionId: String): Boolean =
+    actionId == SYSTEM_ACTION_OPEN_PROTOTYPE || actionId == SYSTEM_ACTION_BIND_WORKSPACE
+
+/** 一颗卡片动作按钮的三档色彩语义；判定是纯函数，渲染端只消费结果。 */
+enum class CardActionTone { Danger, Primary, Neutral }
+
+/**
+ * 动作按钮此刻的色彩档。纯函数：入参即全部事实，不读时钟、不读全局、不碰渲染。
+ *
+ * 显式 `style` 优先于 actionId 推断：熔断自愈的「补充指示并重试」复用
+ * `reject-revision` 这个 id（为蹭既有抽屉展开），但标了 `primary` —— 若按 id
+ * 判成危险档，纠偏动作会被画成带关闭叉的红按钮，语义正好反了。真·打回修订
+ * （无显式 style）仍是危险档；只有发出方明确写了 style 时才覆盖 id 推断。
+ */
+fun cardActionToneOf(
+    actionId: String,
+    style: String?,
+    approval: Boolean,
+    cardState: String?,
+): CardActionTone {
+    val explicit = style?.takeIf { it == "danger" || it == "primary" }
+    val isDanger = when (explicit) {
+        "danger" -> true
+        "primary" -> false
+        else -> actionId == SYSTEM_ACTION_ABORT_TASK ||
+            actionId == SYSTEM_ACTION_REJECT_REVISION ||
+            actionId.startsWith("$SYSTEM_ACTION_REJECT_REVISION|")
+    }
+    if (isDanger) return CardActionTone.Danger
+    val retryIds = setOf("retry", "retry-quest", "retry_quest")
+    val isPrimary = approval ||
+        explicit == "primary" ||
+        ((cardState == "blocked" || cardState == "timeout") && actionId in retryIds)
+    return if (isPrimary) CardActionTone.Primary else CardActionTone.Neutral
+}
 
 /**
  * 卡上网页原型**此刻**的可打开路径（纯函数）。

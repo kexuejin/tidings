@@ -26,6 +26,12 @@ data class FlightRecord(
     val metrics: FlightMetrics,
     val phases: List<FlightPhase> = emptyList(),
     val hostEvidence: FlightEvidence,
+    /**
+     * 这次责任链是**谁定的形状**：Planner 的裁决、还是回落编译固定链（以及为什么回落）。
+     * 没有它，「为什么这次没有审查棒」只能靠猜 —— 而 0 审查棒是合法形状，
+     * 合法的事更需要有据可查。老记录缺该键按 null 渲染。
+     */
+    val planDecision: FlightPlanDecision? = null,
     /** 超 64 KiB 时丢弃可选字段并置 true；JSON 始终可解析。 */
     val truncated: Boolean = false,
 ) {
@@ -70,9 +76,18 @@ data class FlightRecord(
             val sanitizedEvidence = record.hostEvidence.copy(
                 testCommand = record.hostEvidence.testCommand?.let { sanitize(it, userHome) },
             )
+            val sanitizedPlan = record.planDecision?.let { decision ->
+                decision.copy(
+                    rationale = decision.rationale?.let { sanitize(it, userHome).take(400) },
+                    // 承办人名与理由同源（都来自名册/模型），同样可能被写进奇怪内容：
+                    // 落盘前走同一道脱敏，长度按「一个显示名」封顶。
+                    workerName = decision.workerName?.let { sanitize(it, userHome).take(80) },
+                )
+            }
             val sanitized = record.copy(
                 targetDirectory = sanitize(record.targetDirectory, userHome),
                 hostEvidence = sanitizedEvidence,
+                planDecision = sanitizedPlan,
             )
             val encoded = json.encodeToString(sanitized)
             if (encoded.encodeToByteArray().size <= MAX_RECORD_BYTES) return encoded
@@ -114,12 +129,64 @@ data class FlightPhase(
     val status: String,
 )
 
+/**
+ * 责任链形状的决策留痕（见 [FlightRecord.planDecision]）。
+ *
+ * `source` 只放机器可读的分类码，不放人话：卡面/报表要换语言，落盘的事实不该跟着换。
+ */
+@Serializable
+data class FlightPlanDecision(
+    val source: String,
+    val stageCount: Int,
+    val reviewerCount: Int,
+    val rationale: String? = null,
+    /**
+     * 这一单**实际下场**的人（链首那一棒）。点将之后它与 [anchorAgentId] 可能不是同一个
+     * —— 不记下来，「为什么这次跑的是 B 不是 A」只剩日志能答。
+     */
+    val workerAgentId: String? = null,
+    /** 承办人显示名（群声明名；取不到时才回落 agentId）。 */
+    val workerName: String? = null,
+    /**
+     * `@` 命中的那个锚点（用户点的 / 默认落点）。[workerAgentId] 与它不等 =
+     * 主理人换了人，卡面必须说出来，否则换人是静默的。
+     */
+    val anchorAgentId: String? = null,
+) {
+    companion object {
+        /** Planner 的裁决被采纳（含它裁出 0 审查棒）。 */
+        const val SOURCE_LLM: String = "llm"
+
+        /** Planner 给了建议，但被形状门 / 下游硬门否掉，回落编译固定链。 */
+        const val SOURCE_FALLBACK_GATE: String = "fallback_gate"
+
+        /** 没有裁决可用：没装配 Planner、无凭证、超时、解析失败。 */
+        const val SOURCE_FALLBACK_UNAVAILABLE: String = "fallback_unavailable"
+
+        /** 这次派单不经过 Planner（命中 reviewer 的纯审查、单席位等）。 */
+        const val SOURCE_COMPILED: String = "compiled"
+    }
+}
+
 @Serializable
 data class FlightEvidence(
     val testCommand: String? = null,
     val finalExitCode: Int? = null,
     val verifiedBy: String,
 )
+
+/**
+ * 同一份事实的**下行形态**：链执行器在 `:agentNode`，不能反过来依赖本模块
+ * （见 [com.kapp.tenon.agent.ChainPlanTrace]）。判据与取值域仍只住 [FlightPlanDecision]。
+ */
+fun FlightPlanDecision.toChainTrace(): com.kapp.tenon.agent.ChainPlanTrace =
+    com.kapp.tenon.agent.ChainPlanTrace(
+        source = source,
+        rationale = rationale,
+        workerAgentId = workerAgentId,
+        workerName = workerName,
+        anchorAgentId = anchorAgentId,
+    )
 
 /**
  * 宿主飞行记录持久化落地与保留上限治理。

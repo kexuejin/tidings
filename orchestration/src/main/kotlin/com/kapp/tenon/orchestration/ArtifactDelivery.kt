@@ -86,7 +86,7 @@ internal class ArtifactDelivery(
      * **只在编排器确实不认得这张卡时才翻** —— 各动作分支自己的 false 可能只是
      * 时序竞争（倒计时抢先开工），真实状态卡马上就到，翻「失效」反而是说谎。
      */
-    internal fun flipStaleChainCard(cardId: String, agentId: String) {
+    internal fun flipStaleChainCard(cardId: String, agentId: String, hint: String? = null) {
         if (!cardId.startsWith("chain-")) return
         if (tickets()?.hasTicketForCard(cardId) == true) return
         val row = controller.state.value.messages.values
@@ -104,7 +104,11 @@ internal class ArtifactDelivery(
         val staleCard = BoardCardFlip.stale(
             cardId = cardId,
             base = row.renderCard,
-            hint = "该工单已结束或宿主已重启，此操作未生效",
+            // 翻面横幅必须**如实**：默认措辞答的是「工单已结束/宿主重启」，但链工单
+            // 的「重试」接不住时真因是**链执行器不支持该动作**（工单活着，卡上那行
+            // 「可重试或补充说明」是卡面承诺）。真机 UX 轮现场：链受阻卡上点
+            // 「重新运行」，卡翻成「已结束」—— 工单明明活着，用户被骗去重启宿主。
+            hint = hint ?: "该工单已结束或宿主已重启，此操作未生效",
         ).toString()
         publishCardNow(groupId, agentId, staleCard)
         RelayLog.info("RELAY-INVOKE", "stale card flipped to aborted (card " + cardId + ")")

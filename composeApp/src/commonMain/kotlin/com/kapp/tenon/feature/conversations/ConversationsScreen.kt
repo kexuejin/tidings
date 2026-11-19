@@ -68,7 +68,6 @@ import com.kapp.tenon.generated.resources.conv_subtitle_unread
 import com.kapp.tenon.generated.resources.conv_search_hint_global
 import com.kapp.tenon.generated.resources.ic_search
 import com.kapp.tenon.generated.resources.ic_more
-import com.kapp.tenon.ui.components.AppBanner
 import com.kapp.tenon.ui.components.GroupCreateDialog
 import com.kapp.tenon.ui.components.LargeTitleBar
 import com.kapp.tenon.ui.components.TitleBarDivider

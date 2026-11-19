@@ -261,12 +261,20 @@ data class VirtualAgentMember(
     val employeeName: String? = null,
 )
 
-/** 团队组员（仅展示与内部调度用；不参与成员判定与权限，越界键由解码侧丢弃）。 */
+/**
+ * 团队组员（仅展示与内部调度用；不参与成员判定与权限，越界键由解码侧丢弃）。
+ *
+ * [prompt] 是**团队范围**的人设提示词（方案 §2② / §3.4.1）：人设属于名册的一行，
+ * 不属于员工档案（同一员工在两支队里可以有两个人设）。派单期按目录建执行档时，
+ * 它浇进执行档成员的 `customPrompt` 初值；可空 = 没写人设（执行档回落默认模板）。
+ * group 帧无字段白名单，老节点读到多余键按宽容解码忽略。
+ */
 @Serializable
 data class TeamMemberInfo(
     val agentId: String,
     val name: String,
     val role: String,
+    val prompt: String? = null,
 )
 
 /**

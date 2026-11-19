@@ -64,15 +64,18 @@ class GroupMentionDispatchWiringGuardTest {
 
     @Test
     fun singleWorkerFallbackHonoursTheAddressedDriver() {
+        // A5 之后驱动解析收口进 dispatchSingleWorker（执行档 > 员工档案 > 键归一 > 拒绝）：
+        // handlePrompt 必须**点名原文原样下传**——先 resolveKey 再丢 null 的旧写法会把
+        // 「档案配了底座」的席位打回默认驱动。
         val body = handlePromptBody()
-        assertTrue(
-            body.contains("AgentProfiles.resolveKey(it, availableAgentKeys().orEmpty())"),
-            "席位全名要归位成在位档案键，否则点名 dsh 的单会派给默认驱动",
-        )
         val fallback = body.lineSequence().firstOrNull { it.contains("dispatchSingleWorker(") }
         assertTrue(
-            fallback != null && fallback.contains("mentionedDriver") && fallback.contains("wsId"),
-            "群单棒兜底必须把解析出的驱动与 wsId 一起向下传（实际：$fallback）",
+            fallback != null && fallback.contains("mentionedAgentKey") && fallback.contains("wsId"),
+            "群单棒兜底必须把点名原文与 wsId 一起向下传（解析在 dispatchSingleWorker 收口）（实际：$fallback）",
+        )
+        assertFalse(
+            fallback!!.contains("resolveKey"),
+            "handlePrompt 不许再自行 resolveKey（双处解析必然漂移，A5 收口的反面）",
         )
     }
 }

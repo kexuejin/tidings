@@ -282,25 +282,39 @@ object CodecMsg {
         agentState: String? = null,
         /** 声明式卡片负载（可选）。见 `GroupTextMsgPayload.card` 的预算与拒绝纪律。 */
         card: JsonObject? = null,
-    ): JsonElement = wireJson.encodeToJsonElement(
-        GroupTextMsgPayload.serializer(),
-        GroupTextMsgPayload(
-            kind = MsgKinds.GROUP_TEXT,
-            text = text,
-            groupId = groupId,
-            groupRev = groupRev,
-            mentions = mentions,
-            resend = resend,
-            replyTo = replyTo,
-            senderId = senderId,
-            agentSessionId = agentSessionId,
-            agentCursor = agentCursor,
-            agentSessionTitle = agentSessionTitle,
-            agentIntent = agentIntent,
-            agentState = agentState,
-            card = card,
-        ),
-    )
+    ): JsonElement {
+        // **会话归属必须成对**（与下面 recall 的 groupId/groupRev 同一条纪律，同一处收口）：
+        // `validateMsg` 对 group-text 只认「两个都有」或「两个都没有」，只给 sessionId
+        // 的帧**每一个接收端都会整帧拒收** —— 而发送侧编码成功、本地落库成功，症状是
+        // 「手机端怎么没收到」（真机现场：终态卡的广播 acked=false → 入队 → 重放自解码
+        // 也拒 → 从队列删除并标 failed，卡片在发起方的界面上永远不翻面）。
+        // 把判据放在**唯一构造点**：任何调用方再拼出这种帧，在这里就炸，而不是在对端
+        // 静默消失。`hasExtendedKeys` 的 `(sessionId != null && cursor != null)` 与本条
+        // 判据同源 —— 那边漏改不会绕过这里。
+        require((agentSessionId == null) == (agentCursor == null)) {
+            "group-text session attribution must be paired: agentSessionId and agentCursor " +
+                "must be given together (or neither) — an unpaired frame is rejected by every receiver"
+        }
+        return wireJson.encodeToJsonElement(
+            GroupTextMsgPayload.serializer(),
+            GroupTextMsgPayload(
+                kind = MsgKinds.GROUP_TEXT,
+                text = text,
+                groupId = groupId,
+                groupRev = groupRev,
+                mentions = mentions,
+                resend = resend,
+                replyTo = replyTo,
+                senderId = senderId,
+                agentSessionId = agentSessionId,
+                agentCursor = agentCursor,
+                agentSessionTitle = agentSessionTitle,
+                agentIntent = agentIntent,
+                agentState = agentState,
+                card = card,
+            ),
+        )
+    }
 
     /**
      * 撤回指令：`{kind:"recall", targetId}`，群聊再加 `groupId`/`groupRev`。

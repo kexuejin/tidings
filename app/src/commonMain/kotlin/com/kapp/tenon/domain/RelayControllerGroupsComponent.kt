@@ -677,13 +677,23 @@ fun handleSendToGroup(
         // **先解析目标，再决定执不执行**（团队执行方案 §4.2）：@ 的是席位还是组员？
         // 组员 ⇒ 目标宿主就是该席位宿主（targetHostIsSelf 路由，§4.5）。
         val self = host.state.value.selfNodeId
-        val promptTarget = resolvePromptTarget(body, meta, routeFacts.agentKinds)
+        // §4-8b：档案 token 只进路由池（同 handleOnInbound 的口径）。
+        val profileTokens = TeamProfileMention.mentionTokensOf(host.state.value.settings.teamProfiles)
+        val promptTarget = resolvePromptTarget(
+            body, meta,
+            routeFacts.agentKinds + profileTokens,
+            host.state.value.settings.teamProfiles,
+        )
         val targetHostIsSelf = when (promptTarget) {
             is PromptTarget.Seat -> promptTarget.hostNodeId == self
             is PromptTarget.Member -> promptTarget.hostNodeId == self
             is PromptTarget.Team -> promptTarget.hostNodeId == self
-            else -> null
+                    // 未入驻团队的档案在本机（§4-8b）。
+        is PromptTarget.ProfileTeam -> true
+        else -> null
         }
+        // 唤醒判定同用扩展池（§4-8b：手打未入驻队名也要唤醒路由）。
+        val wakePool = routeFacts.agentKinds + profileTokens
         val route = RelayController.agentPromptRoute(
             text = body,
             groupId = groupId,
@@ -691,7 +701,7 @@ fun handleSendToGroup(
             repliedToIsAgent = repliedToIsAgent,
             localAgentPresent = routeFacts.localAgentPresent,
             remoteAgentPresent = routeFacts.remoteAgentPresent,
-            agentKinds = routeFacts.agentKinds,
+            agentKinds = wakePool,
             targetHostIsSelf = targetHostIsSelf,
         )
         // §7.2：未唤醒且群里有 agent ⇒ 记一条 NO_WAKE（判据在 logNoWakeIfNeeded 里）。
@@ -709,7 +719,7 @@ fun handleSendToGroup(
         } else if (route == AgentPromptRoute.Local) {
             val prompt = RelayController.extractAgentPrompt(body, routeFacts.agentKinds)
             // 与收方触发点同口径：点名事实从原文取，剥 @ 之后的 prompt 里已经没有它。
-            val mentionedAgentKey = RelayController.mentionedAgentKeys(body, routeFacts.agentKinds).firstOrNull()
+            val mentionedAgentKey = addressedAgentKey(promptTarget, body, routeFacts.agentKinds)
             host.scope.launch {
                 host.onAgentPrompt?.invoke(ConvId.group(groupId), self, prompt, null, mentionedAgentKey)
             }
@@ -1097,6 +1107,8 @@ fun RelayController.handleSetGroupTeamDeclaration(
             DeclarationRejection.ARGUMENT_INVALID,
             DeclarationRejection.BASE_REV_REQUIRED,
             DeclarationRejection.PERSIST_REJECTED,
+            // MINT 底座不在位的拒绝由档案写路径自己的横幅回报；SetTeamRoster 不建档，静默即可。
+            DeclarationRejection.DRIVER_UNAVAILABLE,
             -> Unit
         }
     }

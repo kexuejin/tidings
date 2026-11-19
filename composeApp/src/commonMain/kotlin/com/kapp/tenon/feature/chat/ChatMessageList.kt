@@ -78,6 +78,16 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 
 /**
+ * 本机乐观置灰的存活上限：点下审批按钮后若在此时长内没等到宿主判定帧，
+ * 就把按钮恢复成可点。
+ *
+ * 无定时器、不读系统时钟 —— 渲染时拿会话已有的 `now` 时钟逐个相减，纯函数、可截帧。
+ * 与域层派单截止时间 `ACTION_INVOKE_DEADLINE_MS` 同档：过了派单截止还没判定，
+ * 继续挂着「等待宿主确认」只会把按钮永久锁死（宿主拒绝只发 result 帧、不翻 rev 卡）。
+ */
+private const val CARD_ACTION_PENDING_TTL_MS: Long = 15_000L
+
+/**
  * 消息列表主体（ARP-14 后半 · ChatScreen 最后一块 god 区）。
  *
  * 内容 = 空态 + LazyColumn（时间/会话分隔线、卡片折叠、气泡、历史加载条）
@@ -124,7 +134,7 @@ internal fun ChatMessageList(
     previewingImagePathState: MutableState<String?>,
     replyingToMessageState: MutableState<MessageUi?>,
     lastRecalledTextState: MutableState<String?>,
-    pendingCardActionsState: MutableState<Set<String>>,
+    pendingCardActionsState: MutableState<Map<String, Long>>,
     draftState: MutableState<String>,
 ) {
     // ChatScreen 顶部的本地解包（actions 同名回调）与五个回写状态的 var 委托：
@@ -293,7 +303,12 @@ internal fun ChatMessageList(
                                 }
                                 AgentCardBubble(
                                     card = card,
-                                    pendingActions = pendingCardActions,
+                                    // TTL 回收：超时的乐观置灰视同没点过，按钮恢复可点。
+                                    // 用会话已有的 now 时钟判断，不读系统时钟、无定时器。
+                                    pendingActions = pendingCardActions
+                                        .filterValues { at -> now - at < CARD_ACTION_PENDING_TTL_MS }
+                                        .keys
+                                        .toSet(),
                                     // D7：decidedBy（拍板节点的 nodeId）走与气泡同一套名字
                                     // 解析 —— 气泡口径（裸 nodeId = 人）正是这行的口径：
                                     // 拍板的是"人点了按钮"，不是那台机器上的 agent。
@@ -314,8 +329,20 @@ internal fun ChatMessageList(
                                     // 「在浏览器打开原型」是**本地动作**：产物还没落到本机时
                                     // 整颗不画（画一颗点了没反应的比没有更糟）。
                                     isActionVisible = { action ->
-                                        action.actionId != SYSTEM_ACTION_OPEN_PROTOTYPE ||
-                                            prototypeSavedPathOf(card, savedPathOf) != null
+                                        when (action.actionId) {
+                                            // 原型入口：产物没落到本机就整颗不画。
+                                            SYSTEM_ACTION_OPEN_PROTOTYPE ->
+                                                prototypeSavedPathOf(card, savedPathOf) != null
+                                            // 合并按钮：卡上没有 diff 摘要、也没有 patch.diff 产物
+                                            // 条目 ⇒ 这张卡本就没有可合并的东西（零补丁收尾的
+                                            // 卡被人为挂上 merge 的历史形态）。画一颗点了只会
+                                            // 得到 Conflict 的按钮比没有更糟。磁盘事后被删仍由
+                                            // 宿主点击时的 ref==null 兜底，这里只拦"卡本身没产物"。
+                                            SYSTEM_ACTION_MERGE_PATCH ->
+                                                card.diff != null ||
+                                                    card.artifacts.any { it.name == "patch.diff" }
+                                            else -> true
+                                        }
                                     },
                                     // 会话里已经有一份时钟（屏幕协助卡在用同一个）：
                                     // 过期子态跟着它走，组件自己不读表 —— 可测、可截帧。
@@ -333,7 +360,9 @@ internal fun ChatMessageList(
                                             } else {
                                                 null
                                             }
-                                            if (localPath != null) {
+                                            if (actionId == SYSTEM_ACTION_BIND_WORKSPACE) {
+                                                dispatch(peer.nodeId, card, actionId)
+                                            } else if (localPath != null) {
                                                 // 本地兑现：不置 pending（宿主不会回这一帧，
                                                 // 置灰会永久留着），也不派发（宿主没有这条语义，
                                                 // 发过去只会被丢并顺手把卡翻成 stale）。
@@ -341,7 +370,7 @@ internal fun ChatMessageList(
                                             } else {
                                                 // 本机乐观置灰先行（§5.3）：即使动作派发失败，
                                                 // 「我点过了」也是本机事实；宿主判定到达后三态接管。
-                                                pendingCardActions = pendingCardActions + "${card.cardId}|$actionId"
+                                                pendingCardActions = pendingCardActions + ("${card.cardId}|$actionId" to now)
                                                 dispatch(peer.nodeId, card, actionId)
                                             }
                                         }
@@ -362,7 +391,17 @@ internal fun ChatMessageList(
                                 modifier = Modifier.fillMaxWidth(),
                                 contentAlignment = if (message.mine) Alignment.CenterEnd else Alignment.CenterStart,
                             ) {
-                                AgentStateBannerRow(state = state.orEmpty(), text = message.text)
+                                AgentStateBannerRow(
+                                    state = state.orEmpty(),
+                                    text = message.text,
+                                    // §4 #7：失败横幅带被 @ 的 agent 名 ⇒ 给「申请授权」一颗
+                                    // 能寻址的按钮（与「@ 了没执行」通知行的入口同一套流程）。
+                                    onRequestGrant = message.mentions.firstOrNull()
+                                        ?.takeIf { it.isNotBlank() && state == "failed" }
+                                        ?.let { agentName ->
+                                            actions.onRequestAgentGrant?.let { cb -> { cb(agentName) } }
+                                        },
+                                )
                             }
                         } else {
                             // S21 退档：卡片负载读不出来时，原文照常按普通消息渲染。

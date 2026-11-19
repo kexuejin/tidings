@@ -120,12 +120,16 @@ class EmployeeProfileWritePathTest {
         token: String? = null,
         employeeId: String = "emp-test",
         agentId: String = "dsh",
+        driverKey: String = "",
+        model: String? = null,
     ) = EmployeeProfileCommand.Create(
         name = name,
         agentId = agentId,
         groupIds = groupIds,
         token = token,
         employeeId = employeeId,
+        driverKey = driverKey,
+        model = model,
         actor = DeclarationActor.Human(self),
     )
 
@@ -585,17 +589,30 @@ class EmployeeProfileWritePathTest {
     // ------------------------------------------------------------ 拒绝面
 
     @Test
-    fun aSecondProfileForTheSameAgentIsRejected() {
+    fun aSecondProfileForTheSameEmployeeIdIsRejected() {
         val controller = controller().also { seed(it) }
         controller.applyEmployeeProfile(createCommand(groupIds = emptyList()))
+        // 终案：撞名只按 employeeId 精确相等；同底座（agentId 都是 dsh）本身不是重复。
+        // 这里显式复用同一个 employeeId（emp-test）才该被拒。
         val second = controller.applyEmployeeProfile(
-            createCommand(groupIds = emptyList(), name = "小李", employeeId = "emp-2"),
+            createCommand(groupIds = emptyList(), name = "小李", employeeId = "emp-test"),
         )
         assertEquals(
             DeclarationRejection.EMPLOYEE_EXISTS,
             (second as? EmployeeProfileResult.Rejected)?.reason,
-            "一个 agent 只能有一份档案；要改名走 Update",
+            "同一个 employeeId 重复建档才拒；要改名走 Update",
         )
+    }
+
+    @Test
+    fun aSecondProfileOnTheSameDriverIsAllowed() {
+        val controller = controller().also { seed(it) }
+        controller.applyEmployeeProfile(createCommand(groupIds = emptyList(), employeeId = "emp-a"))
+        // 同底座 dsh 建第二个员工（不同 employeeId）—— 终案下合法（三层正交模型 §2②）。
+        val second = controller.applyEmployeeProfile(
+            createCommand(groupIds = emptyList(), name = "小李", employeeId = "emp-b"),
+        )
+        assertTrue(second is EmployeeProfileResult.Applied, "同底座第二人必须能建：$second")
     }
 
     @Test
@@ -656,6 +673,110 @@ class EmployeeProfileWritePathTest {
             DeclarationRejection.ARGUMENT_INVALID,
             (result as? EmployeeProfileResult.Rejected)?.reason,
             "一个字段都没给的更新是调用方拼错了，不许静默成功",
+        )
+    }
+
+    @Test
+    fun updatingDriverKeyAndModelPreservesEmployeeIdAndExistingSeats() {
+        val controller = controller().also { seed(it) }
+        controller.applyEmployeeProfile(
+            createCommand(
+                groupIds = listOf("g1"),
+                employeeId = "emp-p3",
+                driverKey = "claude",
+                model = "claude-3-5-sonnet",
+            ),
+        )
+        val initialProfile = controller.state.value.settings.employeeProfiles.single { it.employeeId == "emp-p3" }
+        assertEquals("claude", initialProfile.driverKey)
+        assertEquals("claude-3-5-sonnet", initialProfile.model)
+
+        // 切换运行时与模型：只改 driverKey 和 model，employeeId 终身不变
+        val updateResult = controller.applyEmployeeProfile(
+            EmployeeProfileCommand.Update(
+                employeeId = "emp-p3",
+                driverKey = "codex",
+                model = "gpt-4o",
+                actor = DeclarationActor.Human(self),
+            ),
+        )
+        assertNotNull(updateResult as? EmployeeProfileResult.Applied)
+        val updatedProfile = controller.state.value.settings.employeeProfiles.single { it.employeeId == "emp-p3" }
+        assertEquals("emp-p3", updatedProfile.employeeId)
+        assertEquals("codex", updatedProfile.driverKey)
+        assertEquals("gpt-4o", updatedProfile.model)
+
+        // 既有席位仍然保持引用
+        val seat = controller.state.value.settings.groups
+            .first { it.groupId == "g1" }
+            .virtualAgents
+            .orEmpty()
+            .first { it.employeeId == "emp-p3" }
+        assertEquals("emp-p3", seat.employeeId)
+    }
+
+    @Test
+    fun switchingDriverWithoutModelClearsTheOldModel() {
+        val controller = controller().also { seed(it) }
+        controller.applyEmployeeProfile(
+            createCommand(
+                groupIds = listOf("g1"),
+                employeeId = "emp-p4",
+                driverKey = "claude",
+                model = "claude-3-5-sonnet",
+            ),
+        )
+
+        // 只换运行时、不提模型：旧模型名是驱动私有的，留着等于把 claude 的型号喂给 codex。
+        controller.applyEmployeeProfile(
+            EmployeeProfileCommand.Update(
+                employeeId = "emp-p4",
+                driverKey = "codex",
+                actor = DeclarationActor.Human(self),
+            ),
+        )
+        val after = controller.state.value.settings.employeeProfiles.single { it.employeeId == "emp-p4" }
+        assertEquals("codex", after.driverKey)
+        assertNull(after.model, "换驱动而没给模型 = 跟随新驱动的默认，不是沿用旧值")
+    }
+
+    @Test
+    fun emptyModelStringClearsTheModelAndNullLeavesItAlone() {
+        val controller = controller().also { seed(it) }
+        controller.applyEmployeeProfile(
+            createCommand(
+                groupIds = listOf("g1"),
+                employeeId = "emp-p5",
+                driverKey = "claude",
+                model = "claude-3-5-sonnet",
+            ),
+        )
+
+        // null = 这一栏没动（改名字不该顺手清掉模型）
+        controller.applyEmployeeProfile(
+            EmployeeProfileCommand.Update(
+                employeeId = "emp-p5",
+                name = "改名的人",
+                actor = DeclarationActor.Human(self),
+            ),
+        )
+        assertEquals(
+            "claude-3-5-sonnet",
+            controller.state.value.settings.employeeProfiles.single { it.employeeId == "emp-p5" }.model,
+            "null 表示没碰这一栏",
+        )
+
+        // 空串 = 清空（界面把「输入框清空」发成空串；发 null 的话模型永远清不掉）
+        controller.applyEmployeeProfile(
+            EmployeeProfileCommand.Update(
+                employeeId = "emp-p5",
+                model = "",
+                actor = DeclarationActor.Human(self),
+            ),
+        )
+        assertNull(
+            controller.state.value.settings.employeeProfiles.single { it.employeeId == "emp-p5" }.model,
+            "空串必须真的清空，否则「清空模型」这个动作在界面上不可达",
         )
     }
 }

@@ -28,6 +28,13 @@ object AgentDuties {
     /** 单兵席位默认职责。 */
     const val DEFAULT_SINGLE = ASSISTANT
 
+    /**
+     * **MINT 建档表单**的缺省职责（方案 §3.3）：新建员工的常见形状是「写代码的人」，
+     * 与 [DEFAULT_SINGLE]（assistant，单兵席位的归一兜底）是两回事 —— 表单不写
+     * `normalize(null)`，那个回落是 assistant；缺省要显式选 [CODER]。
+     */
+    const val DEFAULT_MINT = CODER
+
     /** 团队领队席位默认职责。 */
     const val DEFAULT_LEADER = LEAD
 

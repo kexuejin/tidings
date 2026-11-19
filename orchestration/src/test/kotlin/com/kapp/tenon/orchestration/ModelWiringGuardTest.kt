@@ -62,16 +62,16 @@ class ModelWiringGuardTest {
     @Test
     fun singleSeatOverrideFeedsTheTicket() {
         assertTrue(
-            orchestration.contains("val effectiveModel = seatOverride?.second ?: model"),
-            "单兵底座覆盖的模型没有并进工单 —— 只有团队路径能选模型，单兵等于没配",
+            orchestration.contains("val effectiveModel = seatOverride?.second ?: profileCfg?.second ?: model"),
+            "单兵底座覆盖的模型没有并进工单 —— 执行档与员工档案（A5）两环都不许缺席，单兵等于没配",
         )
         assertTrue(
             orchestration.contains("model = effectiveModel"),
             "工单构造没吃 effectiveModel —— 覆盖算出来了却没人用",
         )
         assertTrue(
-            orchestration.contains("val defaultAgent = seatOverride?.first ?: rawKey?.let"),
-            "单兵底座覆盖没接到 defaultAgent（先覆盖、后归一的顺序也不能反）",
+            orchestration.contains("val defaultAgent = seatOverride?.first ?: profileCfg?.first ?: routed"),
+            "单兵底座覆盖没接到 defaultAgent（先覆盖、后归一的顺序也不能反；A5 后员工档案插在中间一环）",
         )
     }
 }

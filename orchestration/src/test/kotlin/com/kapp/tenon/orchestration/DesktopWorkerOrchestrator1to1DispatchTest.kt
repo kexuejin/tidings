@@ -99,8 +99,9 @@ class DesktopWorkerOrchestrator1to1DispatchTest {
                 scope = scope,
             )
 
-            // 行为变更后 1:1 纯文本不再默认派单（PlainChat 分支），失败可见性走
-            // invoke 通路验证：显式 agentKey（缺省 codex）+ plane 不可用 ⇒ 退单通知。
+            // A5 之后 1:1 纯文本不再默认派单（PlainChat 分支），失败可见性走 invoke 通路：
+            // agentKey 为空 + 无档案可查 ⇒ 解析段拒绝（不猜默认驱动），但**必须留一条
+            // 可见通知**（不变量 2）—— 理由里说清「没配底座」，而不是冒充「codex 失败了」。
             orch.handlePromptAwait(
                 convId = convId,
                 senderPeerId = controller.state.value.selfNodeId,
@@ -113,10 +114,10 @@ class DesktopWorkerOrchestrator1to1DispatchTest {
             val notice = controller.state.value.messages[convId].orEmpty()
                 .singleOrNull { it.notice == NoticeKind.AgentDispatchFailed }
             assertNotNull(notice, "派单失败必须在会话流里留下一条用户可见的通知")
-            assertEquals("codex", notice.noticeDetail?.actor, "通知要说清是谁失败的")
+            assertEquals("unassigned", notice.noticeDetail?.actor, "通知要说清是谁失败的：没配底座就是「未指派」，不冒充 codex")
             assertEquals("fix the flaky login test", notice.noticeDetail?.title, "通知要说清是哪一单")
             assertTrue(
-                notice.noticeDetail?.reason?.contains("control plane unavailable") == true,
+                notice.noticeDetail?.reason?.contains("no driver configured") == true,
                 "通知要说清为什么失败（实际原因：" + notice.noticeDetail?.reason + "）",
             )
         } finally {

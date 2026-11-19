@@ -14,7 +14,9 @@ import kotlin.test.assertTrue
  * 另一半：**参数必须真的从入口流到解析点**。这曾是「显式 wsId 分支」沦为死代码的根因——
  * 函数支持、没有任何调用方传入。三处贯通点，抽掉任何一处对应守卫即红：
  *
- * 1. `dispatchSingleWorker` 把 `wsId` 传进 `resolveWorkspacePath(groupId, wsId)`；
+ * 1. `dispatchSingleWorker` 把 `wsId` 传进 `resolveWorkspaceWithDenial(groupId, wsId)`
+ *    （原名 `resolveWorkspacePath`；退单卡要带分类码之后解析点改成「路径 + 拒因」二元组，
+ *    参数照旧，守卫只跟着改名 —— 它钉的是「wsId 有没有流到解析点」）；
  * 2. 两个派单入口（`handlePrompt` / `handlePromptAwait`）签名带 `wsId` 且向下穿透；
  * 3. 执行桥（DesktopExtension）把租约的 `request.wsId` 原样传给 `handlePromptAwait`。
  */
@@ -63,9 +65,9 @@ class DesktopWorkerOrchestrator1to1WorkspaceDispatchTest {
             "private fun dispatchSingleWorker(",
         )
         assertTrue(
-            dispatch.contains("resolveWorkspacePath(groupId, wsId)"),
+            dispatch.contains("resolveWorkspaceWithDenial(groupId, wsId)"),
             "dispatchSingleWorker 必须把显式 wsId 传进工作区解析——" +
-                "退回 resolveWorkspacePath(groupId) 即为死分支复活前的旧形态",
+                "退回只传 groupId 即为死分支复活前的旧形态",
         )
     }
 
@@ -117,14 +119,20 @@ class DesktopWorkerOrchestrator1to1WorkspaceDispatchTest {
     fun workingCardsCarryAssigneeRoster() {
         // 规格二的双角色进度行：items[].assignee 必须落棒（渲染端徽标已就绪）。
         // 工单卡的承办人名单曾经全仓零传参——执行中卡因此退化成「只有标题」的简化版。
+        // 2026-11-19 UX 轮后承办人升级为**人名优先**（displayActor()）：用户点的是
+        // @员工 / @组员，卡面不能只认得出引擎（同底座两个员工的两张单无法区分）。
         val source = orchestratorSource()
         assertTrue(
-            source.contains("assignees = listOf(active.agentKey)"),
-            "active 工单的 working 卡必须带承办人（active.agentKey）",
+            source.contains("assignees = listOf(active.displayActor())"),
+            "active 工单的 working 卡必须带承办人（人名优先，回退驱动键）",
         )
         assertTrue(
-            source.contains("assignees = listOf(defaultAgent)"),
-            "自愈/原型/终验路径的卡片必须带承办人（defaultAgent）",
+            source.contains("assignees = listOf(ticket.displayActor())"),
+            "自愈/原型/终验路径的卡片必须带承办人（人名优先，回退驱动键）",
+        )
+        assertTrue(
+            source.contains("fun displayActor(): String = assigneeName ?: agentKey"),
+            "人名与驱动键必须一个来源各答一件事：displayActor 只管显示，授权仍走 agentKey",
         )
     }
 

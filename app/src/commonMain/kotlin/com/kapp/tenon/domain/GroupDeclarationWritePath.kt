@@ -223,10 +223,15 @@ sealed interface GroupDeclarationCommand {
      *
      * 席位本身保留（`name` 不变）—— 撤席位是 [LeaveSeat] 的事。这样「员工档案删了」
      * 不会把这个人静默踢出所有群。
+     *
+     * @param employeeId 精确定位用（A4：同底座两人在同一群各占一条席位，`agentId` 都是
+     *   kind 级键，只按 `agentId` 定位会摘错人的引用）。给定时按席位 `employeeId` 精确匹配；
+     *   空 = 老数据兼容，按 [agentId] 定位。
      */
     data class DetachEmployee(
         override val groupId: String,
         val agentId: String,
+        val employeeId: String = "",
         override val baseRev: Int? = null,
         override val actor: DeclarationActor,
         override val origin: DeclarationOrigin = DeclarationOrigin.AGENT_HUB,
@@ -263,11 +268,18 @@ enum class DeclarationRejection {
     EMPLOYEE_UNKNOWN,
 
     /**
-     * 这个 agent 在本机已有员工档案（一个 agent 一份 —— 两份名字抢同一个身份）。
+     * 这个 `employeeId` 在本机已有档案（身份锚精确重复）。
      *
-     * 要改名走 `EmployeeProfileCommand.Update`，不要建第二份。
+     * 注意不是「同 agent」：同一底座可以建多个员工（三层正交模型，方案 §2②）。
+     * 撞的是本机分配的身份键，不是路由用的 agentId；要改名走 `EmployeeProfileCommand.Update`。
      */
     EMPLOYEE_EXISTS,
+
+    /**
+     * MINT 建档指定的底座不在 `driverCatalog()` 里 —— 建出来也派不出去（方案 §3.3）。
+     * 只由 [EmployeeCreationSource.MINT] 的预校验产生；REGISTER_EXISTING 走到这里说明调用方拼错。
+     */
+    DRIVER_UNAVAILABLE,
 
     /**
      * 这条席位是**档案化团队**（`teamId != null`）：名册归档案，群内整表替换一律拒绝。
@@ -539,12 +551,34 @@ private fun RelayController.planJoinSeat(
     cmd: GroupDeclarationCommand.JoinSeat,
     /** 显式指定的名字（`UpdateSeat` 落到「按入驻处理」时带上）；null = 按 D13 派生。 */
     nameOverride: String? = null,
+    /**
+     * 本次入驻要**认领**的员工引用（A4，`planAttachEmployee` 传入）。非空时「自己的席位」
+     * 只认 `employeeId` 相等或还没被认领的 —— 别人的席位（employeeId 不同）既不当 previous
+     * 也不被替换，同底座两人同群各占一条。null = 老语义（按 agentId 整体替换）。
+     */
+    claimEmployeeId: String? = null,
 ): DeclarationPlan {
     val canonicalAgentId = cmd.agentId.trim()
     if (canonicalAgentId.isEmpty()) return DeclarationPlan.Rejected(DeclarationRejection.ARGUMENT_INVALID)
-    val previous = meta.localSeat(self, canonicalAgentId)
     // 本机档案（宿主才有；手机端 employeeProfiles 恒空 ⇒ 这条路对手机是空操作）。
+    // 先于 previous：A4 之后同底座两人可以在同一群各占一条席位（agentId 都是 kind 级键），
+    // 「自己的旧席位」必须按 employeeId 认，不能只按 agentId。
     val employee = _state.value.settings.employeeProfiles.byAgentIdentity(canonicalAgentId)
+    // **自己的**席位谓词（previous 与去重共用一份，别各写一遍）：
+    // - 带认领引用（employee.attach 的就地入驻）→ 只认没被认领的 / 自己的；
+    // - 带档案（byAgentIdentity 命中）→ 只认没被认领的 / 档案本人的；
+    // - 都没有（邀请入驻老语义）→ agentId 相同即同一条席位。
+    fun isOwnSeat(va: com.kapp.tenon.core.protocol.VirtualAgentMember): Boolean = when {
+        claimEmployeeId != null -> va.employeeId == null || va.employeeId == claimEmployeeId
+        employee != null -> va.employeeId == null || va.employeeId == employee.employeeId
+        else -> true
+    }
+    // **自己的**旧席位：agentId 相同，且（本路径不带档案 ⇔ 老数据语义：任意同键席位）
+    // 或（带档案 ⇔ 只认自己的引用 / 还没被认领的席位）。别人的席位（employeeId 不同）
+    // 不是「旧」——同名入驻不顶掉它（A4）。
+    val previous = meta.virtualAgents.orEmpty().firstOrNull {
+        it.hostNodeId == self && it.agentId.equals(canonicalAgentId, ignoreCase = true) && isOwnSeat(it)
+    }
     val taken = meta.virtualAgents.orEmpty().map { it.name }.toMutableSet()
     val name = when {
         nameOverride != null -> {
@@ -595,7 +629,12 @@ private fun RelayController.planJoinSeat(
         } ?: emptyList(),
     )
     val seats = meta.virtualAgents.orEmpty()
-        .filterNot { it.hostNodeId == self && it.agentId.equals(canonicalAgentId, ignoreCase = true) } + seat
+        .filterNot {
+            // A4：employeeId 是席位归属的一部分 —— 「自己的」谓词与 previous 共用一份
+            //（[isOwnSeat]）：别人的席位（employeeId 不同）原样保留，两个 MINT 员工
+            // 同底座同群各占一条。老语义（无认领无档案）保持整体替换。
+            it.hostNodeId == self && it.agentId.equals(canonicalAgentId, ignoreCase = true) && isOwnSeat(it)
+        } + seat
     return DeclarationPlan.Ready(
         commandName = "join",
         before = previous?.auditShape() ?: "-",
@@ -922,7 +961,13 @@ private fun RelayController.planAttachEmployee(
         return DeclarationPlan.Rejected(DeclarationRejection.ARGUMENT_INVALID)
     }
 
-    val existing = meta.localSeat(self, canonicalAgentId)
+    // 目标席位**先认引用**（A4：同底座两人在同一群各占一条席位，agentId 都是 kind 级键，
+    // 只按 agentId 找会把第二个员工的引用顶到第一个人的席位上 —— 那是已坐实的顶席位缺陷）。
+    // 引用没命中再按 agentId 找，但**只认还没被认领的席位**（employeeId == null）：
+    // 别人的席位（employeeId 不同）不是「已存在」，落入下方就地入驻分支另立一条。
+    val existing = meta.virtualAgents.orEmpty().firstOrNull {
+        it.hostNodeId == self && it.employeeId == employeeId
+    } ?: meta.localSeat(self, canonicalAgentId)?.takeIf { it.employeeId == null }
     if (existing == null) {
         // 就地入驻：名字用档案 token，撞名则本群别名（不拒绝）。
         val taken = meta.virtualAgents.orEmpty().map { it.name }.toSet()
@@ -940,22 +985,32 @@ private fun RelayController.planAttachEmployee(
                 origin = cmd.origin,
             ),
             nameOverride = seatName,
+            // A4：认领本次的员工引用 —— join 的 previous/去重只动自己的或未认领的席位，
+            // 绝不顶掉别人的（MINT 的 agentId 是 kind 级键，agentId 定位必然撞同底座同事）。
+            claimEmployeeId = employeeId,
         )
         val seats = when (joined) {
             is DeclarationPlan.Rejected -> return joined
             is DeclarationPlan.Ready -> joined.seats
         }
+        // 新落的那条：join 侧按认领谓词追加 —— 它要么还没带引用，要么已带上本次的
+        // `employeeId`（byAgentIdentity 命中档案时 join 自己就补了引用）。
         val seat = seats.lastOrNull {
-            it.hostNodeId == self && it.agentId.equals(canonicalAgentId, ignoreCase = true)
+            it.hostNodeId == self && it.agentId.equals(canonicalAgentId, ignoreCase = true) &&
+                (it.employeeId == null || it.employeeId == employeeId)
         } ?: return DeclarationPlan.Rejected(DeclarationRejection.SEAT_MISSING)
         val attached = seat.copy(employeeId = employeeId, employeeName = employeeName)
         return DeclarationPlan.Ready(
             commandName = "employee.attach",
             before = "-",
             after = attached.auditShape(),
+            // 只把**这条席位**（未认领的或本次认领的）换成 attached：别人已认领的同键席位
+            // 原样保留（A4 —— 顶席位缺陷的另一半在这里，替换不按 employeeId 收口就会
+            // 把第一个人的席位覆盖成第二个人的）。
             seats = seats.map {
                 if (it.hostNodeId == self && it.agentId.equals(canonicalAgentId, ignoreCase = true) &&
-                    it.defaultWsId == seat.defaultWsId
+                    it.defaultWsId == seat.defaultWsId &&
+                    (it.employeeId == null || it.employeeId == employeeId)
                 ) {
                     attached
                 } else {
@@ -969,8 +1024,9 @@ private fun RelayController.planAttachEmployee(
     val seatName = if (cmd.forceToken) {
         val others = meta.virtualAgents.orEmpty()
             .filterNot {
+                // 只把**自己的**席位让出旧名（A4：同键席位可能不止一条，按 employeeId 认）。
                 it.hostNodeId == self && it.agentId.equals(existing.agentId, ignoreCase = true) &&
-                    it.defaultWsId == existing.defaultWsId
+                    it.defaultWsId == existing.defaultWsId && it.employeeId == existing.employeeId
             }
             .map { it.name }
             .toSet()
@@ -980,9 +1036,12 @@ private fun RelayController.planAttachEmployee(
     }
     val attached = existing.copy(name = seatName, employeeId = employeeId, employeeName = employeeName)
     val seats = meta.virtualAgents.orEmpty().map { va ->
+        // 同键 + **同一份员工引用**才算同一条席位（A4）：employeeId 是归属键，
+        // 无引用（null==null）保持老语义 —— 老数据里同键席位本来就只有一条。
         val sameSeat = va.hostNodeId == self &&
             va.agentId.equals(existing.agentId, ignoreCase = true) &&
-            va.defaultWsId == existing.defaultWsId
+            va.defaultWsId == existing.defaultWsId &&
+            va.employeeId == existing.employeeId
         if (sameSeat) attached else va
     }
     return DeclarationPlan.Ready(
@@ -999,13 +1058,23 @@ private fun RelayController.planDetachEmployee(
     self: String,
     cmd: GroupDeclarationCommand.DetachEmployee,
 ): DeclarationPlan {
-    val seat = meta.localSeat(self, cmd.agentId)
-        ?: return DeclarationPlan.Rejected(DeclarationRejection.SEAT_MISSING)
+    // A4：带引用时按席位 employeeId 精确定位 —— 同底座两人在同一群的席位 agentId 相同
+    // （都是 kind 级键），只按 agentId 定位会摘错人的引用。
+    val seat = if (cmd.employeeId.isNotBlank()) {
+        meta.virtualAgents.orEmpty().firstOrNull {
+            it.hostNodeId == self && it.employeeId == cmd.employeeId.trim()
+        }
+            ?: return DeclarationPlan.Rejected(DeclarationRejection.SEAT_MISSING)
+    } else {
+        meta.localSeat(self, cmd.agentId)
+            ?: return DeclarationPlan.Rejected(DeclarationRejection.SEAT_MISSING)
+    }
     val detached = seat.copy(employeeId = null, employeeName = null)
     val seats = meta.virtualAgents.orEmpty().map { va ->
         val sameSeat = va.hostNodeId == self &&
             va.agentId.equals(seat.agentId, ignoreCase = true) &&
-            va.defaultWsId == seat.defaultWsId
+            va.defaultWsId == seat.defaultWsId &&
+            va.employeeId == seat.employeeId
         if (sameSeat) detached else va
     }
     return DeclarationPlan.Ready(

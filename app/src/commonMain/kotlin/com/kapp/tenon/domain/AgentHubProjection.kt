@@ -110,6 +110,10 @@ public data class AgentHubUi(
      * 与卡片流「不显示用户看不到的会话」同一条可见性纪律。
      */
     val latestArtifact: AgentHubArtifactUi? = null,
+    /** 绑定的运行时键（规范键，如 codex/claude）；空串 = 未绑定或老数据。 */
+    val driverKey: String = "",
+    /** 指定模型（null = 驱动默认）。 */
+    val model: String? = null,
 )
 
 /**
@@ -187,6 +191,10 @@ public data class AgentHubDetailUi(
     val employeeName: String? = null,
     /** 员工档案里的职责（归一后的取值域成员）；null = 未登记 —— 编辑对话框的初始值。 */
     val employeeDuty: String? = null,
+    /** 绑定的运行时键（规范键，如 codex/claude）；空串 = 未绑定或老数据。 */
+    val driverKey: String = "",
+    /** 指定模型（null = 驱动默认）。 */
+    val model: String? = null,
     /** 是否团队形态（与卡片同判据）。 */
     val isTeam: Boolean,
     /** 团队人数 = 领队 1 + 组员数；单兵恒为 0。 */
@@ -417,6 +425,8 @@ public fun agentHubDetail(
         employeeId = entity.employeeId,
         employeeName = entity.employeeName,
         employeeDuty = entity.employeeDuty,
+        driverKey = entity.driverKey,
+        model = entity.model,
         isTeam = entity.isTeam,
         teamSize = entity.teamSize,
         online = hostOnline,
@@ -532,8 +542,16 @@ private fun hostIndexOf(
             .map { seat -> seat to group }
     }
     hostSeats.forEach { (seat, _) ->
+        val seatEmployeeId = seat.employeeId?.takeIf { it.isNotBlank() }
         val seatKey = seat.agentId.takeIf { it.isNotBlank() }
-        if (clusters.none { it.matches(seatKey) }) {
+        if (seatEmployeeId != null) {
+            // 三层模型：有身份锚的席位按 employeeId 精确成簇 —— 同底座两个真人绝不并卡（洞 E）。
+            // 先在「同 employeeId 的簇」里找；没有就另起一簇并绑定身份锚。
+            val hit = clusters.firstOrNull { it.employeeId == seatEmployeeId }
+            val cluster = hit ?: HubCluster().also { it.employeeId = seatEmployeeId; clusters += it }
+            if (seatKey != null) cluster.addIdentity(seatKey, fromAgentId = true)
+        } else if (clusters.none { it.matches(seatKey) }) {
+            // 兼容：老席位/手机端建的席位没有身份锚，回落 agentId 路由尺聚类。
             clusterOf(seatKey).addIdentity(seatKey, fromAgentId = true)
         }
     }
@@ -564,6 +582,16 @@ private class HubCluster {
      */
     val identities = mutableListOf<HubIdentity>()
 
+    /**
+     * 本聚类绑定的员工身份锚（三层模型的身份键，精确相等）。
+     *
+     * 来源：本机席位 `VirtualAgentMember.employeeId`。一个聚类里的所有席位必须同 employeeId
+     * —— [matchesEmployeeId] 保证不同 employeeId 的席位绝不并进来（洞 E 的投影根因）。
+     * 空 = 这个聚类还没有员工身份锚（老席位/手机端建的席位），回落到 [identities] 的
+     * agentId 路由尺聚类，兼容旧数据。
+     */
+    var employeeId: String? = null
+
     val sessions = mutableListOf<AgentSessionUi>()
     val workspaces = mutableListOf<WorkspaceUi>()
 
@@ -572,6 +600,12 @@ private class HubCluster {
         null -> identities.any { it.key == null }
         else -> identities.any { it.key != null && sameAgent(key, null, it.key) }
     }
+
+    /**
+     * 带 employeeId 的席位能不能进本聚类：身份锚精确相等才并。
+     * 本聚类尚无身份锚时接纳并绑定；已有不同身份锚时拒绝（由调用方另起一簇）。
+     */
+    fun matchesEmployeeId(id: String): Boolean = employeeId == null || employeeId == id
 
     fun addIdentity(key: String?, fromAgentId: Boolean) {
         // null 键没有精度来源可言（agentId 非空时键就不会是 null），一律记为兜底档。
@@ -607,6 +641,8 @@ private class HubEntity(
     val employeeName: String?,
     /** 档案里的职责（编辑对话框的初始值）；null = 未登记。 */
     val employeeDuty: String?,
+    val driverKey: String = "",
+    val model: String? = null,
     val isTeam: Boolean,
     val teamSize: Int,
     val wsInfos: LinkedHashMap<String, HubWsInfo>,
@@ -637,18 +673,24 @@ private fun assembleEntity(
     val canonicalKey = cluster.identities.firstOrNull { it.key != null && it.fromAgentId }?.key
         ?: cluster.identities.firstOrNull { it.key != null }?.key
 
-    // 席位匹配：宿主已在键里，这里只比身份（sameAgent，精度差异容忍 —— 决策稿 §3）。
-    val seats = index.hostSeats.map { it.first }.filter { seat ->
+    // 席位匹配：宿主已在键里。有身份锚时按 employeeId 精确（三层模型，同底座两人不串席位）；
+    // 没有身份锚的老数据回落 agentId 的 sameAgent 路由尺（兼容）。
+    val clusterEmployeeId = cluster.employeeId
+    fun seatBelongs(seat: VirtualAgentMember): Boolean = if (clusterEmployeeId != null) {
+        seat.employeeId == clusterEmployeeId
+    } else {
         canonicalKey != null && sameAgent(seat.agentId, null, canonicalKey)
     }
-    val entityGroups = index.hostSeats.filter { (seat, _) ->
-        canonicalKey != null && sameAgent(seat.agentId, null, canonicalKey)
-    }.map { it.second }.distinctBy { it.groupId }
+    val seats = index.hostSeats.map { it.first }.filter { seatBelongs(it) }
+    val entityGroups = index.hostSeats.filter { (seat, _) -> seatBelongs(seat) }
+        .map { it.second }.distinctBy { it.groupId }
 
-    // 员工档案：本机有档案就用它的名字（跨群一致），否则回落席位 token（= 入驻时派生的名字）。
-    // 用 sameAgent 匹配而不是精确相等：聚类代表可能取自会话自报（`dsh`），
-    // 而档案键是完整实例 id（`dsh-029bbbf3`）—— 精确比会让同一张卡在"有档案"与"没档案"之间跳。
-    val employee = canonicalKey?.let { key ->
+    // 员工档案：身份锚是 employeeId（三层模型 §2②），精确相等归档 —— 同底座两个真人各归各档。
+    // 聚类已绑定 employeeId（来自本机席位）：优先按它精确找档案。
+    // 没有身份锚的老数据才回落 agentId 的 sameAgent 路由尺（兼容，不等于身份判定）。
+    val employee = cluster.employeeId?.let { eid ->
+        settingsSlice.settings.employeeProfiles.firstOrNull { it.employeeId == eid }
+    } ?: canonicalKey?.let { key ->
         settingsSlice.settings.employeeProfiles.firstOrNull { sameAgent(it.agentId, null, key) }
     }
     val seatName = seats.firstOrNull { it.name.isNotBlank() }?.name
@@ -716,6 +758,8 @@ private fun assembleEntity(
         employeeId = employee?.employeeId,
         employeeName = employee?.name,
         employeeDuty = employee?.duty,
+        driverKey = employee?.driverKey ?: "",
+        model = employee?.model,
         isTeam = isTeam,
         teamSize = teamSize,
         wsInfos = wsInfos,
@@ -823,6 +867,8 @@ private fun HubEntity.toCard(
         primaryWsTitle = primary?.title,
         lastActivityAt = lastActivityAt,
         latestArtifact = latestArtifact,
+        driverKey = driverKey,
+        model = model,
     )
 }
 

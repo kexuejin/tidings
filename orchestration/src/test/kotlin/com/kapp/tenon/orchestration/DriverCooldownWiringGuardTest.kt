@@ -40,12 +40,27 @@ class DriverCooldownWiringGuardTest {
         assertTrue(gateway.contains("is DriverEvent.Error -> {"), "捕获必须在 Error 事件分支内")
     }
 
+    /**
+     * 判据按**出口函数**逐个点验，不再数全仓出现次数：`runTeamDispatch` 里还有第三处
+     * `enforce`（Planner 建议的硬门预检——建议被否时回落编译链，而不是出 blocked 卡），
+     * 计数式断言会把「多了一个合法调用点」误报成「少接了一根线」。
+     */
     @Test
     fun bothDelegationExitsPassTheCooldownProbeToTheGate() {
-        val enforces = occurrencesOf(orchestrator, "StageChainGate.enforce(")
-        assertEquals(2, enforces, "文本路由与 invoke 桥两条派单出口都要过代码门（实际 $enforces 处）")
-        val probes = occurrencesOf(orchestrator, "DriverCooldownTracker.Shared::remainingMs")
-        assertEquals(2, probes, "两处 enforce 都要传同一个共享冷却探针（实际 $probes 处）")
+        for (entry in listOf(
+            "private suspend fun delegateByPlan(",
+            "private suspend fun delegateByPlanAwait(",
+        )) {
+            val block = GuardSourceScan.bracedBlockAfter(orchestrator, entry)
+            assertTrue(
+                block.contains("StageChainGate.enforce("),
+                "$entry 必须过代码门",
+            )
+            assertTrue(
+                block.contains("DriverCooldownTracker.Shared::remainingMs"),
+                "$entry 的 enforce 必须传同一个共享冷却探针",
+            )
+        }
     }
 
     /** 守卫自验证：把接线摘掉，上面两条断言必须真的变红（否则守卫只是字符串摆设）。 */

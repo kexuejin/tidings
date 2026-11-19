@@ -162,19 +162,24 @@ fun classifyDraftEdit(previous: String, next: String, explicitPick: Boolean): Dr
  */
 fun firstAgentMentionToken(text: String, tokens: Collection<String>): String? {
     if (tokens.isEmpty()) return null
-    val ordered = tokens.sortedByDescending { it.length }
     var best: Pair<Int, String>? = null // (位置, token)
-    for (token in ordered) {
+    // **边界比 core 的 mentionsToken 多排掉一个 `-`**：core 的池是 kind 家族
+    // （`@dsh-team` = 同一 agent 的 workspace 限定形态，连字符后随**算命中**）；
+    // 这里的池是**离散席位**（员工 `e2e` 与团队 `e2e-team` 是两台主体）——
+    // 裸子串匹配会把 `@e2e-team` 读成 `@e2e`，员工的意图帧劫走整队派单
+    // （真机 UX 轮现场：`@e2e-team …` 的工单落到了 emp-e2e-01 头上，团队链路
+    // 整个被跳过）。连字符后随 = 另一个实体的 token 延续，不算命中。
+    for (token in tokens.sortedByDescending { it.length }) {
         if (token.isEmpty()) continue
-        var from = 0
-        while (true) {
-            val at = text.indexOf(token, from, ignoreCase = true)
-            if (at < 0) break
+        val bare = token.removePrefix("@")
+        if (bare.isEmpty()) continue
+        val regex = Regex("(?i)@" + Regex.escape(bare) + "(?![a-z0-9_-])")
+        for (match in regex.findAll(text)) {
+            val start = match.range.first
             val current = best
-            if (current == null || at < current.first || (at == current.first && token.length > current.second.length)) {
-                best = at to token
+            if (current == null || start < current.first || (start == current.first && token.length > current.second.length)) {
+                best = start to token
             }
-            from = at + 1
         }
     }
     return best?.second

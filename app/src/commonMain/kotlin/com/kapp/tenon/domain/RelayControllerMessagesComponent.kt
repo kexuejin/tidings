@@ -737,6 +737,12 @@ fun handleOnInbound(envelope: Envelope) {
             // 卡片与执行状态（方案 §4.1/§4.3）：形状校验在协议层（validateMsg），这里如实落库。
             // 卡片是 JSON 对象原样进列（cardJson）；渲染引擎是 M3 的交付物。
             card = payload?.get("card") as? kotlinx.serialization.json.JsonObject,
+            // 横幅行的动作寻址（§4 #7）：失败横幅带被 @ 的 agent 名 —— 渲染层据此
+            // 给「申请授权」一颗能寻址的按钮。会话内快照，刻意不持久化（见 MessageUi）。
+            mentions = payload?.get("mentions")?.let { raw ->
+                (raw as? kotlinx.serialization.json.JsonArray)
+                    ?.mapNotNull { item -> (item as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull }
+            }.orEmpty(),
             agentState = payload?.let { stringField(it, "agentState") },
             replyTo = if (groupId != null) replyToOf(envelope) else null,
             reasoning = parsedReasoning,
@@ -808,13 +814,25 @@ fun handleOnInbound(envelope: Envelope) {
     // 组员 ⇒ 目标宿主就是该席位宿主；解析不出目标（宿主自报 kind / 旧发送端）⇒ null
     // ⇒ agentPromptRoute 保持既有兜底判据。
     val groupMeta = groupId?.let { host.state.value.settings.groups.firstOrNull { g -> g.groupId == it } }
-    val promptTarget = resolvePromptTarget(cleanedText, groupMeta, routeFacts.agentKinds)
+    // §4-8b：未入驻团队的档案 token 只进**路由池**（不进 @ 候选）——用户手打
+        // `@队名` 也能唤醒路由，编排层接住后出「把队加进这个群」的 blocked 卡。
+        val profileTokens = TeamProfileMention.mentionTokensOf(host.state.value.settings.teamProfiles)
+        val promptTarget = resolvePromptTarget(
+            cleanedText, groupMeta,
+            routeFacts.agentKinds + profileTokens,
+            host.state.value.settings.teamProfiles,
+        )
     val targetHostIsSelf = when (promptTarget) {
         is PromptTarget.Seat -> promptTarget.hostNodeId == host.state.value.selfNodeId
         is PromptTarget.Member -> promptTarget.hostNodeId == host.state.value.selfNodeId
         is PromptTarget.Team -> promptTarget.hostNodeId == host.state.value.selfNodeId
+        // 未入驻团队的档案在本机（§4-8b）：加队动作就发生在这台宿主上。
+        is PromptTarget.ProfileTeam -> true
         else -> null
     }
+    // 唤醒判定与剥 @ 同用**扩展池**（席位 token + 档案 token）：§4-8b 的手打
+    // `@队名` 不带席位也能唤醒 —— 否则编排层的「把队加进这个群」永远够不着。
+    val wakePool = routeFacts.agentKinds + profileTokens
     val route = RelayController.agentPromptRoute(
         text = cleanedText,
         groupId = groupId,
@@ -822,7 +840,7 @@ fun handleOnInbound(envelope: Envelope) {
         repliedToIsAgent = repliedToIsAgent,
         localAgentPresent = routeFacts.localAgentPresent,
         remoteAgentPresent = routeFacts.remoteAgentPresent,
-        agentKinds = routeFacts.agentKinds,
+        agentKinds = wakePool,
         targetHostIsSelf = targetHostIsSelf,
     )
     // §7.2：未唤醒且群里有 agent ⇒ 记一条 NO_WAKE（判据在 logNoWakeIfNeeded 里）。
@@ -855,10 +873,10 @@ fun handleOnInbound(envelope: Envelope) {
                 ),
             )
         } else if (!externalChatBlocked && !operatorBlocked && !ambiguous) {
-            val prompt = RelayController.extractAgentPrompt(cleanedText, routeFacts.agentKinds)
+            val prompt = RelayController.extractAgentPrompt(cleanedText, wakePool)
             // 点名事实必须在剥 @ **之前**从同一份 kinds 里取：prompt 里已经没有 @ 了，
             // 编排层拿它重判只会得到「没点名」（D18：群工单句被分诊成只读讨论）。
-            val mentionedAgentKey = RelayController.mentionedAgentKeys(cleanedText, routeFacts.agentKinds).firstOrNull()
+            val mentionedAgentKey = addressedAgentKey(promptTarget, cleanedText, wakePool)
             host.scope.launch {
                 host.onAgentPrompt?.invoke(convId, envelope.from, prompt, envelope.id, mentionedAgentKey)
             }

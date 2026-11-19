@@ -4,14 +4,19 @@ package com.kapp.tenon.orchestration
 
 import com.kapp.tenon.agent.ChainDiff
 import com.kapp.tenon.agent.ChainProgress
+import com.kapp.tenon.agent.ChainRetry
 import com.kapp.tenon.agent.ChainStage
 import com.kapp.tenon.core.protocol.AgentExecAuthorizer
+import com.kapp.tenon.core.protocol.TeamMemberInfo
+import com.kapp.tenon.core.protocol.VirtualAgentMember
 import com.kapp.tenon.core.protocol.TeamNameMention
 import com.kapp.tenon.core.protocol.seatsMatchingToken
 import com.kapp.tenon.core.protocol.teamSeatMatchingName
 import com.kapp.tenon.agent.ControlPlane
 import com.kapp.tenon.agent.DelegationParser
 import com.kapp.tenon.agent.DelegationPlan
+import com.kapp.tenon.agent.LeaderBrief
+import com.kapp.tenon.agent.LeaderMember
 import com.kapp.tenon.agent.SandboxPatchRef
 import com.kapp.tenon.agent.StageChain
 import com.kapp.tenon.agent.drivers.AgentProfiles
@@ -22,8 +27,15 @@ import com.kapp.tenon.agent.recentCliSessionState
 import com.kapp.tenon.agent.resolveCliDriver
 import com.kapp.tenon.core.nowMillis
 import com.kapp.tenon.core.protocol.ConvId
+import com.kapp.tenon.core.protocol.isTeam
 import com.kapp.tenon.domain.CognitiveFlow
+import com.kapp.tenon.domain.DispatchBlockedCode
 import com.kapp.tenon.domain.RelayController
+import com.kapp.tenon.domain.byEmployeeId
+import com.kapp.tenon.domain.byTeamId
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.jsonObject
 import com.kapp.tenon.domain.groupParticipantRows
 import com.kapp.tenon.domain.RelayUiState
 import com.kapp.tenon.domain.TicketRef
@@ -40,6 +52,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.putJsonObject
@@ -87,6 +100,17 @@ class DesktopWorkerOrchestrator(
      */
     private val groupDirIdOf: (groupId: String) -> String? = { null },
     /**
+     * dirId → 目录档案的**本机路径**（D16 的另一半）。装配方给
+     * `HostDirectoryStore.directoryOf(id)?.path`。
+     *
+     * 为什么单兵派单需要它：群绑定项目目录在 D16 之后有两条落点 —— 群元数据的
+     * `defaultWsId`（席位投影）与宿主目录档案的指针（`groupDirIdOf`）。单兵路径原先
+     * 只读前者，于是「用目录指针绑过、但席位投影还没重建」的群会被判成
+     * `no git workspace bound to group`（真机现场：手机上选完项目目录，派单还是退单）。
+     * 两条落点指的是同一个目录，执行点必须两条都认。null = 未装配 ⇒ 只认老口径。
+     */
+    private val dirPathOf: (dirId: String) -> String? = { null },
+    /**
      * 节点级目录白名单（D10/D15）：`(path, requireWrite) -> 是否放行`。**默认 deny**
      * 在 store 里实现（空白名单 = 全拒）；这里 null = 未装配（测试与老装置），
      * 行为与从前一致。装配后：未登记的路径一律不许执行 —— fail-closed，
@@ -101,6 +125,14 @@ class DesktopWorkerOrchestrator(
      */
     private val teamPlanRefiner: (suspend (plan: DelegationPlan) -> DelegationPlan?)? = null,
     /**
+     * 责任链**审核面**的裁决（Planner）：审不审、审几棒、谁审。null = 未装配（测试与老
+     * 装置）⇒ 行为与从前逐字一致（编译固定链）。返回 null 同样回落编译链。
+     *
+     * 与 [teamPlanRefiner] 的分层：本口在形状**未定**之前做 L1 裁决，refiner 在形状
+     * 已定之后改 L3 文案；采纳了本口的建议就跳过 refiner（同一批 instruction 不写两遍）。
+     */
+    private val teamPlannerChain: (suspend (PlannerChainInput) -> OrchestrationSuggestion?)? = null,
+    /**
      * 派单指令尾部的**能力简报**（P3 工具面）：告诉这根棒「本机还提供哪些可以调的动作」。
      *
      * 返回 null = 这次不追加（没装配档案面 / headless）—— **不写就是没有**，绝不追加一段
@@ -108,6 +140,15 @@ class DesktopWorkerOrchestrator(
      * 内容来自 `RosterTools.brief()`，与 `GET /v1/agent/tools` 同一份，不另写文案。
      */
     private val rosterBrief: (() -> String?)? = null,
+    /**
+     * 「本机装了哪些底座」的**接缝**：null = 问控制面（生产路径，唯一正确来源）。
+     *
+     * 非 null 只用于单元测试：点将（主理人选谁下场）与逐人授权都**要求有候选池**
+     * —— 没人可点就谈不上点将，而单测里没有控制面。没有这个接缝，「点将」只能在真机
+     * 上验，而它恰恰是最容易静默退回「只按锚点」的那一类改动。
+     * **生产装配不许传它**：在不在位只有控制面答得了。
+     */
+    private val availableDriversHint: (() -> Set<String>?)? = null,
 ) {
     /**
      * 工单的**可等待终局**：invoke 执行桥（真机 `@agent` 派单）await 它拿到请求-响应
@@ -146,6 +187,16 @@ class DesktopWorkerOrchestrator(
          * 过不了授权，「已提交，等待宿主确认」永远等不来执行（真机实锤）。
          */
         val agentKey: String = "codex",
+        /**
+         * 卡面上那行「谁在干」的**人名**（组员名 / 员工档案名），null = 不知道是谁
+         * （裸驱动派单）——那时卡面回落驱动名（旧行为）。
+         *
+         * 为什么单独存：用户点的是**人**（@员工 / @组员），卡面却只认得出**引擎**
+         * （「Codex（本机）」×3）—— 同底座两个员工的两张单在用户眼里无法区分，
+         * 「这一单点了谁」（planDecision 已带 workerName）在单兵卡上断了线。
+         * 广播与授权仍认 [agentKey]（驱动键），人名只进显示字段 —— 两件事两个来源。
+         */
+        val assigneeName: String? = null,
         /**
          * 这张工单派单时用的**显式工作区指针**（1:1 药丸 / 派单帧携带）。
          * 「方向确认卡 → 派为新任务」那条腿必须原样带回去：1:1 会话没有群绑定
@@ -187,11 +238,36 @@ class DesktopWorkerOrchestrator(
         val done: CompletableDeferred<TicketOutcome> = CompletableDeferred(),
         /** 该工单绑定的底层 Agent 执行会话 ID（供工牌穿透使用）。 */
         @Volatile var sessionId: String? = null,
+        /**
+         * 这一单的责任链形状是谁定的（采纳了 Planner 的裁决，还是回落编译链、为什么）。
+         * 终局时随飞行记录落盘：0 审查棒是合法形状，合法的事更需要有据可查。
+         */
+        @Volatile var planDecision: FlightPlanDecision? = null,
+        /**
+         * 这一单该找谁审（单兵入口才有）：终态卡上的「请 TA 复检」落点。
+         *
+         * 存下来而不是发卡时现查：跑到一半编制可能被改，那时现查会把卡上的名字换成
+         * 另一个人 —— 用户点的是「当初那个审查员」，不该被静默换人。
+         */
+        @Volatile var reviewBy: com.kapp.tenon.agent.ChainReviewTarget? = null,
     ) {
         val targetConvId: String get() = groupId ?: convId
+
+        /** 卡面承办人：人名优先，不知道是谁才回落驱动键（旧行为）。 */
+        fun displayActor(): String = assigneeName ?: agentKey
     }
 
     private val activeTickets = ConcurrentHashMap<String, ActiveTicket>()
+
+    /**
+     * review_ready 终态卡的**可打回快照**：工单发终态卡时已从 [activeTickets] 移除
+     *（终态语义，避免 abort/retry 误操作），但横幅承诺了「等你合并或打回」——
+     * 打回要用当初那张工单的全套参数（devPrompt/repoPath/convId/…）才能重跑。
+     * 这里留一份只读快照，打回时由 [steerableTicket] 复活进 activeTickets 再走
+     * 既有重跑路径（复活即从快照移除）。合并成功后的残留到宿主重启即散，每单
+     * 一个对象、ticketId 不复用，不会被误读。
+     */
+    private val reviewableTickets = ConcurrentHashMap<String, ActiveTicket>()
 
     /** ticketId → 底层 CLI 会话 id：卡片 JSON/工牌穿透的唯一 producer。 */
     private val ticketSessionIds = ConcurrentHashMap<String, String>()
@@ -228,6 +304,14 @@ class DesktopWorkerOrchestrator(
 
     /** 合并成功后翻面卡该发到哪个群（见 [groupByCard]）。 */
     fun groupForCard(cardId: String): String? = groupByCard[cardId]
+
+    /**
+     * 卡已经翻面（不会再派动作）后丢掉这条登记 —— [groupByCard] 是进程内登记簿，
+     * 不清理就随卡片数量线性增长。只在「处理完且卡已翻面」的路径上调。
+     */
+    fun forgetCardGroup(cardId: String) {
+        groupByCard.remove(cardId)
+    }
 
     fun activeTicketsForConv(convId: String): List<ActiveTicket> =
         activeTickets.values.filter { it.convId == convId }
@@ -331,7 +415,7 @@ class DesktopWorkerOrchestrator(
                     percent = 50,
                     roleName = active.role,
                     agentId = active.agentKey,
-                assignees = listOf(active.agentKey),
+                assignees = listOf(active.displayActor()),
                 startedAt = active.createdAt,
                 )
                 handler.invoke(trimmed)
@@ -441,7 +525,7 @@ class DesktopWorkerOrchestrator(
                     percent = 50,
                     roleName = active.role,
                     agentId = active.agentKey,
-                assignees = listOf(active.agentKey),
+                assignees = listOf(active.displayActor()),
                 startedAt = active.createdAt,
                 )
                 active.onFollowUp?.invoke(pending.text)
@@ -517,7 +601,7 @@ class DesktopWorkerOrchestrator(
                 percent = 30,
                 roleName = active.role,
                 agentId = active.agentKey,
-                assignees = listOf(active.agentKey),
+                assignees = listOf(active.displayActor()),
                 startedAt = active.createdAt,
             )
             handler.invoke("APPROVE_AND_DEVELOP")
@@ -542,7 +626,7 @@ class DesktopWorkerOrchestrator(
                 percent = 30,
                 roleName = active.role,
                 agentId = active.agentKey,
-                assignees = listOf(active.agentKey),
+                assignees = listOf(active.displayActor()),
                 startedAt = active.createdAt,
             )
             handler.invoke("APPROVE_AND_DEVELOP")
@@ -563,7 +647,17 @@ class DesktopWorkerOrchestrator(
      */
     fun retryByCard(cardId: String): Boolean {
         val tid = cardId.removePrefix("chain-")
-        val active = activeTickets[tid] ?: activeTickets.values.firstOrNull { it.ticketId == tid } ?: return false
+        val active = activeTickets[tid] ?: activeTickets.values.firstOrNull { it.ticketId == tid }
+        if (active == null) {
+            // 链工单的重试：链执行器的恢复注册表（同形状同参数重派，新 chainId）。
+            // 探测能力而非写死类型：老装配没有 ChainRetry = 接不住，调用方如实翻面。
+            val host = planeProvider() ?: return false
+            val retried = (host.chainDispatcher as? ChainRetry)?.retry(tid) == true
+            if (retried) {
+                RelayLog.info("RELAY-INVOKE", "chain retry dispatched (card " + cardId + ")")
+            }
+            return retried
+        }
         if (active.stage != "blocked") return false
         val prompt = active.devPrompt ?: return false
         active.stage = "working"
@@ -607,8 +701,15 @@ class DesktopWorkerOrchestrator(
     fun rejectRevisionByCard(cardId: String, actionId: String): Boolean {
         val feedback = RevisionFeedback.feedbackOf(actionId) ?: return false
         val tid = cardId.removePrefix("chain-")
-        val active = activeTickets[tid] ?: activeTickets.values.firstOrNull { it.ticketId == tid } ?: return false
-        if (active.stage != "blocked") return false
+        // 活跃表优先；review_ready 工单已退到快照表（发终态卡时移除），从这里复活。
+        // 单兵表与快照表都没有 = 团队责任链卡（chain-<chainId> 全程不写 activeTickets）：
+        // 交给链执行器的恢复注册表按同形状同参数重派、并把反馈前置进每棒。
+        val active = steerableTicket(tid) ?: return rejectViaChain(tid, feedback)
+        // 打回的两个落点：熔断受阻卡（纠偏，单次授权）与 **review_ready 终态卡**
+        // （「等你合并或打回」的打回 —— 卡面承诺过这个出口，宿主不发动作/不收
+        // review_ready 档，承诺就断在卡面上；真机 UX 轮现场）。两档共用同一套
+        // 反馈注入：stage 翻 working、反馈进硬约束、重跑开发循环。
+        if (active.stage != "blocked" && active.stage != "review_ready") return false
         val prompt = active.devPrompt ?: return false
         // 单次授权：熔断后只追加 1 轮终验，第二次请求直接拒收（转人工，不无限循环）。
         val grant = HealSteering.grantOnce(feedback, active.steeringUsed) ?: return false
@@ -635,7 +736,7 @@ class DesktopWorkerOrchestrator(
                 percent = 40,
                 roleName = active.role,
                 agentId = active.agentKey,
-                assignees = listOf(active.agentKey),
+                assignees = listOf(active.displayActor()),
                 startedAt = active.createdAt,
             )
             val outcome = try {
@@ -669,8 +770,13 @@ class DesktopWorkerOrchestrator(
      */
     fun abandonHealByCard(cardId: String): Boolean {
         val tid = cardId.removePrefix("chain-")
-        val active = activeTickets[tid] ?: activeTickets.values.firstOrNull { it.ticketId == tid } ?: return false
-        if (active.stage != "blocked") return false
+        // 活跃表优先；review_ready 工单已退到快照表，这里复活后翻 aborted。
+        val active = steerableTicket(tid) ?: return false
+        // 打回的两个落点：熔断受阻卡（纠偏，单次授权）与 **review_ready 终态卡**
+        // （「等你合并或打回」的打回 —— 卡面承诺过这个出口，宿主不发动作/不收
+        // review_ready 档，承诺就断在卡面上；真机 UX 轮现场）。两档共用同一套
+        // 反馈注入：stage 翻 working、反馈进硬约束、重跑开发循环。
+        if (active.stage != "blocked" && active.stage != "review_ready") return false
         active.stage = "aborted"
         active.done.complete(TicketOutcome("aborted", null, "Human abandoned; worktree kept", null))
         scope.launch {
@@ -684,11 +790,35 @@ class DesktopWorkerOrchestrator(
                 percent = 100,
                 roleName = active.role,
                 agentId = active.agentKey,
-                assignees = listOf(active.agentKey),
+                assignees = listOf(active.displayActor()),
                 startedAt = active.createdAt,
             )
         }
         return true
+    }
+
+    /**
+     * 人机纠偏（打回/放弃）按 cardId 反查可操作的工单：活跃表优先，其次是
+     * review_ready 快照表（那张卡发出时工单已退下活跃表）。**复活**意味着从
+     * 快照移除并放回活跃表 —— 重跑后它又会走一遍完整生命周期（可能再次进快照）。
+     * 查不到返回 null，调用方如实翻 stale，不假装接下了动作。
+     */
+    private fun steerableTicket(tid: String): ActiveTicket? {
+        activeTickets[tid]?.let { return it }
+        activeTickets.values.firstOrNull { it.ticketId == tid }?.let { return it }
+        reviewableTickets.remove(tid)?.let { active -> activeTickets[tid] = active; return active }
+        return null
+    }
+
+    /**
+     * 团队责任链卡的打回出口：链工单不写 [activeTickets]，cardId 去掉前缀就是
+     * chainId。探测 `as? ChainRetry`（与 [retryByCard] 同纪律）：老装配没实现
+     * reject = 接不住，返回 false 由调用方如实翻 stale，不假装接下反馈。
+     */
+    private fun rejectViaChain(chainId: String, feedback: String): Boolean {
+        val host = planeProvider() ?: return false
+        return (host.chainDispatcher as? com.kapp.tenon.agent.ChainRetry)
+            ?.reject(chainId, feedback) == true
     }
 
     /**
@@ -707,6 +837,116 @@ class DesktopWorkerOrchestrator(
         val ref = patchRefForCard(cardId)
             ?: return DesktopPatchMerge.Outcome.Conflict("no sandbox patch recorded for card " + cardId)
         return DesktopPatchMerge.apply(patchPath = ref.patchPath, workspacePath = ref.workspacePath)
+    }
+
+    /**
+     * 单兵终态卡上的「请 TA 复检」（`review-patch|<组员名>`）：把这一单的活**另派一次纯审查**。
+     *
+     * ## 为什么是「另派一单」而不是「在这张卡上加一棒」
+     *
+     * 这张卡背后没有链：单兵入口本来就不展开审查棒（`@组员` 干什么就是什么）。要审，
+     * 就得有一次真的进程 —— 而每一次真的进程都应该是**一张自己能收尾的卡**，否则
+     * 「审完了没有、审出什么」在这张已经终态的卡上无处安放。所以：新工单、新卡、
+     * 审查员的结论按既有通路（无补丁 + 有正文 ⇒ `done`）落到那张卡上。
+     *
+     * ## 判据
+     *
+     * 四处都得有，缺一不派、如实返回 false 让调用方翻面并留日志：
+     * 会话键（登记簿 → 落库卡片行）、补丁账（[TicketPatchLedger]）、这一单的目标
+     * （卡片标题）、以及**组员名回查**（[TeamExecutionResolver]，按编制读驱动键）。
+     *
+     * 授权不在这一层判：卡片动作帧（`op=action`）只带 cardId + actionId，**不带发送者**，
+     * 宿主判不出「是谁点的」。这与 `merge-patch` / `retry` / `start-task` 是同一个信任级，
+     * 这里不发明一套比合并补丁更严的判据 —— 那只会让人以为这一层有权判据而别处没有。
+     */
+    fun reviewByCard(cardId: String, reviewerToken: String): Boolean {
+        val token = reviewerToken.trim()
+        if (token.isEmpty()) return false
+        // 会话键：登记簿（活着时最准）→ 落库的卡片行 `peerId`（宿主重启后唯一还在的）。
+        // 与 `attach-team` / 合并分支同一条兜底 —— 只认登记簿的话，重启后点这张卡
+        // 就是「毫无反应」，而那正是本仓反复踩过的那条。
+        val row = controller.state.value.messages.values
+            .asSequence()
+            .flatten()
+            .lastOrNull { r -> (r.renderCard?.get("cardId") as? JsonPrimitive)?.contentOrNull == cardId }
+        // 登记簿的历史条目可能是**裸 groupId**（修 e5f0bf4e 之前的旧写入）或会话键；
+        // 卡片行的 peerId 恒为会话键。两种形态都认，归一成 groupId 再判群。
+        val convKey = groupByCard[cardId] ?: row?.peerId ?: run {
+            RelayLog.info("RELAY-INVOKE", "request-review: no conversation for card " + cardId)
+            return false
+        }
+        val groupId = ConvId.groupIdOf(convKey)
+            ?: convKey.takeIf { raw -> controller.state.value.settings.groups.any { it.groupId == raw } }
+            ?: run {
+                RelayLog.info("RELAY-INVOKE", "request-review: conv is not a group (" + convKey + ")")
+                return false
+            }
+        val ledger = TicketPatchLedger.lookup(cardId)
+        val patch = ledger?.patchPath
+            ?.let { path -> runCatching { File(path).takeIf { it.isFile }?.readText() }.getOrNull() }
+            ?.takeIf { it.isNotBlank() }
+            ?: run {
+                // 静默出口必须留读数：账上没这一笔 = 「合并」那条路也接不住这张卡
+                // （账簿是两颗按钮共用的地基），用户会以为只有复检坏了。
+                RelayLog.info(
+                    "RELAY-INVOKE",
+                    "request-review: no patch ledger entry (card " + cardId +
+                        ", ledger=" + (ledger != null) + ", file=" +
+                        ledger?.patchPath?.let { File(it).isFile } + ")",
+                )
+                return false
+            }
+        val goal = (row?.renderCard?.get("title") as? JsonPrimitive)?.contentOrNull
+            ?.takeIf { it.isNotBlank() }
+            ?: run {
+                RelayLog.info("RELAY-INVOKE", "request-review: card has no title (card " + cardId + ")")
+                return false
+            }
+        val hit = resolveTeamTarget(groupId, token).also {
+            if (it !is TeamExecutionResolver.Target.Hit) {
+                RelayLog.info(
+                    "RELAY-INVOKE",
+                    "request-review: token '" + token + "' resolved " + it::class.simpleName +
+                        (if (it is TeamExecutionResolver.Target.NotConfigured) " (" + it.reason + ")" else ""),
+                )
+            }
+        } as? TeamExecutionResolver.Target.Hit ?: return false
+        val spec = hit.profile.members.firstOrNull {
+            it.agentId.trim().equals(hit.member.agentId.trim(), ignoreCase = true)
+        } ?: run {
+            RelayLog.info(
+                "RELAY-INVOKE",
+                "request-review: member " + hit.member.agentId + " not in the execution profile",
+            )
+            return false
+        }
+        // 审查员自己也得在位：`@组员` 派单时判过的是干活那位，没判过审的人。
+        val available = availableAgentKeys()
+        if (available != null && spec.driverKey !in available) {
+            RelayLog.info(
+                "RELAY-INVOKE",
+                "request-review: driver '" + spec.driverKey + "' not in place (available: " +
+                    available.joinToString(",") + ")",
+            )
+            return false
+        }
+        val instruction = CardReviewAsk.instruction(
+            goal = goal,
+            roleLabel = hit.member.role,
+            customPrompt = spec.customPrompt,
+            patch = patch,
+        )
+        RelayLog.info(
+            "RELAY-INVOKE",
+            "request-review: card " + cardId + " -> " + spec.agentId +
+                " (driver " + spec.driverKey + ", " + patch.length + " chars of diff) group=" + groupId,
+        )
+        dispatchSingleWorker(
+            ConvId.group(groupId), groupId, instruction, spec.driverKey,
+            wsId = hit.seat.defaultWsId,
+            model = spec.models.firstOrNull(),
+        )
+        return true
     }
 
     fun followUpByCard(cardId: String, text: String): Boolean {
@@ -728,7 +968,7 @@ class DesktopWorkerOrchestrator(
                 percent = 50,
                 roleName = active.role,
                 agentId = active.agentKey,
-                assignees = listOf(active.agentKey),
+                assignees = listOf(active.displayActor()),
                 startedAt = active.createdAt,
             )
             handler.invoke(trimmed)
@@ -782,7 +1022,7 @@ class DesktopWorkerOrchestrator(
                     percent = 50,
                     roleName = active.role,
                     agentId = active.agentKey,
-                assignees = listOf(active.agentKey),
+                assignees = listOf(active.displayActor()),
                 startedAt = active.createdAt,
                 )
                 handler.invoke(prompt)
@@ -823,7 +1063,11 @@ class DesktopWorkerOrchestrator(
             val denial = deniedSeatDispatch(groupId, mentionedAgentKey, senderPeerId, prompt)
             if (denial != null) {
                 recordApprovalRequest(senderPeerId, denial.agentId, "seat dispatch: " + denial.reason.take(60))
-                publishTeamDispatchBlocked(groupId, prompt, denial.reason, approvalRecorded = true)
+                publishTeamDispatchBlocked(
+                    groupId, prompt, denial.reason,
+                    approvalRecorded = true,
+                    code = DispatchBlockedCode.NOT_AUTHORIZED,
+                )
                 return
             }
         }
@@ -838,10 +1082,21 @@ class DesktopWorkerOrchestrator(
         if (groupId != null && mentionedAgentKey != null) {
             when (val teamTarget = resolveTeamTarget(groupId, mentionedAgentKey)) {
                 is TeamExecutionResolver.Target.NotConfigured -> {
-                    // 缺配置不猜（§2）：绝不回落到"默认 codex 单棒"。
+                    // 缺配置不猜（§2）：绝不回落到"默认 codex 单棒"。blocked 卡带分类码（P2）。
                     publishTeamDispatchBlocked(
                         groupId, prompt,
                         teamTarget.reason + " (member @" + mentionedAgentKey + ")",
+                        code = teamTarget.code,
+                    )
+                    return
+                }
+                is TeamExecutionResolver.Target.NotInGroup -> {
+                    // 队伍还没进这个群（TEAM_NOT_IN_GROUP）：blocked 卡带码与主行动路由。
+                    publishTeamDispatchBlocked(
+                        groupId, prompt,
+                        teamTarget.reason,
+                        code = teamTarget.code,
+                        teamIdForAttach = teamTarget.team.teamId,
                     )
                     return
                 }
@@ -866,12 +1121,10 @@ class DesktopWorkerOrchestrator(
             dispatchMultiRoleChain(convId, groupId, prompt, stages, wsId = wsId)
         } else if (groupId != null) {
             // 群路径保留既有兜底（群绑定解析有据）：点名了谁就把这一棒交给谁。
-            // 从前这里不带 agentKey，恒落 codex —— 席位全名 @ 的单即使走到工单也会派错驱动。
-            // 解析不出（没点名 / 不在位）就传 null，行为与从前逐字一致。
-            val mentionedDriver = mentionedAgentKey?.let {
-                AgentProfiles.resolveKey(it, availableAgentKeys().orEmpty())
-            }
-            dispatchSingleWorker(convId, groupId, prompt, mentionedDriver, wsId = wsId)
+            // **点名原文原样下传**：驱动解析（执行档 > 员工档案 > 键归一）在
+            // dispatchSingleWorker 一处收口 —— 这里先 resolveKey、解析不出传 null 的旧写法
+            // 会把「档案配了底座」的席位打回默认驱动，正是 A5 要拔的兜底。
+            dispatchSingleWorker(convId, groupId, prompt, mentionedAgentKey, wsId = wsId)
         }
         // 1:1 纯文本到此为止（决议矩阵蓝图 §4.2 的 PlainChat 分支）：普通聊天不派单——
         // 派单走药丸触发的 dispatchDirectInvoke（invoke 通路显式携带 agentKind+wsId）。
@@ -902,6 +1155,8 @@ class DesktopWorkerOrchestrator(
         replyToId: String?,
         agentKey: String?,
         wsId: String? = null,
+        /** 卡面承办人名（见 [ActiveTicket.assigneeName]）：桥上知道是谁就带下来。 */
+        assigneeName: String? = null,
     ): TicketOutcome {
         val groupId = ConvId.groupIdOf(convId)
         val active = activeTicketForConv(convId)
@@ -1022,7 +1277,7 @@ class DesktopWorkerOrchestrator(
         // **原始键直接交给 dispatchSingleWorker**：归一必须排在「单兵底座覆盖」之后
         // （覆盖要靠席位 slug 才查得到执行档，归一之后 slug 已经不在了）。归一本体
         // 留在那里，注释也随它一起搬过去。
-        return dispatchSingleWorker(convId, groupId, prompt, agentKey, wsId).await()
+        return dispatchSingleWorker(convId, groupId, prompt, agentKey, wsId, assigneeName = assigneeName).await()
     }
 
     /**
@@ -1249,7 +1504,13 @@ class DesktopWorkerOrchestrator(
         }
 
         val readOnly = CognitiveFlow.readOnlyPrompt(augmentedPrompt)
-        val targetDriver = agentKey ?: activeTickets[cardId.removePrefix("chain-")]?.agentKey ?: "codex"
+        // 不变量 1（不猜底座）：帧没带键、活跃工单也没有记录 ⇒ 拒绝这次只读问答并留痕，
+        // 绝不回落默认驱动。旧写法 `?: "codex"` 会把任何来历不明的卡片都派给 codex。
+        val targetDriver = agentKey ?: activeTickets[cardId.removePrefix("chain-")]?.agentKey
+        if (targetDriver == null) {
+            RelayLog.info("RELAY-QA", "no driver for Q&A card=" + cardId + " — refusing to guess a default")
+            return false
+        }
         val host = planeProvider() ?: return false
         val said = StringBuilder()
         var violated: String? = null
@@ -1347,7 +1608,9 @@ class DesktopWorkerOrchestrator(
     /** 提议卡上的「取消」：撤掉提案，群里补一张已取消卡（不调用任何进程）。 */
     private fun cancelProposalByCard(cardId: String, reason: String): Boolean {
         val proposal = proposals.remove(cardId) ?: return false
-        val agent = proposal.agents.firstOrNull() ?: "codex"
+        // 中止卡只是展示（不派单），但发送者标签也不能瞎猜成一个驱动 —— 解析不出就用
+        // 中性 kind（与 `effectiveToken` 的回落同形），不冒充「这是 codex 的卡」。
+        val agent = proposal.agents.firstOrNull() ?: "agent"
         val json = ticketCardJson(
             ticketId = cardId,
             rev = 2,
@@ -1377,6 +1640,10 @@ class DesktopWorkerOrchestrator(
         module: String? = null,
         context: String? = null,
         wsId: String? = null,
+        /** 主理人上下文：非 null = 这条链卡住时由他接手决定下一步。 */
+        leaderBrief: LeaderBrief? = null,
+        /** 形状来源（飞行记录）：团队派单带下来，其它入口 null。 */
+        planTrace: com.kapp.tenon.agent.ChainPlanTrace? = null,
     ): Boolean {
         val host = planeProvider() ?: return false
         val repo = resolveWorkspacePath(groupId, wsId) ?: return false
@@ -1390,9 +1657,54 @@ class DesktopWorkerOrchestrator(
                 target = target,
                 module = module,
                 context = context,
+                leader = leaderBrief,
+                planTrace = planTrace,
             )
         }
         return true
+    }
+
+    /**
+     * 把「团队 + 席位」翻译成主理人的决策上下文。
+     *
+     * 三样东西各有出处，不许互相顶替：`leaderAgentId` 说**是谁**（执行档主键），
+     * 席位名册说**叫什么、什么岗位**（展示事实），执行档说**用什么底座**（执行配置）。
+     * lead 自己在执行档里就没配过 ⇒ null，整条链回落到纯规约 —— 不假装有人主事。
+     */
+    private fun leaderBriefOf(
+        seat: VirtualAgentMember,
+        profile: TeamExecutionProfile,
+        goal: String,
+    ): LeaderBrief? {
+        val leaderId = profile.leaderAgentId.trim().lowercase()
+        if (leaderId.isEmpty()) return null
+        val leaderSpec = profile.members.firstOrNull { it.agentId.trim().lowercase() == leaderId }
+        val members = profile.members.map { spec ->
+            val declared = seat.teamMembers.firstOrNull {
+                it.agentId.trim().lowercase() == spec.agentId.trim().lowercase()
+            }
+            LeaderMember(
+                agentId = spec.agentId.trim().lowercase(),
+                name = declared?.name?.ifBlank { null } ?: spec.agentId,
+                role = declared?.role?.ifBlank { null }
+                    ?: if (spec.isWorker) TeamExecutionKinds.WORKER else TeamExecutionKinds.REVIEWER,
+                isWorker = spec.isWorker,
+                driverKey = spec.driverKey,
+                model = spec.models.firstOrNull(),
+            )
+        }
+        if (members.isEmpty()) return null
+        val leaderDeclared = seat.teamMembers.firstOrNull {
+            it.agentId.trim().lowercase() == leaderId
+        }
+        return LeaderBrief(
+            leaderAgentId = leaderId,
+            leaderName = leaderDeclared?.name?.ifBlank { null } ?: leaderId,
+            leaderPrompt = leaderSpec?.customPrompt?.trim()?.takeIf { it.isNotEmpty() },
+            teamName = seat.teamName?.takeIf { it.isNotBlank() } ?: seat.name,
+            goal = goal,
+            members = members,
+        )
     }
 
     /**
@@ -1403,6 +1715,7 @@ class DesktopWorkerOrchestrator(
      * 「哪些驱动在位」不许在装配层再问一遍，否则两处名册迟早分叉。
      */
     internal fun availableAgentKeys(): Set<String>? {
+        availableDriversHint?.let { return it() }
         val host = planeProvider() ?: return null
         return AgentProfiles.knownKeys().filter { host.resolveCliDriver(it) != null }.toSet()
     }
@@ -1489,17 +1802,99 @@ class DesktopWorkerOrchestrator(
             // 交给它只会变成「用默认驱动跑一棒」，必须出 blocked 卡。
             val isTeamName = group?.teamSeatMatchingName(mentionedAgentKey.orEmpty()) is TeamNameMention.Hit
             return if (isTeamName) {
-                TeamExecutionResolver.Target.NotConfigured(null, "team dispatch is not available on this host")
+                TeamExecutionResolver.Target.NotConfigured(
+                    null,
+                    DispatchBlockedCode.NO_DRIVER,
+                    "team dispatch is not available on this host",
+                )
             } else {
                 TeamExecutionResolver.Target.None
             }
         }
-        return TeamExecutionResolver(store, groupDirIdOf).resolve(
+        val target = TeamExecutionResolver(store, groupDirIdOf).resolve(
             groupId = groupId,
             mentionedKey = mentionedAgentKey,
             group = group,
             selfNodeId = st.selfNodeId,
+            teamProfiles = st.settings.teamProfiles,
         )
+        // **派单期按目录建执行档**（方案 §3.4 P1b-4）：档案在、席位在、目录在、唯独没有
+        // 执行档 ⇒ 用档案名册就地建出初值（第一名 worker、其余 reviewer），复用成员的
+        // driverKey/model 从员工档案读、人设从 `TeamMemberInfo.prompt` 浇进 `customPrompt`。
+        // 初值**只在 driverKey 全部明确时落盘**（validate 拒绝空键，而且「不猜底座」不许
+        // 造半份档）—— 有空键就如实 blocked（NO_DRIVER，去群编制指派），不猜。
+        if (target is TeamExecutionResolver.Target.NotConfigured &&
+            target.code == DispatchBlockedCode.NO_DRIVER &&
+            target.seat?.teamId != null
+        ) {
+            bootstrapTeamExecutionProfile(groupId, target.seat!!, store)?.let {
+                return TeamExecutionResolver(store, groupDirIdOf).resolve(
+                    groupId = groupId,
+                    mentionedKey = mentionedAgentKey,
+                    group = group,
+                    selfNodeId = st.selfNodeId,
+                    teamProfiles = st.settings.teamProfiles,
+                )
+            }
+        }
+        return target
+    }
+
+    /**
+     * 执行档**初值**落盘；null = 没建成（成员底座不齐 / 校验拒绝）—— 调用方保持 blocked，
+     * 不静默放行一个派不出去的档。
+     */
+    private fun bootstrapTeamExecutionProfile(
+        groupId: String,
+        seat: com.kapp.tenon.core.protocol.VirtualAgentMember,
+        store: TeamExecutionStore,
+    ): Boolean {
+        val st = controller.state.value
+        val team = st.settings.teamProfiles.byTeamId(seat.teamId) ?: return false
+        val dirId = groupDirIdOf(groupId)?.trim().orEmpty()
+        if (dirId.isEmpty()) return false
+        if (seat.teamMembers.isEmpty()) return false
+        val members = seat.teamMembers.mapIndexed { i, m ->
+            // 复用行（agentId = employeeId）读档案的 driverKey/model —— 声明值，不反解；
+            // 新建行（m-…）没有档案底座 ⇒ 空 ⇒ 整份不落盘（不猜）。
+            val employee = st.settings.employeeProfiles.byEmployeeId(m.agentId)
+            val model = employee?.model
+                ?.takeIf { it.isNotBlank() && employee.driverKey.isNotBlank() }
+                ?.let { if (com.kapp.tenon.agent.drivers.DriverModelFlags.supports(employee.driverKey)) listOf(it) else emptyList() }
+                ?: emptyList()
+            com.kapp.tenon.domain.TeamExecutionMemberUi(
+                agentId = m.agentId,
+                // 初值（方案 §3.4 P1b-4）：名册第一名 = worker，其余 reviewer。
+                kind = if (i == 0) {
+                    com.kapp.tenon.domain.TeamExecutionKindsUi.WORKER
+                } else {
+                    com.kapp.tenon.domain.TeamExecutionKindsUi.REVIEWER
+                },
+                driverKey = employee?.driverKey.orEmpty(),
+                models = model,
+                // 人设属于团队名册的一行（§2②）：派单期浇进执行档 customPrompt 初值。
+                customPrompt = m.prompt?.takeIf { it.isNotBlank() },
+            )
+        }
+        if (members.any { it.driverKey.isBlank() }) return false
+        val verdict = store.save(
+            TeamExecutionProfile(
+                dirId = dirId,
+                leaderAgentId = seat.agentId,
+                updatedAt = 0,
+                members = members.map {
+                    TeamExecutionMemberSpec(
+                        agentId = it.agentId,
+                        kind = it.kind,
+                        driverKey = it.driverKey,
+                        models = it.models,
+                        customPrompt = it.customPrompt,
+                    )
+                },
+            ),
+            declaredMemberIds = seat.teamMembers.map { it.agentId.trim() }.toSet(),
+        )
+        return verdict is TeamExecutionSaveVerdict.Saved
     }
 
     /**
@@ -1522,10 +1917,34 @@ class DesktopWorkerOrchestrator(
         val dirId = groupDirIdOf(group.groupId)?.trim().orEmpty()
         if (dirId.isEmpty()) return null
         val profile = store.profileFor(dirId, seat.agentId) ?: return null
-        val worker = profile.members.firstOrNull { it.isWorker } ?: return null
         // 空 driverKey = 用户还没指派：保持既有解析（按席位 slug 走），不替人做决定。
-        if (worker.driverKey.isBlank()) return null
-        return worker.driverKey to worker.models.firstOrNull()?.takeIf { it.isNotBlank() }
+        val workers = profile.workers
+        if (workers.isEmpty() || workers.any { it.driverKey.isBlank() }) return null
+        // **点将之后"这个席位用什么底座"不再唯一**：编制里可能有 N 位能干活的人，
+        // 而按席位 slug 派单这条路不知道这一单点了谁。全部一致（同底座同模型）时没有
+        // 歧义，照旧覆盖；只要有一个不一致就返回 null —— 猜一个底座等于替主理人点将。
+        return workers.map { worker ->
+            (AgentProfiles.normalizeKey(worker.driverKey) ?: return null) to
+                worker.models.firstOrNull()?.takeIf { it.isNotBlank() }
+        }.distinct().singleOrNull()
+    }
+
+    /**
+     * **员工档案的派单配置**（A5，方案 §2②）：席位 → `employeeId` → 档案 `driverKey`+`model`。
+     *
+     * 优先级在调用方排：执行档（[seatExecutionOverride]，按目录、按队伍，更具体）> 这里
+     * （员工档案的声明值）> 拒绝。null = 席位没带员工引用、或档案没配 `driverKey`
+     * （老数据）。卡面上的**承办人名**解析在 [TicketActorNaming]（纯函数，测试直喂）；
+     * 这里只答「用什么引擎」—— 两个问题两个来源，别合并。
+     */
+    private fun employeeDriverConfig(groupId: String?, seatKey: String): Pair<String, String?>? {
+        val st = controller.state.value
+        val group = st.settings.groups.firstOrNull { it.groupId == groupId } ?: return null
+        val seat = group.seatsMatchingToken(seatKey).singleOrNull() ?: return null
+        if (seat.hostNodeId != st.selfNodeId) return null
+        val profile = st.settings.employeeProfiles.byEmployeeId(seat.employeeId) ?: return null
+        if (profile.driverKey.isBlank()) return null
+        return profile.driverKey to profile.model
     }
 
     /** 本群全部可被 @ 的 token（候选与匹配同源的那一份；组员名已由 P0-0.1 进池）。 */
@@ -1555,59 +1974,161 @@ class DesktopWorkerOrchestrator(
     ): Boolean {
         val st = controller.state.value
         val group = st.settings.groups.firstOrNull { it.groupId == groupId } ?: return false
-        // **逐成员授权（§4.4，mulica 式员工可见性）**：真正被调起的是 `target.member`
-        // （`@团队名` 编到执行档唯一的 worker，`@组员` 就是那个组员），授权必须按**它的**
-        // agentId 判，不是按领队席位 agentId。否则「组员各自设了仅自己可用」会整个失效 ——
-        // 领队开放就等同全队开放，与用户要的「每个员工各自决定给谁用」正相反。
-        // 判据与意图路径同一份（[AgentExecAuthorizer]）。
-        val verdict = AgentExecAuthorizer.authorize(
-            senderId = senderPeerId,
-            group = group,
-            grantAllows = { node -> controller.invokeGrantAllows?.invoke(target.member.agentId, node) == true },
-            policy = controller.invokeExecPolicyOf?.invoke(target.member.agentId),
-            selfNodeId = st.selfNodeId,
-        )
-        if (!with(AgentExecAuthorizer) { verdict.permitsExecution() }) {
-            // 审批回流（与 direct/cross-host invoke 同口径）：被拒不进死胡同 ——
-            // 记一条授权申请（键 = 授权判据用的那把 agentId），机主在可信设备面板
-            // 批一次（scope=AGENT），同一目标下一次就能过。没有这条回流，
-            // 「mulica 式逐成员授权」对 AI 建队的 m-* 编制行就是永远打不开的门：
-            // UI 没有按 m-* 写策略的入口，被拒后连申请都不存在。
-            recordApprovalRequest(
-                senderPeerId, target.member.agentId,
-                "team dispatch: " + targetLabel.take(40),
-            )
-            publishTeamDispatchBlocked(
-                groupId, prompt,
-                "not authorized for " + targetLabel + " (" + verdict + ")",
-                approvalRecorded = true,
-            )
-            return true
-        }
         val profile = target.profile
         val seatMembers = target.seat.teamMembers
         val available = availableAgentKeys()
         // prompt 在域层已经剥净 @（onAgentPrompt 的契约），直接当 goal 用。
         val goal = prompt
-        return when (val compiled = TeamPlanCompiler.compile(
+        val brief = rosterBrief?.invoke()
+        // **逐成员授权（§4.4，mulica 式员工可见性）**：判据与意图路径同一份
+        // （[AgentExecAuthorizer]）。两次判，各自有明确职责：
+        //
+        // 1. **锚点先判**（下面这几行）：被点名的人自己没授权 ⇒ 立即拒。放在编译前有
+        //    三个理由 —— 失败快；不给主理人一次拿别人顶上的机会（点谁就该谁能跑）；
+        //    也不让人靠一个必然被拒的派单去试探本机装了哪些底座。
+        // 2. **编译后逐人再判**：主理人一旦有换人权，执行人就不再是锚点。谁真的会被
+        //    调起就判谁，否则就是「拿 A 的授权跑 B」（见 [TeamDispatchAuthorization]）。
+        fun verdictFor(agentId: String) = AgentExecAuthorizer.authorize(
+            senderId = senderPeerId,
+            group = group,
+            grantAllows = { node -> controller.invokeGrantAllows?.invoke(agentId, node) == true },
+            policy = controller.invokeExecPolicyOf?.invoke(agentId),
+            selfNodeId = st.selfNodeId,
+        )
+        val anchorVerdict = verdictFor(target.member.agentId)
+        // **点将改变了「锚点没授权」的含义**：`@团队名` / `@主理人` 的锚点只是编制首位，
+        // 不是用户点的那个人 —— 他没授权不等于整队没人能干活。判据分档住
+        // [TeamDispatchAuthorization.entryPermits]（纯函数，两档语义各一条用例），
+        // 两档都排在编译之前：全队都不可调起时不许先拿到宿主侧错误（试探底座）。
+        val permitted = TeamDispatchAuthorization.entryPermits(
+            entry = target.entry,
+            anchorVerdict = anchorVerdict,
+            workers = profile.workers.map { it.agentId },
+            verdictOf = ::verdictFor,
+        )
+        if (!permitted) {
+            publishUnauthorizedDispatch(
+                groupId, prompt, senderPeerId,
+                TeamDispatchAuthorization.Denial(target.member.agentId, anchorVerdict),
+                who = targetLabel,
+            )
+            return true
+        }
+        // **审核面裁决**（L1）只在「整队接活 + 命中 worker」时问：
+        // - `@组员` = 单兵，链形状根本不由这一单决定，问了只是白花 20s；
+        // - 命中 reviewer 是对当前工作区的纯审查任务，也没有可裁决的形状。
+        val hitIsWorker = profile.members.firstOrNull {
+            it.agentId.trim().lowercase() == target.member.agentId.trim().lowercase()
+        }?.isWorker == true
+        val asksPlanner = hitIsWorker && target.entry != DispatchEntry.MEMBER
+        val suggestion = if (asksPlanner) {
+            decideChainShape(profile, seatMembers, target.member, goal, available)
+        } else {
+            null
+        }
+        var compiled = TeamPlanCompiler.compile(
             profile, seatMembers, target.member, goal, available,
             // 只在真装配了档案面时追加：否则 agent 会照着一份空说明书去调不存在的动作。
-            capabilityBrief = rosterBrief?.invoke(),
-        )) {
+            capabilityBrief = brief,
+            suggestion = suggestion,
+            entry = target.entry,
+        )
+        // Planner 的选择若被**既有硬门**否掉（同厂商 / 冷却 / 不在位），回落编译固定链
+        // 再裁决一次 —— planner 的坏选择不该变成用户的一次失败。这里只**复用**那道门，
+        // 不复制它的任何判据（同一判据两处实现会各自腐坏）。
+        if (suggestion != null && compiled is TeamPlanCompiler.Compiled.Plan) {
+            val verdict = StageChainGate.enforce(
+                compiled.plan,
+                available ?: emptySet(),
+                cooldownRemainingMs = DriverCooldownTracker.Shared::remainingMs,
+            )
+            if (verdict !is StageChainGate.Decision.Pass) {
+                compiled = TeamPlanCompiler.compile(
+                    profile, seatMembers, target.member, goal, available,
+                    capabilityBrief = brief,
+                )
+            }
+        }
+        // **逐人授权，按编译结果判**（见 [TeamDispatchAuthorization]）：锚点已经过；
+        // 这里守的是「主理人换人之后新出现的人」。整份拒绝时不问任何人 —— 一次只暴露
+        // 一个阻塞点，用户批完再来一次就能推进到下一个。
+        val denial = TeamDispatchAuthorization.firstDenied(compiled.participants) { verdictFor(it) }
+        if (denial != null) {
+            val isAnchor = denial.agentId.trim().equals(target.member.agentId.trim(), ignoreCase = true)
+            val who = if (isAnchor) {
+                targetLabel
+            } else {
+                val name = seatMembers.firstOrNull {
+                    it.agentId.trim().equals(denial.agentId.trim(), ignoreCase = true)
+                }?.name?.ifBlank { null }
+                "delegated member " + (name ?: denial.agentId) + " of " + targetLabel
+            }
+            publishUnauthorizedDispatch(groupId, prompt, senderPeerId, denial, who = who)
+            return true
+        }
+        // 单兵派单**不写** planDecision：它没有「团队形状决策」这回事。写进去会让
+        // 卡面按「0 审查棒」给它打上「未经独立审查」——用户点一个人干活，被提示
+        // 「这队没审查」，那是另一个意思。
+        val decision = if (target.entry == DispatchEntry.MEMBER) null else {
+            planDecisionOf(
+                compiled, suggestion,
+                askedPlanner = asksPlanner,
+                seatMembers = seatMembers,
+                anchorAgentId = target.member.agentId,
+            )
+        }
+        RelayLog.info(
+            "PLAN",
+            "entry=" + target.entry.name.lowercase() +
+                // 链首那一棒的人：点将之后它与 `@` 锚点可能不是同一个人，日志不写它
+                // 就查不出「为什么跑的是 B 不是 A」。
+                " worker=" + (compiled.participants.firstOrNull() ?: "-") +
+                " source=" + (decision?.source ?: "none") +
+                " stages=" + (decision?.stageCount ?: 0) +
+                " reviewers=" + (decision?.reviewerCount ?: 0) +
+                " group=" + groupId,
+        )
+        return when (val outcome = compiled) {
             is TeamPlanCompiler.Compiled.Rejected -> {
-                publishTeamDispatchBlocked(groupId, prompt, compiled.reason)
+                publishTeamDispatchBlocked(groupId, prompt, outcome.reason, code = outcome.code)
                 true
             }
             is TeamPlanCompiler.Compiled.Single -> {
                 // 单棒（无 reviewer，或 reviewer 直呼）：§5.3 不经过 StageChainGate。
                 if (available == null) {
-                    publishTeamDispatchBlocked(groupId, prompt, "control plane unavailable")
+                    publishTeamDispatchBlocked(
+                        groupId,
+                        prompt,
+                        "control plane unavailable",
+                        code = DispatchBlockedCode.NO_DRIVER,
+                    )
                     return true
                 }
                 dispatchSingleWorker(
-                    convId, groupId, compiled.instruction, compiled.agentKey,
+                    convId, groupId, outcome.instruction, outcome.agentKey,
                     wsId = target.seat.defaultWsId,
-                    model = compiled.model,
+                    model = outcome.model,
+                    planDecision = decision,
+                    // **卡面承办人是人**：与团队链卡同一份 seatMembers 名字来源
+                    // （compilePlanned 的 assignee 也取它）—— 单棒不能只有引擎名。
+                    assigneeName = seatMembers.firstOrNull {
+                        it.agentId.trim().equals(outcome.agentId.trim(), ignoreCase = true)
+                    }?.name?.trim()?.takeIf { it.isNotEmpty() },
+                    // **单兵卡的第二颗按钮：这活该找谁审。**
+                    //
+                    // 名册简报（`rosterBrief`）早就告诉过那位组员该找谁，但那是给它看的；
+                    // 卡面前的人只能自己去编制里找谁管审。只在这一档给：链（`Compiled.Plan`）
+                    // 的审查棒本来就在链上，纯审查单棒（`reviewOnly`）问「谁来审审查员」更是荒谬。
+                    reviewBy = if (outcome.reviewOnly) {
+                        null
+                    } else {
+                        CardReviewAsk.pickReviewTarget(
+                            profile = profile,
+                            declared = seatMembers,
+                            available = available,
+                            excludeAgentId = outcome.agentId,
+                        )
+                    },
                 )
                 true
             }
@@ -1615,16 +2136,115 @@ class DesktopWorkerOrchestrator(
                 // **workspace 显式取席位默认工作区**（§4.3）：不用 resolveWorkspacePath 的
                 // 群级推导 —— 同群多席位时会在错误的仓里跑。
                 val dispatched = delegateByPlan(
-                    convId, groupId, compiled.plan, available ?: emptySet(),
+                    convId, groupId, outcome.plan, available ?: emptySet(),
                     wsId = target.seat.defaultWsId,
+                    // 采纳了 Planner 就不再让 refiner 把同一批 instruction 改写一遍。
+                    refine = !outcome.plannedByLlm,
+                    // 主理人在场：链中途卡住时由他决定下一步（常规流转仍走规约）。
+                    leaderBrief = leaderBriefOf(target.seat, profile, goal),
+                    // 链路径的飞行记录靠它落 `planDecision`（单棒那条自己带）。
+                    planTrace = decision?.toChainTrace(),
                 )
                 if (!dispatched) {
                     // §5.5：派不出去也要可见 —— delegateByPlan 的 Boolean 原先会被丢掉。
-                    publishTeamDispatchBlocked(groupId, prompt, "chain executor unavailable or no workspace bound")
+                    publishTeamDispatchBlocked(
+                        groupId,
+                        prompt,
+                        "chain executor unavailable or no workspace bound",
+                        code = DispatchBlockedCode.NO_DIRECTORY,
+                    )
                 }
                 true
             }
         }
+    }
+
+    /**
+     * 问一次审核面裁决（[TeamPlannerLlm] / 注入的 [teamPlannerChain]）。
+     *
+     * 只把**在位且未冷却**的成员列进候选池：不可用的成员进池只会换来一次无效往返，
+     * 而它的建议一旦点名不可用的人，还得整份作废回落编译链。
+     */
+    private suspend fun decideChainShape(
+        profile: TeamExecutionProfile,
+        seatMembers: List<TeamMemberInfo>,
+        hitMember: TeamMemberInfo,
+        goal: String,
+        available: Set<String>?,
+    ): OrchestrationSuggestion? {
+        val planner = teamPlannerChain ?: return null
+        val usable = available ?: return null
+        val declared = seatMembers.associateBy { it.agentId.trim().lowercase() }
+        val pool = profile.members
+            .filter { it.driverKey in usable }
+            .map { spec ->
+                val seat = declared[spec.agentId.trim().lowercase()]
+                TeamPlannerLlm.briefOf(spec, seat?.name.orEmpty(), seat?.role.orEmpty())
+            }
+        if (pool.isEmpty()) return null
+        val input = PlannerChainInput(
+            goal = goal,
+            // 默认落点，不是硬约束：点将权已经在主理人手里，这里只告诉他"用户默认点了谁"。
+            defaultWorkerAgentId = hitMember.agentId,
+            members = pool,
+        )
+        return runCatching { planner(input) }.getOrNull()
+    }
+
+    /**
+     * 形状来源的留痕（进飞行记录 / 日志 / 卡面）。[askedPlanner] = 这次派单本来要不要问
+     * Planner —— 不问的（纯审查）与「问了但没有答案」必须在读数上分得开，
+     * 否则「没装配 Planner」会被读成「LLM 判定不用审」。
+     *
+     * **承办人也记在这里**：点将之后链首那一棒未必是用户点的锚点，而卡面只画岗位。
+     * 不写这两个字段，「为什么跑的是 B」就只剩日志能答（`RelayLog.PLAN` 也只写到
+     * agentId，名字还得靠人记）。
+     */
+    private fun planDecisionOf(
+        compiled: TeamPlanCompiler.Compiled,
+        suggestion: OrchestrationSuggestion?,
+        askedPlanner: Boolean,
+        seatMembers: List<TeamMemberInfo>,
+        anchorAgentId: String,
+    ): FlightPlanDecision? {
+        val stageCount: Int
+        val reviewerCount: Int
+        val adopted: Boolean
+        when (compiled) {
+            is TeamPlanCompiler.Compiled.Single -> {
+                stageCount = 1
+                reviewerCount = if (compiled.reviewOnly) 1 else 0
+                adopted = compiled.plannedByLlm
+            }
+            is TeamPlanCompiler.Compiled.Plan -> {
+                stageCount = compiled.plan.stages.size
+                reviewerCount = compiled.plan.stages.size - 1
+                adopted = compiled.plannedByLlm
+            }
+            is TeamPlanCompiler.Compiled.Rejected -> return null
+        }
+        val source = when {
+            adopted -> FlightPlanDecision.SOURCE_LLM
+            suggestion != null -> FlightPlanDecision.SOURCE_FALLBACK_GATE
+            askedPlanner -> FlightPlanDecision.SOURCE_FALLBACK_UNAVAILABLE
+            else -> FlightPlanDecision.SOURCE_COMPILED
+        }
+        val workerAgentId = compiled.participants.firstOrNull()
+        // 显示名取群声明（人叫什么是名册的事实）；取不到才回落 agentId —— 卡面写
+        // `m-coder` 比写「coder」更不像人，但比留空强。
+        val workerName = workerAgentId?.let { id ->
+            seatMembers.firstOrNull { it.agentId.trim().equals(id.trim(), ignoreCase = true) }
+                ?.name?.ifBlank { null }
+        }
+        return FlightPlanDecision(
+            source = source,
+            stageCount = stageCount,
+            reviewerCount = reviewerCount,
+            rationale = if (adopted) suggestion?.rationale else null,
+            workerAgentId = workerAgentId,
+            workerName = workerName ?: workerAgentId,
+            anchorAgentId = anchorAgentId,
+        )
     }
 
     /**
@@ -1676,18 +2296,51 @@ class DesktopWorkerOrchestrator(
     }
 
     /** 团队派单被拒/未配置的**可见出口**：blocked 卡（全群可见），不许静默吞。 */
+    /**
+     * 授权拒绝的唯一出口（锚点早拒与「编译后新增的人被拒」共用）。
+     *
+     * 审批回流（与 direct / cross-host invoke 同口径）：被拒不进死胡同 —— 记一条授权
+     * 申请（键 = **被拒的那个** agentId），机主在可信设备面板批一次（scope=AGENT），
+     * 同一个目标下一次就能过。没有这条回流，「mulica 式逐成员授权」对 AI 建队的 m-*
+     * 编制行就是永远打不开的门：UI 没有按 m-* 写策略的入口，被拒后连申请都不存在。
+     *
+     * @param who 卡面里怎么称呼被拒的人（用户打过的那个词 / 组员名）。
+     */
+    private suspend fun publishUnauthorizedDispatch(
+        groupId: String?,
+        prompt: String,
+        senderPeerId: String,
+        denial: TeamDispatchAuthorization.Denial,
+        who: String,
+    ) {
+        recordApprovalRequest(
+            senderPeerId, denial.agentId,
+            "team dispatch: " + who.take(40),
+        )
+        publishTeamDispatchBlocked(
+            groupId, prompt,
+            "not authorized for " + who + " (" + denial.verdict + ")",
+            approvalRecorded = true,
+        )
+    }
+
     private suspend fun publishTeamDispatchBlocked(
         groupId: String?,
         goal: String,
         reason: String,
         /** true = 已落一条授权申请（可信设备面板可见），卡面要说出路而不是只说死。 */
         approvalRecorded: Boolean = false,
+        /** 分类码（§3.5）：卡 JSON 带 `blockedCode`，UI 按 code 选 chip/文案/主行动；老端宽容忽略。 */
+        code: DispatchBlockedCode? = null,
+        /** `TEAM_NOT_IN_GROUP` 的主行动路由：把这支队伍加进本群（[DispatchBlockedCode.TEAM_NOT_IN_GROUP]）。 */
+        teamIdForAttach: String? = null,
     ): String? {
         recordBlindSpot(BlindSpotPatrol.KIND_DELEGATION_REJECTED, goal.take(60), reason.take(200))
         val banner = "Team dispatch blocked: " + reason +
             (if (approvalRecorded) "; approval request recorded for the host owner" else "")
+        val ticketId = "team-" + com.kapp.tenon.core.nowMillis().toString(36)
         val json = ticketCardJson(
-            ticketId = "team-" + System.currentTimeMillis().toString(36),
+            ticketId = ticketId,
             rev = 1,
             state = "blocked",
             title = goal.take(60),
@@ -1695,8 +2348,36 @@ class DesktopWorkerOrchestrator(
             percent = 0,
             roleName = "Team",
         )
-        publishCardJson(groupId, json, "codex")
+        if (groupId != null) {
+            // 登记簿存**会话键**（group:<id>，KDoc 的契约）：裸 id 会让消费方的
+            // `ConvId.groupIdOf` 解不出（真机 UX 轮现场：复检卡点了没反应）。
+            groupByCard["chain-$ticketId"] = ConvId.group(groupId)
+        }
+        publishCardJson(groupId, cardJsonWithBlockedMeta(json, code, teamIdForAttach), "agent")
         return json
+    }
+
+    /**
+     * blocked 卡的**分类码 / 主行动路由**元数据：卡 JSON 是宽容解码面（老手机端忽略
+     * 未知键，不画 chip 而已，不崩），所以这里只做追加、不改既有键。
+     *
+     * **不往 `actions` 里塞按钮**：卡面的主行动由渲染端按 `blockedCode` 自己画
+     * （`CardBlockedBanner`），它走 `labelKey` → 本端词条。在这里再塞一条动作，
+     * 会让同一颗按钮出现两次，而塞进去的 `label` 只能是宿主的语言（手机壳翻不回去）。
+     */
+    private fun cardJsonWithBlockedMeta(
+        json: String,
+        code: DispatchBlockedCode?,
+        teamIdForAttach: String?,
+    ): String {
+        if (code == null && teamIdForAttach == null) return json
+        return runCatching {
+            val obj = Json.parseToJsonElement(json).jsonObject
+            val extras = LinkedHashMap<String, JsonElement>()
+            code?.let { extras["blockedCode"] = JsonPrimitive(it.name) }
+            teamIdForAttach?.let { extras["attachTeamId"] = JsonPrimitive(it) }
+            JsonObject(LinkedHashMap(obj.toMap() + extras)).toString()
+        }.getOrDefault(json)
     }
 
     /**
@@ -1715,14 +2396,24 @@ class DesktopWorkerOrchestrator(
         plan: DelegationPlan,
         available: Set<String>,
         wsId: String? = null,
+        /**
+         * 是否让 [teamPlanRefiner] 再改一遍文案。false = 形状与文案已由 Planner 裁决，
+         * 同一批 instruction 不写两遍（第二遍既白付 20s，又会把裁掉的审查棒语义说回来）。
+         */
+        refine: Boolean = true,
+        /** 主理人上下文：非 null = 这条链由某个 Lead 负责，卡住时他会接手。 */
+        leaderBrief: LeaderBrief? = null,
+        /** 形状来源（飞行记录）：团队派单带下来，其它入口 null。 */
+        planTrace: com.kapp.tenon.agent.ChainPlanTrace? = null,
     ): Boolean {
-        val effective = refinedPlan(plan, available)
+        val effective = if (refine) refinedPlan(plan, available) else plan
         return when (val decision = StageChainGate.enforce(
             effective,
             available,
             cooldownRemainingMs = DriverCooldownTracker.Shared::remainingMs,
         )) {
-            is StageChainGate.Decision.Pass -> dispatchPlanStages(convId, groupId, effective, decision.stages, wsId)
+            is StageChainGate.Decision.Pass ->
+                dispatchPlanStages(convId, groupId, effective, decision.stages, wsId, leaderBrief, planTrace)
             is StageChainGate.Decision.Downgrade -> {
                 dispatchSingleWorker(convId, groupId, plan.goal, decision.stage.agentKey, wsId)
                 true
@@ -1772,6 +2463,9 @@ class DesktopWorkerOrchestrator(
         plan: DelegationPlan,
         stages: List<ChainStage>,
         wsId: String? = null,
+        leaderBrief: LeaderBrief? = null,
+        /** 形状来源：进飞行记录（链执行器在 :agentNode，只收这份标量快照）。 */
+        planTrace: com.kapp.tenon.agent.ChainPlanTrace? = null,
     ): Boolean {
         if (stages.isEmpty()) return false
         if (stages.size == 1) {
@@ -1781,6 +2475,8 @@ class DesktopWorkerOrchestrator(
         return dispatchMultiRoleChain(
             convId, groupId, plan.goal, stages,
             target = plan.target, module = plan.module, context = plan.context, wsId = wsId,
+            leaderBrief = leaderBrief,
+            planTrace = planTrace,
         )
     }
 
@@ -1840,11 +2536,23 @@ class DesktopWorkerOrchestrator(
         wsId: String? = null,
         /** 执行档带来的模型（`models.first`）：null = 跟随驱动默认。 */
         model: String? = null,
+        /** 责任链形状的决策留痕（团队派单带下来，其它入口 null = 与从前一致）。 */
+        planDecision: FlightPlanDecision? = null,
+        /**
+         * 这一单该找谁审（单兵入口才有，见 [ActiveTicket.reviewBy]）：终态卡上画成
+         * 「请 TA 复检」那颗按钮。null = 卡形状与从前一字不差。
+         */
+        reviewBy: com.kapp.tenon.agent.ChainReviewTarget? = null,
+        /**
+         * 卡面上的承办人名（组员名 / 员工档案名）：调用方知道是谁就显式带（团队派单
+         * 从 seatMembers 解），不知道就留 null —— 内部按 rawKey 回查席位/档案。
+         */
+        assigneeName: String? = null,
     ): CompletableDeferred<TicketOutcome> {
         val ticketId = "t" + System.currentTimeMillis().toString(36)
         val title = prompt.lineSequence().firstOrNull()?.trim()?.take(60) ?: "Task $ticketId"
 
-        // 派单帧带 agentId 时随帧走（codex/claude/antigravity…）；文本路由没带 → codex。
+        // 派单帧带 agentId 时随帧走（codex/claude/antigravity…）；文本路由没带 → 拒绝。
         // 提前到 handback 之前：退单卡也要挂真名（广播身份与授权都认这个键）。
         val rawKey = agentKey?.takeIf { it.isNotBlank() }
         // **单兵底座**（不变量 5）：按席位 slug 派单时，若执行配置里指派过底座就改用它。
@@ -1853,14 +2561,38 @@ class DesktopWorkerOrchestrator(
         val seatOverride = rawKey
             ?.takeIf { AgentProfiles.normalizeKey(it) == null }
             ?.let { seatExecutionOverride(groupId, it) }
-        // 席位全名（`dsh-<host>-<workspace>`）不是档案键：原样传下去会让 executeCliTask
-        // 报「no cli driver」。裸档案键（含大小写写法）一律原样保留，避免改动既有卡面。
-        // 执行配置指派过底座时以它为准（**先覆盖、后归一**，顺序不能反）。
-        val defaultAgent = seatOverride?.first ?: rawKey?.let { raw ->
-            if (AgentProfiles.normalizeKey(raw) != null) raw
-            else AgentProfiles.resolveKey(raw, availableAgentKeys().orEmpty()) ?: raw
-        } ?: "codex"
-        val effectiveModel = seatOverride?.second ?: model
+        // **员工档案**（A5，方案 §2②）：执行档（更具体）没给时，读席位引用的员工档案 ——
+        // 声明值优先于键反解。null = 席位没带员工引用 / 档案没配 driverKey（老数据）。
+        val profileCfg = rawKey
+            ?.takeIf { AgentProfiles.normalizeKey(it) == null }
+            ?.let { employeeDriverConfig(groupId, it) }
+        // 席位全名（`dsh-<host>-<workspace>`）不是档案键：由 [AgentProfiles.resolveKey] 归一
+        // 成底座键。**不再 `?: raw` 透传**：解析不出的键说明「没有任何明确底座来源」，按
+        // 不变量 1 拒绝并说明，而不是把一个来历不明的字符串递给 executeCliTask。
+        val routed = rawKey?.let { raw ->
+            AgentProfiles.normalizeKey(raw)
+                ?: AgentProfiles.resolveKey(raw, availableAgentKeys().orEmpty())
+        }
+        // 不变量 1（**不猜底座**）：执行档、员工档案、显式点名三者都没有 ⇒ 拒绝并说明，
+        // 绝不回落默认驱动。旧写法 `?: "codex"` 正是「不猜底座」要拔掉的那颗钉子 ——
+        // 拒因在 P2 升格为 NO_DRIVER 分类码，人话先落在这里。
+        // 不变量 1（**不猜底座**）：执行档、员工档案、显式点名三者都没有 ⇒ 拒绝并说明，
+        // 绝不回落默认驱动。旧写法 `?: "codex"` 正是「不猜底座」要拔掉的那颗钉子 ——
+        // 拒因在 P2 升格为 NO_DRIVER 分类码，人话先落在这里。
+        val defaultAgent = seatOverride?.first ?: profileCfg?.first ?: routed ?: run {
+            val reason = "no driver configured for @" + (rawKey ?: "(unnamed)") +
+                " — assign a runtime in the team roster or the employee profile"
+            RelayLog.info("DISPATCH", reason + " group=" + groupId + " conv=" + convId)
+            val refused = TicketOutcome("blocked", null, reason, null)
+            if (groupId != null) scope.launch {
+                publishTeamDispatchBlocked(groupId, prompt, reason, code = DispatchBlockedCode.NO_DRIVER)
+            }
+            // 不变量 2（不静默）：1:1（groupId == null）没有群卡片可用，也必须在会话里
+            // 留一条可见通知 —— 旧实现靠「缺省 codex」混过这一关，A5 之后这里自己发声。
+            else announceTerminalFailure(convId, rawKey ?: "unassigned", title, ticketId, refused)
+            return CompletableDeferred(refused)
+        }
+        val effectiveModel = seatOverride?.second ?: profileCfg?.second ?: model
 
         val host = planeProvider()
             ?: run {
@@ -1870,7 +2602,7 @@ class DesktopWorkerOrchestrator(
                 announceTerminalFailure(convId, defaultAgent, title, ticketId, unavailable)
                 return CompletableDeferred(unavailable)
             }
-        val repoPath = resolveWorkspacePath(groupId, wsId)
+        val (repoPath, workspaceDenial) = resolveWorkspaceWithDenial(groupId, wsId)
 
         val done = CompletableDeferred<TicketOutcome>()
 
@@ -1919,18 +2651,33 @@ class DesktopWorkerOrchestrator(
                 title,
                 "no git workspace bound to group (agent=$defaultAgent)",
             )
+            // 分类码（§3.5）：**两种成因两条出路**。回收授权与「还没选目录」是两件事，
+            // 前者让用户去授权、后者让用户去选，卡面文案与主行动都由 code 决定。
+            val workspaceCode = when (workspaceDenial) {
+                WorkspaceDenial.DIR_NOT_ALLOWED -> DispatchBlockedCode.DIR_NOT_ALLOWED
+                else -> DispatchBlockedCode.NO_DIRECTORY
+            }
+            val handedBackBanner = if (workspaceCode == DispatchBlockedCode.DIR_NOT_ALLOWED) {
+                "Handed back: the group's project directory is not allowed on this host"
+            } else {
+                "Handed back: no git workspace bound to group"
+            }
             val handedBack = TicketOutcome(
                 state = "blocked",
                 summary = null,
-                error = "Handed back: no git workspace bound to group",
-                cardJson = ticketCardJson(
-                    ticketId = ticketId,
-                    rev = 1,
-                    state = "blocked",
-                    title = title,
-                    banner = "Handed back: no git workspace bound to group",
-                    percent = 0,
-                    roleName = roleNameOf(defaultAgent),
+                error = handedBackBanner,
+                cardJson = cardJsonWithBlockedMeta(
+                    ticketCardJson(
+                        ticketId = ticketId,
+                        rev = 1,
+                        state = "blocked",
+                        title = title,
+                        banner = handedBackBanner,
+                        percent = 0,
+                        roleName = roleNameOf(defaultAgent),
+                    ),
+                    workspaceCode,
+                    null,
                 ),
             )
             scope.launch { publishCardJson(groupId ?: convId, handedBack.cardJson, defaultAgent) }
@@ -2026,6 +2773,14 @@ class DesktopWorkerOrchestrator(
             done.complete(outcome)
         }
 
+        // 卡面承办人：**人名优先**（用户点的是 @员工 / @组员，不是引擎）。
+        // 调用方显式带的（团队派单从 seatMembers 解）> 按 rawKey 回查席位/档案
+        // > 说不清是谁（裸驱动）回落驱动名 —— 与旧行为逐字一致。
+        val resolvedAssignee = assigneeName ?: TicketActorNaming.assigneeNameOf(
+            controller.state.value.settings.groups.firstOrNull { it.groupId == groupId },
+            controller.state.value.settings.employeeProfiles,
+            rawKey,
+        )
         ticket = ActiveTicket(
             ticketId = ticketId,
             convId = convId,
@@ -2035,12 +2790,15 @@ class DesktopWorkerOrchestrator(
             repoPath = repoPath,
             stage = "proposed",
             rev = revCounter,
-            role = roleNameOf(defaultAgent),
+            role = resolvedAssignee ?: roleNameOf(defaultAgent),
             agentKey = defaultAgent,
             wsId = wsId,
             model = effectiveModel,
             devPrompt = prompt,
             done = done,
+            planDecision = planDecision,
+            reviewBy = reviewBy,
+            assigneeName = resolvedAssignee,
         )
         activeTickets[ticketId] = ticket
         // 先入表再起跑：打断信号（`abortIfRequested`）按 convId 找活跃工单，
@@ -2051,7 +2809,9 @@ class DesktopWorkerOrchestrator(
         // 倒计时到点自动开工（文档 §五「极简注意力」：不强制人等，倒计时不是审批门），
         // 卡上的「立即执行 / 取消」只是把这两个时刻握到人手里。
         scope.launch {
-            val assignee = controller.uiTexts.localAssignee(ticket.role)
+            // 承办人行：人名直用（「UX 小工」—— 人不在「本机/远端」的维度上）；
+            // 不知道是谁（驱动名回落）才带「（本机）」—— 那句话答的是「哪台机在跑」。
+            val assignee = ticket.assigneeName ?: controller.uiTexts.localAssignee(ticket.role)
             val plan = controller.uiTexts.stageRoles(isProto)
             publishTicketCard(
                 groupId = groupId ?: convId,
@@ -2059,7 +2819,7 @@ class DesktopWorkerOrchestrator(
                 rev = revCounter.get(),
                 state = "proposed",
                 title = title,
-                banner = controller.uiTexts.teamReadyBanner(ticket.role, TEAM_COUNTDOWN_MS / 1000),
+                banner = teamReadyBannerWithReviewNotice(ticket),
                 percent = 0,
                 roleName = ticket.role,
                 agentId = defaultAgent,
@@ -2070,6 +2830,31 @@ class DesktopWorkerOrchestrator(
             startProposedTicket(ticket)
         }
         return done
+    }
+
+    /**
+     * 就位横幅 + 「本单由 X 承办」+「未经独立审查」标注。
+     *
+     * 0 审查棒是**合法形状**（单点、低风险、可自验），代码不替用户认定「必须审」；
+     * 但「这单没有独立复核」必须让人看得见 —— 否则它和一张常规团队单长得一模一样，
+     * 用户只能等到出问题才发现没人复核过。
+     *
+     * 同理，主理人换了人也要说出来：`@团队名` 的锚点只是默认落点，而卡面的承办人
+     * 那一列写的是**岗位**，不是「你点的那个人」。
+     *
+     * 纯审查单自己就是审查棒，不打这个标；1:1 单席位派单没有链路形状（`planDecision`
+     * 为 null），同样不打。
+     */
+    private suspend fun teamReadyBannerWithReviewNotice(ticket: ActiveTicket): String {
+        val base = controller.uiTexts.teamReadyBanner(ticket.role, TEAM_COUNTDOWN_MS / 1000)
+        val decision = ticket.planDecision
+        // 只在**真的换了人**时才问文案桥：没换人（绝大多数单）不该多走一次资源解析。
+        val picked = if (PlanDecisionBanner.workerSwitched(decision)) {
+            controller.uiTexts.pickedWorkerNotice(decision?.workerName.orEmpty())
+        } else {
+            ""
+        }
+        return PlanDecisionBanner.compose(base, controller.uiTexts.unreviewedNotice(), decision, picked)
     }
 
     /** 点将卡的自动开工等待（§二 Proposed → Executing 的「倒计时结束」）。
@@ -2240,7 +3025,7 @@ class DesktopWorkerOrchestrator(
             percent = 20,
             roleName = ticket.role,
             agentId = defaultAgent,
-            assignees = listOf(defaultAgent),
+            assignees = listOf(ticket.displayActor()),
             startedAt = ticket.createdAt,
         )
 
@@ -2286,7 +3071,7 @@ class DesktopWorkerOrchestrator(
             percent = 50,
             roleName = ticket.role,
             agentId = defaultAgent,
-            assignees = listOf(defaultAgent),
+            assignees = listOf(ticket.displayActor()),
             artifacts = protoArtifacts,
         )
 
@@ -2338,7 +3123,7 @@ class DesktopWorkerOrchestrator(
                     percent = 60,
                     roleName = ticket.role,
                     agentId = defaultAgent,
-                    assignees = listOf(defaultAgent),
+                    assignees = listOf(ticket.displayActor()),
                     artifacts = refinedArtifacts,
                 )
             }
@@ -2538,7 +3323,7 @@ class DesktopWorkerOrchestrator(
             percent = 40,
             roleName = ticket.role,
             agentId = defaultAgent,
-            assignees = listOf(defaultAgent),
+            assignees = listOf(ticket.displayActor()),
             startedAt = ticket.createdAt,
         )
 
@@ -2769,7 +3554,7 @@ class DesktopWorkerOrchestrator(
                         percent = 40 + healRound * 15,
                         roleName = ticket.role,
                         agentId = defaultAgent,
-                        assignees = listOf(defaultAgent),
+                        assignees = listOf(ticket.displayActor()),
                         startedAt = ticket.createdAt,
                     )
                     // 重试提示词按失败类分化（真机观察 O6：问答式任务没有补丁是
@@ -2826,7 +3611,7 @@ class DesktopWorkerOrchestrator(
                 percent = 40,
                 roleName = ticket.role,
                 agentId = defaultAgent,
-                assignees = listOf(defaultAgent),
+                assignees = listOf(ticket.displayActor()),
                 startedAt = ticket.createdAt,
                 failure = StageChainFailure(
                     observation = executionError,
@@ -2841,6 +3626,10 @@ class DesktopWorkerOrchestrator(
         }
 
         // Success -> review_ready card (sandbox isolated, host repo remains clean until user reviews and merges)
+        // 终态工单从活跃表退下，但**留一份可打回快照**：横幅承诺「等你合并或打回」，
+        // 打回（rejectRevisionByCard / abandonHealByCard）要凭它复活工单重跑。没有它，
+        // review_ready 时查 activeTickets 恒空 ⇒ 按钮点了翻 stale（真机现场）。
+        reviewableTickets[ticket.ticketId] = ticket
         activeTickets.remove(ticket.ticketId)
         val harvest = patchPath?.let { StageChain.parseHarvest(File(it), File(repoPath).name) }
         val diff = harvest?.first
@@ -2872,7 +3661,7 @@ class DesktopWorkerOrchestrator(
                 workspacePath = repoPath,
                 patchPath = patchPath,
             )
-            groupByCard["chain-" + ticketId] = targetId
+            groupByCard["chain-" + ticketId] = groupId?.let { ConvId.group(it) } ?: targetId
             // 同一笔账落到磁盘（[TicketPatchLedger]）：内存表随宿主重启蒸发，
             // 而补丁文件还在 `/tmp/tenon-ws/artifacts/…` 里 —— 真机现场就是这样
             // 得到「重启后点合并 = cannot resolve workspace」的。
@@ -2910,6 +3699,8 @@ class DesktopWorkerOrchestrator(
                         FlightRecord.VERIFIED_BY_AGENT_SELF_REPORT
                     },
                 ),
+                // 形状的来源：采纳了 Planner 的裁决 / 回落编译链 / 这单不经 Planner。
+                planDecision = ticket.planDecision,
             ),
             outputDir = File(controller.dataDirectory, "flight-records"),
         )
@@ -2945,6 +3736,8 @@ class DesktopWorkerOrchestrator(
             // 自描述契约（§7.4）：intent/delivered 只在 review_ready 终态卡上出现，
             // 其余调用点不传，卡形状一字不变。
             selfDescribeDelivered = pipedNames,
+            // 单兵卡的第二颗按钮：编制里有在位的审查员才有，见 [ActiveTicket.reviewBy]。
+            reviewBy = ticket.reviewBy,
         )
         return TicketOutcome("review_ready", summary, null, reviewJson, patchPath)
     }
@@ -3077,6 +3870,8 @@ class DesktopWorkerOrchestrator(
         humanSteering: Boolean = false,
         /** 工单创建时刻：非空时执行中/终态卡都带耗时段（规格二的 `(45s)`/`耗时 1m20s`）。 */
         startedAt: Long? = null,
+        /** 终态卡的「请 TA 复检」落点（单兵才有）：null = 卡形状与从前一致。 */
+        reviewBy: com.kapp.tenon.agent.ChainReviewTarget? = null,
     ): String? {
         if (groupId == null) return null
         val progress = ChainProgress(
@@ -3094,6 +3889,7 @@ class DesktopWorkerOrchestrator(
             artifacts = artifacts,
             diff = diff,
             sessionId = ticketSessionIds[ticketId],
+            reviewBy = reviewBy,
         )
         val baseCard: kotlinx.serialization.json.JsonObject = StageChain.cardOf(progress)
         val decorated: kotlinx.serialization.json.JsonObject = if (selfDescribeDelivered.isEmpty()) {
@@ -3147,12 +3943,26 @@ class DesktopWorkerOrchestrator(
      * 补丁卡都齐），错的是"改哪个仓"，而往别人的仓库里写字是不可撤销的那类错。
      * 兜底的语义从来不是"猜一个仓"，是"没有就退单"。
      */
-    fun resolveWorkspacePath(groupId: String?, wsId: String? = null): String? {
-        val hit = resolveWorkspacePathCandidate(groupId, wsId) ?: return null
-        // **节点级白名单（D10/D15）**：目录没被机主显式放行 ⇒ 终局退单，**不回落**
-        // 任何别的推导 —— 换一个仓写字比「不执行」更不可接受。
-        if (pathAllowed?.invoke(hit, true) == false) return null
-        return hit
+    fun resolveWorkspacePath(groupId: String?, wsId: String? = null): String? =
+        resolveWorkspaceWithDenial(groupId, wsId).first
+
+    /**
+     * [resolveWorkspacePath] 的**带原因**版本：`null` 有两种成因，界面上是两条不同的出路
+     * （「这个群还没选项目目录」vs「这台电脑没被授权访问它」），所以不能都退化成 null。
+     *
+     * 判据顺序与白名单语义（默认 deny）都不变，只是把「为什么没有」带出来。
+     */
+    private fun resolveWorkspaceWithDenial(
+        groupId: String?,
+        wsId: String? = null,
+    ): Pair<String?, WorkspaceDenial> {
+        val hit = resolveWorkspacePathCandidate(groupId, wsId)
+        return when (val denial = workspaceDenialOf(hit, hit?.let { pathAllowed?.invoke(it, true) })) {
+            WorkspaceDenial.NONE -> hit to denial
+            // **节点级白名单（D10/D15）**：目录没被机主显式放行 ⇒ 终局退单，**不回落**
+            // 任何别的推导 —— 换一个仓写字比「不执行」更不可接受。
+            else -> null to denial
+        }
     }
 
     private fun resolveWorkspacePathCandidate(groupId: String?, wsId: String? = null): String? {
@@ -3172,6 +3982,10 @@ class DesktopWorkerOrchestrator(
             val legacy = state.agentWorkspaces.values.firstOrNull { it.wsId == groupId }
             val path = (declared ?: legacy)?.wsPath?.takeIf { it.isNotBlank() }
             if (path != null && isGitRepo(path)) return path
+            // 1b. **D16 的目录指针**：同一件事的第二条落点（见 [dirPathOf] 的 KDoc）。
+            // 只读指针、不猜顺序：指针唯一，解不出就是没有。
+            val pointed = groupDirIdOf(groupId)?.let { dirPathOf(it) }?.takeIf { it.isNotBlank() }
+            if (pointed != null && isGitRepo(pointed)) return pointed
         }
         // 3. 宿主仅绑定 1 个工作区时自然推导（1:1 直连场景自动锁定）
         val localWorkspaces = state.agentWorkspaces.values.filter {
@@ -3313,5 +4127,41 @@ object AbortSignals {
         val trimmed = stripMentions(text).lowercase()
         if (trimmed.isEmpty()) return false
         return keywords.any { trimmed == it }
+    }
+}
+
+/**
+ * 单兵工单卡面上的**承办人名**（组员名 / 员工档案名 / 席位名）。null = 这一单
+ * 说不清是谁（裸驱动派单），卡面回落驱动名 —— 与旧行为逐字一致。
+ *
+ * 为什么要它（真机 UX 轮的现场）：用户点的是 @员工 / @组员（**人**），卡面
+ * 却只认得出引擎（「Codex（本机）」×3）—— 同底座两个员工的两张单在用户眼里
+ * 无法区分，planDecision 已带 workerName（团队链卡答得出「这一单点了谁」），
+ * 单兵卡在同一件事上断了线。
+ *
+ * 判据顺序：组员 token（`@组员` 直派，团队席位 member 行的名字）→ 员工档案名
+ * （跨群一致的档案事实）→ 本群别名（employeeName）→ 席位名。与
+ * `employeeDriverConfig` 同一份座位事实，各答各的问题：那个答「用什么引擎」，
+ * 这个答「是谁在干」。
+ */
+internal object TicketActorNaming {
+
+    fun assigneeNameOf(
+        group: com.kapp.tenon.core.protocol.GroupMeta?,
+        employeeProfiles: List<com.kapp.tenon.domain.EmployeeProfile>,
+        seatKey: String?,
+    ): String? {
+        val key = seatKey?.trim()?.lowercase().orEmpty()
+        if (group == null || key.isEmpty()) return null
+        group.virtualAgents.orEmpty().filter { it.isTeam }
+            .flatMap { it.teamMembers }
+            .firstOrNull { it.name.trim().lowercase() == key }
+            ?.let { member -> return member.name.trim().ifBlank { null } }
+        val seat = group.seatsMatchingToken(seatKey.orEmpty()).singleOrNull() ?: return null
+        employeeProfiles.byEmployeeId(seat.employeeId)?.let { profile ->
+            profile.name.trim().takeIf { it.isNotEmpty() }?.let { return it }
+        }
+        return seat.employeeName?.trim()?.takeIf { it.isNotEmpty() }
+            ?: seat.name.trim().takeIf { it.isNotEmpty() }
     }
 }

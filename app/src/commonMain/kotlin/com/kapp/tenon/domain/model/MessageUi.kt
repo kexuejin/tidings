@@ -311,6 +311,15 @@ data class MessageUi(
      */
     val agentSessionTitle: String? = null,
     /**
+     * 这条群文本 `mentions` 的**会话内快照**（横幅行的动作寻址用）。
+     *
+     * 谁写它：宿主的失败横幅（`broadcastAgentGaveUp`）带上被 @ 的 agent 名 ——
+     * 渲染层据此在横幅行上给「申请授权」一颗能寻址的按钮（§4 #7：分类 + 入口）。
+     * **刻意不持久化**（SQLDelight 映射恒空表）：横幅正文才是持久事实，chip 是
+     * 动作入口 —— 重启后入口消失可接受，为它加一列迁移不值。
+     */
+    val mentions: List<String> = emptyList(),
+    /**
      * 出站排队时为 [DeliveryState.Queued]，其余为 null —— 一个徽标，别的什么都不存。
      *
      * 这里**曾经**有一个 `outgoingEnvelope: String?`，存的是整条已编码信封，

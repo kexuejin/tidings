@@ -7,11 +7,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -23,9 +20,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
 import com.kapp.tenon.core.protocol.AVATAR_LEGACY_INITIAL_VALUE
-import com.kapp.tenon.domain.AgentEmployeeCandidateUi
 import com.kapp.tenon.domain.AgentEmployeeProfileUi
 import com.kapp.tenon.generated.resources.Res
 import com.kapp.tenon.generated.resources.agent_count_items
@@ -36,12 +31,7 @@ import com.kapp.tenon.generated.resources.agent_profile_forget_hint
 import com.kapp.tenon.generated.resources.agent_profile_hint
 import com.kapp.tenon.generated.resources.agent_profile_meta_alone_format
 import com.kapp.tenon.generated.resources.agent_profile_meta_groups_format
-import com.kapp.tenon.generated.resources.agent_empty_exit_title
 import com.kapp.tenon.generated.resources.agent_profile_new
-import com.kapp.tenon.generated.resources.agent_profile_new_empty
-import com.kapp.tenon.generated.resources.agent_profile_new_empty_hint
-import com.kapp.tenon.generated.resources.agent_profile_new_hint
-import com.kapp.tenon.generated.resources.agent_profile_new_meta_format
 import com.kapp.tenon.generated.resources.agent_profile_section_title
 import com.kapp.tenon.generated.resources.common_cancel
 import com.kapp.tenon.generated.resources.ic_trash
@@ -51,7 +41,6 @@ import com.kapp.tenon.ui.components.AppTextButton
 import com.kapp.tenon.ui.components.PeerAvatar
 import com.kapp.tenon.ui.components.RelayDialog
 import com.kapp.tenon.ui.components.RelayDialogButton
-import com.kapp.tenon.ui.components.RelayDialogContentHeight
 import com.kapp.tenon.ui.components.SectionHeader
 import com.kapp.tenon.ui.components.formatCount
 import com.kapp.tenon.ui.theme.LocalAppSpacing
@@ -245,136 +234,6 @@ private fun AgentProfileRow(
                 onForget?.invoke()
             },
         )
-    }
-}
-
-/**
- * 「新建档案」的第一步：**选谁**。
- *
- * ## 为什么建档要一个选择器，而登记不需要
- *
- * 详情页的「登记为员工」是从一张**已有的卡**上点进去的 —— 身份键就在手里，多一步选择只是
- * 多一次点击。档案页相反：这里没有卡，用户手里只有「我想给某个人起个名字」这个意图，
- * 而档案**必须**挂在一个真实存在的本机 agent 上（空表单会产出派不出去的幽灵，见
- * `EmployeeProfile` 的 KDoc）。所以这一步问的是「哪个人」，不是「填什么」。
- *
- * 选完就交给同一个表单（[EmployeeEditDialog]）—— 本对话框不收集名字/职责，两份表单必然漂。
- *
- * @param candidates [employeeProfileCandidates] 的结果：本机、还没有档案、有身份键。
- *   空表 = 这台机器上没有可登记的对象，如实说，不给一颗假按钮。
- */
-@Composable
-internal fun EmployeeProfileCreateDialog(
-    candidates: List<AgentEmployeeCandidateUi>,
-    onPick: (AgentEmployeeCandidateUi) -> Unit,
-    onDismiss: () -> Unit,
-    /**
-     * 前置条件不满足时的出路：去节点页确认宿主在线。
-     *
-     * null = 这个壳没有节点页（预览）⇒ 只保留「取消」，但不假装能建档 ——
-     * 表单本身也不展开（见下方 [candidates] 为空的分支）。
-     */
-    onFindNodes: (() -> Unit)? = null,
-) {
-    val sp = LocalAppSpacing.current
-    val hasCandidates = candidates.isNotEmpty()
-    RelayDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(Res.string.agent_profile_new)) },
-        content = {
-            if (hasCandidates) {
-                Column(verticalArrangement = Arrangement.spacedBy(sp.sm)) {
-                    Text(
-                        text = stringResource(Res.string.agent_profile_new_hint),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    // 与「添加成员」同一个高度收口（比例上限 + 列表自己滚），
-                    // 候选多时不会把对话框顶出屏幕。
-                    RelayDialogContentHeight(defaultMaxHeight = 320.dp) { cap ->
-                        LazyColumn(Modifier.heightIn(max = cap)) {
-                            items(candidates, key = { it.agentId }) { candidate ->
-                                CandidateRow(candidate = candidate, onClick = { onPick(candidate) })
-                            }
-                        }
-                    }
-                }
-            } else {
-                // 一个候选都没有时**不展开选择器、也不放表单**：档案必须挂在真实存在的
-                // 本机 agent 上，空表提交只会产出一座派不出去的幽灵。这里只说清前置条件
-                // 与出路 —— 此前这一支只有一句「暂时无法建档」加一颗「取消」，用户点了
-                // 「新建档案」却只能关掉，是一次没有出口的操作。
-                Column(verticalArrangement = Arrangement.spacedBy(sp.sm6)) {
-                    Text(
-                        text = stringResource(Res.string.agent_profile_new_empty),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                    Text(
-                        text = stringResource(Res.string.agent_profile_new_empty_hint),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-        },
-        confirmButton = {
-            if (!hasCandidates && onFindNodes != null) {
-                RelayDialogButton(
-                    text = stringResource(Res.string.agent_empty_exit_title),
-                    primary = true,
-                    onClick = {
-                        onDismiss()
-                        onFindNodes()
-                    },
-                )
-            }
-        },
-        dismissButton = {
-            RelayDialogButton(
-                text = stringResource(Res.string.common_cancel),
-                onClick = onDismiss,
-            )
-        },
-    )
-}
-
-/** 候选行：首字头像 + 现有显示名 + 身份键（副行）。与档案行同一套排版语言。 */
-@Composable
-private fun CandidateRow(candidate: AgentEmployeeCandidateUi, onClick: () -> Unit) {
-    val sp = LocalAppSpacing.current
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(vertical = sp.xs),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(sp.sm),
-    ) {
-        PeerAvatar(
-            name = candidate.name,
-            avatar = AVATAR_LEGACY_INITIAL_VALUE,
-            size = sp.xxl,
-            shape = MaterialTheme.shapes.medium,
-        )
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(sp.xxs)) {
-            Text(
-                text = candidate.name,
-                style = MaterialTheme.typography.bodyMedium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            // 副行写**身份键**：显示名可能只是一个 `@` token，用户靠它认不出这是哪个进程。
-            Text(
-                text = candidate.hostName
-                    ?.let { stringResource(Res.string.agent_profile_new_meta_format, it, candidate.agentId) }
-                    ?: candidate.agentId,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
     }
 }
 

@@ -2,8 +2,10 @@
 
 package com.kapp.tenon.feature.agents
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -31,20 +33,34 @@ import com.kapp.tenon.core.protocol.AVATAR_LEGACY_INITIAL_VALUE
 import com.kapp.tenon.core.protocol.sameAgent
 import com.kapp.tenon.domain.AgentEmployeeProfileUi
 import com.kapp.tenon.domain.AgentHubUi
+import com.kapp.tenon.domain.AgentTeamMemberUi
 import com.kapp.tenon.domain.AgentTeamOrphanUi
 import com.kapp.tenon.domain.AgentTeamUi
 import com.kapp.tenon.domain.AgentWorkstationPort
+import com.kapp.tenon.domain.HubEmptyTier
+import com.kapp.tenon.domain.hubEmptyTier
 import com.kapp.tenon.domain.teamDisplayName
 import com.kapp.tenon.generated.resources.Res
 import com.kapp.tenon.generated.resources.agent_count_items
+import com.kapp.tenon.generated.resources.hub_team_leader_format
+import com.kapp.tenon.generated.resources.agent_empty_exit_title
 import com.kapp.tenon.generated.resources.agent_subtitle_pending
 import com.kapp.tenon.generated.resources.agent_team_ai_new
 import com.kapp.tenon.generated.resources.conv_inbox_ws_open_chat
 import com.kapp.tenon.generated.resources.desktop_toolbar_more
+import com.kapp.tenon.generated.resources.employee_create_title
 import com.kapp.tenon.generated.resources.exec_config_entry
 import com.kapp.tenon.generated.resources.hub_agent_section_title
+import com.kapp.tenon.generated.resources.hub_empty_no_device_body
+import com.kapp.tenon.generated.resources.hub_empty_no_device_title
+import com.kapp.tenon.generated.resources.hub_empty_no_employee_body
+import com.kapp.tenon.generated.resources.hub_empty_no_employee_title
+import com.kapp.tenon.generated.resources.hub_empty_not_running_body
+import com.kapp.tenon.generated.resources.hub_empty_not_running_title
+import com.kapp.tenon.generated.resources.hub_empty_only_remote_body
+import com.kapp.tenon.generated.resources.hub_empty_only_remote_title
+import com.kapp.tenon.generated.resources.hub_section_local
 import com.kapp.tenon.generated.resources.hub_team_empty
-import com.kapp.tenon.generated.resources.hub_team_leader_format
 import com.kapp.tenon.generated.resources.hub_team_open_group
 import com.kapp.tenon.generated.resources.hub_team_orphan_hint
 import com.kapp.tenon.generated.resources.hub_team_orphan_meta_format
@@ -58,9 +74,11 @@ import com.kapp.tenon.generated.resources.ic_chev
 import com.kapp.tenon.generated.resources.ic_more
 import com.kapp.tenon.generated.resources.ic_settings
 import com.kapp.tenon.generated.resources.ic_trash
+import com.kapp.tenon.generated.resources.team_builder_reuse_offline
 import com.kapp.tenon.generated.resources.team_profile_dissolve
 import com.kapp.tenon.generated.resources.team_profile_edit
 import com.kapp.tenon.generated.resources.team_profile_new
+import com.kapp.tenon.ui.EmptyState
 import com.kapp.tenon.ui.components.AppButtonSize
 import com.kapp.tenon.ui.components.AppIconButton
 import com.kapp.tenon.ui.components.AppTextButton
@@ -159,12 +177,12 @@ internal fun AgentDirectorySection(
     /** 档案行的注销：null = 没有档案写通路 ⇒ 垃圾桶不画。 */
     onForgetEmployeeProfile: ((AgentEmployeeProfileUi) -> Unit)? = null,
     /**
-     * 档案页的「新建档案」：null = 这个壳没有档案写通路 ⇒ 按钮不画。
+     * 档案页的「新建员工」：null = 这个壳没有建档写通路 ⇒ 按钮不画。
      *
-     * 与 [onEditEmployeeProfile] 不同，它**不需要**先有一行：给还没进任何群的本机 agent
-     * 建档正是这条通路的用处，所以它在位时「档案」这一档空表也成立。
+     * 与 [onEditEmployeeProfile] 不同，它**不需要**先有一行：建档不要求「有实例在跑」
+     * （那正是建人闭环的死锁形态），所以它在位时「档案」这一档空表也成立。
      */
-    onNewEmployeeProfile: (() -> Unit)? = null,
+    onCreateEmployee: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
     compact: Boolean = false,
     /** 当前选中的宿主与身份键（桌面两栏联动高亮）。 */
@@ -186,6 +204,16 @@ internal fun AgentDirectorySection(
      * 必然把「某些成员的」说成「这队的」。
      */
     workstationPort: AgentWorkstationPort? = null,
+    /**
+     * 已连节点数（含本机）：**空态四档里 D 档的唯一判据**（方案 §3.1）。
+     *
+     * null = 这个壳读不到节点面（预览帧 / 手机壳没传）⇒ 不判 D 档。
+     * **不许用 0 兜底**：「读不到」与「一台都没连」是两件事，把前者写成后者会让
+     * 一个其实有设备的壳劝用户去配对（同一类错误在「在线」判据上已经犯过一次）。
+     */
+    connectedNodeCount: Int? = null,
+    /** 「去看看节点」：null = 这个壳没有节点页 ⇒ 需要它的那一档不给这颗按钮。 */
+    onOpenNodes: (() -> Unit)? = null,
 ) {
     val sp = LocalAppSpacing.current
     // 只有**存在团队**（或这个壳能新建团队）时才给团队那一档：一个团队都没有、又没建队能力时
@@ -275,25 +303,86 @@ internal fun AgentDirectorySection(
         }
         when (effectiveView) {
             AgentDirectoryView.EMPLOYEES -> Column(verticalArrangement = Arrangement.spacedBy(sp.md)) {
-                AgentHubSection(
-                    cards = employees,
-                    now = now,
-                    onOpenEntity = onOpenEntity,
-                    onOpenChat = onOpenChat,
-                    onOpenRowSession = onOpenRowSession,
-                    compact = compact,
-                    showSectionHeader = !hasSwitcher,
-                    selectedHostNodeId = selectedHostNodeId,
-                    selectedAgentKey = selectedAgentKey,
-                    workstationPort = workstationPort,
-                    onEditEmployee = employeeRowEdit,
-                )
-                if (orphanProfiles.isNotEmpty() || onNewEmployeeProfile != null) {
+                // 空态四档（方案 §3.1）：判据是纯函数 [hubEmptyTier]，四档各有各的出路。
+                // 之前整页只有一句话，把「一台设备都没连」「还没建人」「只有别的设备在跑」
+                // 说成同一件事 —— 前两种出路完全不同，第三种更是把别人的说成你的。
+                val localRows = employees.count { it.hostNodeId == selfNodeId }
+                val tier = connectedNodeCount?.let {
+                    hubEmptyTier(
+                        connectedNodes = it,
+                        localRows = localRows,
+                        remoteRows = employees.size - localRows,
+                        hasLocalProfiles = employeeProfiles.isNotEmpty(),
+                    )
+                }
+                if (tier != null) {
+                    HubEmptyState(
+                        tier = tier,
+                        onCreateEmployee = onCreateEmployee,
+                        onCreateTeam = onCreateTeam,
+                        onOpenExecutionConfig = onOpenExecutionConfig,
+                        onOpenNodes = onOpenNodes,
+                    )
+                }
+                // D（一台都没连）与 A（有设备但谁都没建）时名录与登记簿都是空的：
+                // 再画一遍空表会把「没有」说两遍，也会让空态的主行动与登记簿里的「新建」
+                // 撞成两个入口。B/C 两档下面**有**内容（别的设备的行），照画。
+                val rosterVisible = tier == null ||
+                    tier == HubEmptyTier.LOCAL_IDLE ||
+                    tier == HubEmptyTier.REMOTE_ONLY
+                if (!rosterVisible) return@Column
+                // 名录**按设备分组**（方案 §3.1）：两层段头 —— 本机永远叫「这台电脑」，
+                // 别的设备用节点显示名 + 离线标记。
+                //
+                // **唯一的设备也要画段头**：行内副行已经不再写宿主名（§5 名录行规格），
+                // 段头成了「这些人在哪台机器上」的唯一出处。只有「单设备 ∧ 就是本机」
+                // 才省略 —— 那一档不画也不会认错（就是这台电脑）。
+                val grouped = employees.groupBy { it.hostNodeId }
+                val showDeviceHeaders = grouped.keys.size > 1 || grouped.keys.none { it == selfNodeId }
+                grouped.entries.forEach { (hostId, hostCards) ->
+                    if (showDeviceHeaders) {
+                        val isSelf = hostId == selfNodeId
+                        val nameMissing = !isSelf && hostCards.first().hostName.isNullOrBlank()
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = if (isSelf) {
+                                    stringResource(Res.string.hub_section_local)
+                                } else {
+                                    hostCards.first().hostName ?: hostId.take(8)
+                                },
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            if (nameMissing && hostCards.none { it.online }) {
+                                Text(
+                                    text = " · " + stringResource(Res.string.team_builder_reuse_offline),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                    AgentHubSection(
+                        cards = hostCards,
+                        now = now,
+                        onOpenEntity = onOpenEntity,
+                        onOpenChat = onOpenChat,
+                        onOpenRowSession = onOpenRowSession,
+                        compact = compact,
+                        showSectionHeader = !hasSwitcher && !showDeviceHeaders,
+                        selectedHostNodeId = selectedHostNodeId,
+                        selectedAgentKey = selectedAgentKey,
+                        workstationPort = workstationPort,
+                        onEditEmployee = employeeRowEdit,
+                    )
+                }
+                if (orphanProfiles.isNotEmpty() || onCreateEmployee != null) {
                     AgentProfileSection(
                         profiles = orphanProfiles,
                         onEdit = onEditEmployeeProfile,
                         onForget = onForgetEmployeeProfile,
-                        onCreate = onNewEmployeeProfile,
+                        onCreate = onCreateEmployee,
                         showSectionHeader = true,
                     )
                 }
@@ -316,6 +405,76 @@ internal fun AgentDirectorySection(
                 showSectionHeader = !hasSwitcher,
             )
         }
+    }
+}
+
+/**
+ * 空态四档的落点（方案 §3.1）。**文案与两枚行动各自绑档** —— 不要用一句通用话盖住四档：
+ * 「一台都没连」与「还没建人」的下一步不是同一件事，而「只有别的设备在跑」还要顺带说清
+ * 下面那些行不是你的。
+ *
+ * 行动**按能力降级**（同一套纪律：能力缺失就不画按钮，不画点了没反应的）：
+ * 主行动的回调不在位时，把副行动提上来当主行动；两个都不在位就只留一句话。
+ */
+@Composable
+private fun HubEmptyState(
+    tier: HubEmptyTier,
+    onCreateEmployee: (() -> Unit)?,
+    onCreateTeam: (() -> Unit)?,
+    onOpenExecutionConfig: (() -> Unit)?,
+    onOpenNodes: (() -> Unit)?,
+) {
+    val title = stringResource(
+        when (tier) {
+            HubEmptyTier.NO_DEVICE -> Res.string.hub_empty_no_device_title
+            HubEmptyTier.NO_EMPLOYEE -> Res.string.hub_empty_no_employee_title
+            HubEmptyTier.LOCAL_IDLE -> Res.string.hub_empty_not_running_title
+            HubEmptyTier.REMOTE_ONLY -> Res.string.hub_empty_only_remote_title
+        },
+    )
+    val body = stringResource(
+        when (tier) {
+            HubEmptyTier.NO_DEVICE -> Res.string.hub_empty_no_device_body
+            HubEmptyTier.NO_EMPLOYEE -> Res.string.hub_empty_no_employee_body
+            HubEmptyTier.LOCAL_IDLE -> Res.string.hub_empty_not_running_body
+            HubEmptyTier.REMOTE_ONLY -> Res.string.hub_empty_only_remote_body
+        },
+    )
+    // 一台都没连 ⇒ 唯一正当的下一步是去配对；建人此刻没有任何意义（派不出去）。
+    // 已经有人了却都没在跑 ⇒ 主行动是建队（派单要有可派的目标），不是再建一个人。
+    val primary = when (tier) {
+        HubEmptyTier.NO_DEVICE ->
+            stringResource(Res.string.agent_empty_exit_title) to onOpenNodes
+        HubEmptyTier.NO_EMPLOYEE, HubEmptyTier.REMOTE_ONLY ->
+            stringResource(Res.string.employee_create_title) to onCreateEmployee
+        HubEmptyTier.LOCAL_IDLE ->
+            stringResource(Res.string.team_profile_new) to onCreateTeam
+    }
+    val secondary = when (tier) {
+        HubEmptyTier.NO_DEVICE -> null
+        HubEmptyTier.NO_EMPLOYEE, HubEmptyTier.LOCAL_IDLE ->
+            stringResource(Res.string.exec_config_entry) to onOpenExecutionConfig
+        HubEmptyTier.REMOTE_ONLY ->
+            stringResource(Res.string.agent_empty_exit_title) to onOpenNodes
+    }
+    val primaryAction = primary.second
+    val secondaryAction = secondary?.second
+    when {
+        primaryAction != null -> EmptyState(
+            title = title,
+            message = body,
+            actionLabel = primary.first,
+            onAction = primaryAction,
+            secondaryLabel = secondary?.first,
+            onSecondary = secondaryAction,
+        )
+        secondaryAction != null -> EmptyState(
+            title = title,
+            message = body,
+            actionLabel = secondary.first,
+            onAction = secondaryAction,
+        )
+        else -> EmptyState(title = title, message = body)
     }
 }
 
@@ -358,12 +517,13 @@ private fun ExecutionConfigEntry(onClick: () -> Unit) {
 /** 视角切换的一格。选中态用 secondaryContainer（与既有 pill 的选中口径同一套颜色）。 */
 @Composable
 private fun DirectoryViewChip(text: String, selected: Boolean, onClick: () -> Unit) {
+    val sp = LocalAppSpacing.current
     Surface(
-        shape = MaterialTheme.shapes.small,
+        shape = CircleShape,
         color = if (selected) {
             MaterialTheme.colorScheme.secondaryContainer
         } else {
-            MaterialTheme.colorScheme.surfaceVariant
+            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
         },
         onClick = onClick,
     ) {
@@ -378,8 +538,8 @@ private fun DirectoryViewChip(text: String, selected: Boolean, onClick: () -> Un
             },
             maxLines = 1,
             modifier = Modifier.padding(
-                horizontal = LocalAppSpacing.current.md10,
-                vertical = LocalAppSpacing.current.xxs,
+                horizontal = sp.md,
+                vertical = sp.xs,
             ),
         )
     }
@@ -658,6 +818,54 @@ private fun AgentTeamOrphanRow(
 }
 
 /**
+ * 团队成员紧凑头像堆叠（Avatar Stack，对齐消费级协同软件心智）。
+ *
+ * 在有限卡片空间内直观传达多人协同阵容，最多展示 [maxVisible] 个重叠圆形头像，
+ * 超出部分呈现 +N 微徽标。
+ */
+@Composable
+private fun TeamMemberAvatarStack(
+    members: List<AgentTeamMemberUi>,
+    maxVisible: Int = 3,
+) {
+    val sp = LocalAppSpacing.current
+    val visible = members.take(maxVisible)
+    val remaining = members.size - visible.size
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(-sp.xs),
+    ) {
+        visible.forEach { member ->
+            Surface(
+                shape = CircleShape,
+                border = BorderStroke(sp.xxs, MaterialTheme.colorScheme.surface),
+            ) {
+                PeerAvatar(
+                    name = member.name.ifBlank { member.agentId },
+                    avatar = AVATAR_LEGACY_INITIAL_VALUE,
+                    size = sp.md10,
+                    shape = CircleShape,
+                )
+            }
+        }
+        if (remaining > 0) {
+            Surface(
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                border = BorderStroke(sp.xxs, MaterialTheme.colorScheme.surface),
+            ) {
+                Text(
+                    text = "+$remaining",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = sp.xxs, vertical = sp.xxs),
+                )
+            }
+        }
+    }
+}
+
+/**
  * 名录里的一行团队。
  *
  * ## 名字的「团队内」限定
@@ -732,20 +940,49 @@ private fun AgentTeamRow(
                 // 窄列：待批挪进名字行（与员工行同一落位），把整段宽度留给名字。
                 if (compact && team.pendingCount > 0) TeamPendingSlot(team)
             }
-            Text(
-                // 有独立团队名时把群名挂在副行：同一支队进了多个群时，
-                // 群名是唯一能区分「这是哪一行」的线索（不做就两行同名）。
-                text = if (team.teamName.isNullOrBlank()) {
-                    stringResource(Res.string.hub_team_leader_format, team.leaderName)
-                } else {
-                    stringResource(Res.string.hub_team_leader_format, team.leaderName) +
-                        " · " + team.groupName
-                },
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(sp.xs),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
+                    modifier = Modifier.weight(1f, fill = false),
+                ) {
+                    val leaderName = team.leaderName.ifBlank { team.leaderAgentId }
+                    Text(
+                        text = if (compact) {
+                            leaderName
+                        } else {
+                            stringResource(Res.string.hub_team_leader_format, leaderName)
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.padding(horizontal = sp.sm6, vertical = sp.xxs),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                // 窄列只留领队一格：头像堆与群名都是宽态的补充事实，
+                // 268dp 里三块并排会把名字和领队一起挤成省略号。
+                if (!compact) {
+                    if (team.members.isNotEmpty()) {
+                        TeamMemberAvatarStack(members = team.members)
+                    }
+                    if (!team.teamName.isNullOrBlank() && team.groupName.isNotBlank()) {
+                        Text(
+                            text = "· " + team.groupName,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false),
+                        )
+                    }
+                }
+            }
             // 第三行：这支队在哪个项目目录里干活（席位声明的执行点）。
             // 团队行此前只有「领队 · 群名」两行，宽态比员工行矮一行 —— 员工行那一格
             // 是工位（用什么驱动、在哪台机器），团队没有自己的工位，但有自己的地盘。

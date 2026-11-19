@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -51,12 +52,20 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.widthIn
 import com.kapp.tenon.generated.resources.Res
+import com.kapp.tenon.generated.resources.card_action_approve_prototype
+import com.kapp.tenon.generated.resources.card_action_cancel_task
+import com.kapp.tenon.generated.resources.card_action_heal_abandon
+import com.kapp.tenon.generated.resources.card_action_heal_steer
+import com.kapp.tenon.generated.resources.card_action_retry
+import com.kapp.tenon.generated.resources.card_action_start_task
 import com.kapp.tenon.generated.resources.ic_file
 import com.kapp.tenon.generated.resources.ic_terminal
 import com.kapp.tenon.generated.resources.ic_check_double
 import com.kapp.tenon.generated.resources.ic_refresh
 import com.kapp.tenon.generated.resources.ic_close
+import com.kapp.tenon.generated.resources.ic_chev
 import com.kapp.tenon.generated.resources.ic_link
 import com.kapp.tenon.generated.resources.card_diff_collapse_code
 import com.kapp.tenon.generated.resources.card_diff_expand_code
@@ -112,6 +121,7 @@ internal fun CardDiffHunkViewer(diff: AgentCardDiff) {
     val lines = remember(diff.hunk) { agentCardHunkLinesOf(diff.hunk) }
     val expandable = lines.size > CARD_HUNK_COLLAPSED_LINES
     val visible = if (expandable && !expanded) lines.take(CARD_HUNK_COLLAPSED_LINES) else lines
+    val scrollState = rememberScrollState()
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -120,8 +130,17 @@ internal fun CardDiffHunkViewer(diff: AgentCardDiff) {
             .padding(vertical = sp.xs),
         verticalArrangement = Arrangement.spacedBy(1.dp),
     ) {
-        visible.forEach { line ->
-            CardHunkLineRow(line)
+        Column(
+            modifier = if (expanded && lines.size > CARD_HUNK_COLLAPSED_LINES) {
+                Modifier.fillMaxWidth().heightIn(max = 280.dp).verticalScroll(scrollState)
+            } else {
+                Modifier.fillMaxWidth()
+            },
+            verticalArrangement = Arrangement.spacedBy(1.dp),
+        ) {
+            visible.forEach { line ->
+                CardHunkLineRow(line)
+            }
         }
         if (expandable) {
             // .dftoggle：文字开关（primary 11px 600），不用实心按钮 —— 代码视窗的
@@ -286,18 +305,22 @@ internal fun CardRevisionDrawer(
             },
             modifier = Modifier.fillMaxWidth(),
         )
-        AppButton(
-            text = stringResource(
-                if (submitted) Res.string.card_pending_confirm else Res.string.card_revision_submit,
-            ),
-            onClick = {
-                onAction(card, rejectRevisionActionIdOf(feedback))
-            },
-            enabled = enabled,
-            size = AppButtonSize.Small,
-            tone = AppButtonTone.Danger,
+        Row(
             modifier = Modifier.fillMaxWidth(),
-        )
+            horizontalArrangement = Arrangement.End,
+        ) {
+            AppButton(
+                text = stringResource(
+                    if (submitted) Res.string.card_pending_confirm else Res.string.card_revision_submit,
+                ),
+                onClick = {
+                    onAction(card, rejectRevisionActionIdOf(feedback))
+                },
+                enabled = enabled,
+                size = AppButtonSize.Small,
+                tone = AppButtonTone.Danger,
+            )
+        }
     }
 }
 
@@ -475,6 +498,13 @@ internal fun CardArtifactRows(
                     )
                     .padding(horizontal = sp.md, vertical = sp.md10),
             ) {
+                val isWeb = artifact.name.endsWith(".html", ignoreCase = true) || artifact.name.endsWith(".htm", ignoreCase = true)
+                val isDiff = artifact.name.endsWith(".diff", ignoreCase = true) || artifact.name.endsWith(".patch", ignoreCase = true)
+                val iconRes = when {
+                    isWeb -> Res.drawable.ic_link
+                    isDiff -> Res.drawable.ic_terminal
+                    else -> Res.drawable.ic_file
+                }
                 // .art .art-ic：28×28 图标座（agent 紫 10% 底 + primary 图标）。
                 Box(
                     modifier = Modifier
@@ -483,7 +513,7 @@ internal fun CardArtifactRows(
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
-                        painter = painterResource(Res.drawable.ic_file),
+                        painter = painterResource(iconRes),
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(com.kapp.tenon.ui.theme.IconSizes.Label),
@@ -531,6 +561,14 @@ internal fun CardArtifactRows(
                         ArtifactPreviewBlockedReason(blockedReason)
                     }
                 }
+                if (previewable) {
+                    Icon(
+                        painter = painterResource(if (kind.opensExternally) Res.drawable.ic_link else Res.drawable.ic_chev),
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                        modifier = Modifier.size(com.kapp.tenon.ui.theme.IconSizes.Inline),
+                    )
+                }
             }
             if (previewOpen && savedPath != null) {
                 ArtifactPreviewDialog(
@@ -577,28 +615,35 @@ private fun CardActionButton(
     onAction: (card: AgentCardUi, actionId: String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val isDanger = action.style == "danger" ||
-        action.actionId == SYSTEM_ACTION_ABORT_TASK ||
-        action.actionId == SYSTEM_ACTION_REJECT_REVISION ||
-        action.actionId.startsWith("$SYSTEM_ACTION_REJECT_REVISION|")
+    // 三档色彩判定是纯函数（AgentCardLogic），这里只消费结果 —— 判据只留一处。
+    val tone = cardActionToneOf(
+        actionId = action.actionId,
+        style = action.style,
+        approval = action.approval,
+        cardState = card.state,
+    )
+    val isDanger = tone == CardActionTone.Danger
+    val isPrimary = tone == CardActionTone.Primary
 
     val iconRes = when {
         action.actionId == SYSTEM_ACTION_MERGE_PATCH -> Res.drawable.ic_check_double
         action.actionId == SYSTEM_ACTION_ABORT_TASK -> Res.drawable.ic_close
-        action.actionId == SYSTEM_ACTION_REJECT_REVISION ||
-            action.actionId.startsWith("$SYSTEM_ACTION_REJECT_REVISION|") -> Res.drawable.ic_close
-        action.actionId == "approve-prototype" -> Res.drawable.ic_check_double
+        // 关闭叉只给真·危险档；primary 的纠偏动作用的是同一个 id，不该带叉。
+        (action.actionId == SYSTEM_ACTION_REJECT_REVISION ||
+            action.actionId.startsWith("$SYSTEM_ACTION_REJECT_REVISION|")) && isDanger -> Res.drawable.ic_close
+        action.actionId == "approve-prototype" || action.actionId == "approve_prototype" -> Res.drawable.ic_check_double
         action.actionId == SYSTEM_ACTION_OPEN_PROTOTYPE -> Res.drawable.ic_link
-        action.actionId == "retry" -> Res.drawable.ic_refresh
+        action.actionId.startsWith("retry") ||
+            (isPrimary && action.style == "primary") -> Res.drawable.ic_refresh
         else -> null
     }
-    if (action.approval) {
+    if (isPrimary) {
         AppButton(
             text = text,
             onClick = { onAction(card, action.actionId) },
             enabled = actionsEnabled && !ui.disabled,
-            size = AppButtonSize.Medium,
-            tone = if (isDanger) AppButtonTone.Danger else AppButtonTone.Primary,
+            size = AppButtonSize.Small,
+            tone = AppButtonTone.Primary,
             leadingIcon = iconRes,
             modifier = modifier,
         )
@@ -607,7 +652,7 @@ private fun CardActionButton(
             text = text,
             onClick = { onAction(card, action.actionId) },
             enabled = actionsEnabled && !ui.disabled,
-            size = AppButtonSize.Medium,
+            size = AppButtonSize.Small,
             tone = if (isDanger) AppButtonTone.Danger else AppButtonTone.Neutral,
             leadingIcon = iconRes,
             modifier = modifier,
@@ -630,11 +675,21 @@ internal fun CardButtonGroupRow(
     val actionItems = visibleActions.map { action ->
         val ui = cardActionUiOf(card, pendingActions, action.actionId)
         val keyedLabel = localizedCardActionLabel(action)
+        val actionFallback = when (action.actionId) {
+            SYSTEM_ACTION_MERGE_PATCH -> stringResource(Res.string.card_action_merge_patch)
+            SYSTEM_ACTION_ABORT_TASK -> stringResource(Res.string.card_action_abort)
+            "retry", "retry-quest", "retry_quest", "retry-task", "retry_task" -> stringResource(Res.string.card_action_retry)
+            "approve-prototype", "approve_prototype" -> stringResource(Res.string.card_action_approve_prototype)
+            "start-task", "start_task" -> stringResource(Res.string.card_action_start_task)
+            "cancel-task", "cancel_task" -> stringResource(Res.string.card_action_cancel_task)
+            "heal-steer", "heal_steer" -> stringResource(Res.string.card_action_heal_steer)
+            "heal-abandon", "heal_abandon" -> stringResource(Res.string.card_action_heal_abandon)
+            else -> null
+        }
         val text = when {
             ui.lock == CardActionLock.PendingConfirm -> stringResource(Res.string.card_pending_confirm)
             keyedLabel != null -> keyedLabel
-            action.actionId == SYSTEM_ACTION_MERGE_PATCH -> stringResource(Res.string.card_action_merge_patch)
-            action.actionId == SYSTEM_ACTION_ABORT_TASK -> stringResource(Res.string.card_action_abort)
+            actionFallback != null -> actionFallback
             else -> cardActionLabel(action, null)
         }
         Triple(action, ui, text)
@@ -649,8 +704,8 @@ internal fun CardButtonGroupRow(
         )
 
         if (shouldStack) {
-            // 垂直通栏堆叠（规格 §4.2 / §6.4）：主强调动作（approval=true）置顶，次要动作置底
-            val sortedItems = actionItems.sortedByDescending { it.first.approval }
+            // 垂直通栏堆叠（规格 §4.2 / §6.4）：主强调动作置顶，次要动作置底
+            val sortedItems = actionItems.sortedByDescending { it.first.approval || it.first.style == "primary" }
             Column(
                 verticalArrangement = Arrangement.spacedBy(sp.sm),
                 modifier = Modifier.fillMaxWidth(),
@@ -667,8 +722,25 @@ internal fun CardButtonGroupRow(
                     )
                 }
             }
+        } else if (actionItems.size == 1) {
+            // 单按钮精致化：居中自适应宽度，杜绝过大空心框输入框错觉
+            val (action, ui, text) = actionItems.first()
+            Box(
+                modifier = Modifier.fillMaxWidth(),
+                contentAlignment = Alignment.Center,
+            ) {
+                CardActionButton(
+                    card = card,
+                    action = action,
+                    text = text,
+                    ui = ui,
+                    actionsEnabled = actionsEnabled,
+                    onAction = onAction,
+                    modifier = Modifier.widthIn(min = 136.dp, max = 240.dp).fillMaxWidth(0.65f),
+                )
+            }
         } else {
-            // 水平排列：单按钮满宽，多按钮等分布列
+            // 多按钮等分布列
             Row(
                 horizontalArrangement = Arrangement.spacedBy(sp.md10),
                 modifier = Modifier.fillMaxWidth(),
@@ -681,7 +753,7 @@ internal fun CardButtonGroupRow(
                         ui = ui,
                         actionsEnabled = actionsEnabled,
                         onAction = onAction,
-                        modifier = if (actionItems.size == 1) Modifier.fillMaxWidth() else Modifier.weight(1f),
+                        modifier = Modifier.weight(1f),
                     )
                 }
             }
@@ -842,27 +914,28 @@ internal fun CardContextBox(
 ) {
     val sp = LocalAppSpacing.current
     Surface(
-        color = SurfaceTiers.Raised,
+        color = SurfaceTiers.Raised.copy(alpha = 0.5f),
         shape = MaterialTheme.shapes.small,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.08f)),
         modifier = modifier.fillMaxWidth(),
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = sp.md, vertical = sp.sm),
+                .padding(horizontal = sp.md, vertical = sp.sm6),
             horizontalArrangement = Arrangement.spacedBy(sp.sm),
             verticalAlignment = Alignment.Top,
         ) {
             Box(
                 modifier = Modifier
-                    .width(sp.oxs3)
-                    .heightIn(min = sp.lg)
-                    .background(MaterialTheme.colorScheme.primary, CircleShape),
+                    .width(sp.xxs)
+                    .heightIn(min = sp.lg14)
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.7f), CircleShape),
             )
             Text(
                 text = formatContextAnnotated(context),
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 lineHeight = 16.sp,
                 modifier = Modifier.weight(1f),
             )

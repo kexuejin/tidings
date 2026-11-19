@@ -112,7 +112,7 @@ internal fun artifactSavedPathOf(
     if (artifactName.isBlank()) return null
     // 卡必须真的在这条会话的消息流里：找不到卡 = 文件行无从归属，入口不画。
     val hasCard = messages.any { message ->
-        (message.card ?: message.cardPayload)?.get("cardId")?.toString()?.contains(cardId) == true
+        message.renderCard?.get("cardId")?.toString()?.contains(cardId) == true
     }
     if (!hasCard) return null
     val hits = messages.filter { message ->

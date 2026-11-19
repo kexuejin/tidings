@@ -52,16 +52,15 @@ import com.kapp.tenon.generated.resources.ic_arrow_back
 import com.kapp.tenon.generated.resources.ic_chev
 import com.kapp.tenon.generated.resources.ic_trash
 import com.kapp.tenon.generated.resources.team_detail_groups_title
+import com.kapp.tenon.generated.resources.team_detail_groups_empty
+import com.kapp.tenon.generated.resources.team_member_agent_id_format
 import com.kapp.tenon.generated.resources.team_detail_roster_title
 import com.kapp.tenon.generated.resources.team_exec_kind_reviewer
 import com.kapp.tenon.generated.resources.team_exec_kind_worker
-import com.kapp.tenon.generated.resources.team_exec_model_placeholder
 import com.kapp.tenon.generated.resources.team_member_detail_title
 import com.kapp.tenon.generated.resources.team_member_driver_label
 import com.kapp.tenon.generated.resources.team_member_edit_roster
 import com.kapp.tenon.generated.resources.team_member_leader_desc
-import com.kapp.tenon.generated.resources.team_member_model_custom_toggle
-import com.kapp.tenon.generated.resources.team_member_model_follow_leader
 import com.kapp.tenon.generated.resources.team_member_model_label
 import com.kapp.tenon.generated.resources.team_member_no_execution_host
 import com.kapp.tenon.generated.resources.team_member_prompt_hint
@@ -79,6 +78,7 @@ import com.kapp.tenon.ui.centerCapped
 import com.kapp.tenon.ui.components.AppButtonSize
 import com.kapp.tenon.ui.components.AppIconButton
 import com.kapp.tenon.ui.components.AppTextButton
+import com.kapp.tenon.ui.components.DriverModelPicker
 import com.kapp.tenon.ui.components.MutedTag
 import com.kapp.tenon.ui.components.PeerAvatar
 import com.kapp.tenon.ui.components.PendingPill
@@ -86,7 +86,10 @@ import com.kapp.tenon.ui.components.RelayDialog
 import com.kapp.tenon.ui.components.RelayDialogButton
 import com.kapp.tenon.ui.components.SectionHeader
 import com.kapp.tenon.ui.components.StatusDot
+import com.kapp.tenon.ui.components.driverSupportsPerTaskModel
 import com.kapp.tenon.ui.components.formatDriverName
+import com.kapp.tenon.ui.components.knownModelIdsOf
+import com.kapp.tenon.ui.components.rememberDriverModelCatalog
 import com.kapp.tenon.ui.theme.IconSizes
 import com.kapp.tenon.ui.theme.LocalAppSpacing
 import com.kapp.tenon.ui.theme.LocalCardShape
@@ -121,8 +124,9 @@ import org.jetbrains.compose.resources.stringResource
  * `agentHubDetail` 按 `(host, agentId)` 根本解析不到它。给一行点了弹空态的入口
  * 等于骗用户：**能力缺失就是不画那条路**，与「手机不画编辑员工」同一条纪律。
  */
+// 公开面：androidApp 的 screenshotTest 跨模块组装预览；生产入口仍在本模块。
 @Composable
-internal fun AgentTeamDetailView(
+public fun AgentTeamDetailView(
     detail: AgentTeamDetailUi,
     selfNodeId: String? = null,
     teamExecutionPort: TeamExecutionPort? = null,
@@ -222,15 +226,24 @@ internal fun AgentTeamDetailView(
             // ===== 在哪些群里（每群：执行点目录 + 本群待批；行可点 → 群会话）=====
             SectionHeader(text = stringResource(Res.string.team_detail_groups_title))
             SectionListCard {
-                detail.groups.forEachIndexed { index, row ->
-                    if (index > 0) SectionListDivider()
-                    TeamGroupRow(
-                        row = row,
-                        onOpen = onOpenGroup?.let { open -> { open(row.groupId) } },
-                        onOpenWorkspace = onOpenWorkspaceDetail?.let { open ->
-                            { row.wsId?.let(open) }
-                        },
+                if (detail.groups.isEmpty()) {
+                    Text(
+                        text = stringResource(Res.string.team_detail_groups_empty),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = sp.lg14, vertical = sp.md),
                     )
+                } else {
+                    detail.groups.forEachIndexed { index, row ->
+                        if (index > 0) SectionListDivider()
+                        TeamGroupRow(
+                            row = row,
+                            onOpen = onOpenGroup?.let { open -> { open(row.groupId) } },
+                            onOpenWorkspace = onOpenWorkspaceDetail?.let { open ->
+                                { row.wsId?.let(open) }
+                            },
+                        )
+                    }
                 }
             }
         }
@@ -455,8 +468,8 @@ private fun AgentMemberDetailDialog(
         }
     }
 
-    // 是否支持就地编辑执行配置（宿主在位且有执行端口且非领队）
-    val isHost = selfNodeId == null || detail.hostNodeId == selfNodeId
+    // 是否支持就地编辑执行配置（宿主在位且有执行端口且非领队，非空且相等 fail-closed）
+    val isHost = selfNodeId != null && detail.hostNodeId == selfNodeId
     val canEditExecution = teamExecutionPort != null && pointerDirId != null && isHost && !member.isLeader
 
     // 既有执行档对齐
@@ -488,7 +501,10 @@ private fun AgentMemberDetailDialog(
         mutableStateOf(existingMemberExec?.customPrompt.orEmpty())
     }
     var saveErrors by remember { mutableStateOf<List<String>>(emptyList()) }
-    var showModelCustomInput by remember { mutableStateOf(false) }
+    // 模型目录（打开弹窗才探，结果全应用共用一份）：null = 这个壳没有目录能力/还没探完。
+    val modelCatalog = rememberDriverModelCatalog(teamExecutionPort, driverCatalog.toSet())
+    // 「这家驱动支不支持按次指定模型」的唯一来源是名册投影（UI 不许 import CliDriverSpecs）。
+    val supportsPerTaskModel = driverSupportsPerTaskModel(driverKey)
 
     RelayDialog(
         onDismissRequest = onDismiss,
@@ -521,23 +537,16 @@ private fun AgentMemberDetailDialog(
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.SemiBold,
                             )
-                            Surface(
-                                shape = MaterialTheme.shapes.extraSmall,
-                                color = MaterialTheme.colorScheme.primaryContainer,
-                            ) {
-                                Text(
-                                    text = if (member.isLeader) {
-                                        stringResource(Res.string.agent_detail_assignment_leader)
-                                    } else {
-                                        member.role.ifBlank { stringResource(Res.string.agent_detail_assignment_member) }
-                                    },
-                                    style = MaterialTheme.typography.labelSmall,
-                                    modifier = Modifier.padding(horizontal = sp.sm6, vertical = sp.xxs),
-                                )
-                            }
+                            MutedTag(
+                                text = if (member.isLeader) {
+                                    stringResource(Res.string.agent_detail_assignment_leader)
+                                } else {
+                                    member.role.ifBlank { stringResource(Res.string.agent_detail_assignment_member) }
+                                },
+                            )
                         }
                         Text(
-                            text = "Agent ID: " + member.agentId,
+                            text = stringResource(Res.string.team_member_agent_id_format, member.agentId),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -547,7 +556,7 @@ private fun AgentMemberDetailDialog(
                 if (member.isLeader) {
                     // 领队说明卡
                     Surface(
-                        shape = MaterialTheme.shapes.small,
+                        shape = LocalCardShape.current,
                         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
                         modifier = Modifier.fillMaxWidth(),
                     ) {
@@ -570,7 +579,7 @@ private fun AgentMemberDetailDialog(
                             val isWorker = kind == TeamExecutionKindsUi.WORKER
                             val isReviewer = kind == TeamExecutionKindsUi.REVIEWER
                             Surface(
-                                shape = MaterialTheme.shapes.small,
+                                shape = LocalCardShape.current,
                                 color = if (isWorker) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
                                 onClick = { kind = TeamExecutionKindsUi.WORKER },
                             ) {
@@ -582,7 +591,7 @@ private fun AgentMemberDetailDialog(
                                 )
                             }
                             Surface(
-                                shape = MaterialTheme.shapes.small,
+                                shape = LocalCardShape.current,
                                 color = if (isReviewer) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
                                 onClick = { kind = TeamExecutionKindsUi.REVIEWER },
                             ) {
@@ -616,7 +625,7 @@ private fun AgentMemberDetailDialog(
                                 driverCatalog.forEach { dKey ->
                                     val sel = driverKey.equals(dKey, ignoreCase = true)
                                     Surface(
-                                        shape = MaterialTheme.shapes.small,
+                                        shape = LocalCardShape.current,
                                         color = if (sel) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceVariant,
                                         onClick = { driverKey = dKey },
                                     ) {
@@ -632,62 +641,25 @@ private fun AgentMemberDetailDialog(
                         }
                     }
 
-                    // 4. 基座模型推荐 Chips
+                    // 4. 基座模型：真实目录 chips（打开编制才探）+ 手填兜底。
+                    // 曾经这里是三个跨厂商混用的写死 chip（claude-3-5-sonnet / gpt-4o /
+                    // deepseek-chat），给 claude 选了 gpt-4o 也能存 —— 现在选项来自
+                    // 该驱动当下的目录；目录读不到就如实说并退化成手填（见 DriverModelPicker）。
                     Column(verticalArrangement = Arrangement.spacedBy(sp.xs)) {
                         Text(
                             text = stringResource(Res.string.team_member_model_label),
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.Medium,
                         )
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(sp.xs),
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            val presets = listOf(
-                                null to stringResource(Res.string.team_member_model_follow_leader),
-                                "claude-3-5-sonnet" to "Claude 3.5",
-                                "gpt-4o" to "GPT-4o",
-                                "deepseek-chat" to "DeepSeek",
-                            )
-                            presets.forEach { (modelVal, label) ->
-                                val isSel = currentModel == modelVal
-                                Surface(
-                                    shape = MaterialTheme.shapes.extraSmall,
-                                    color = if (isSel) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
-                                    onClick = {
-                                        currentModel = modelVal
-                                        showModelCustomInput = false
-                                    },
-                                ) {
-                                    Text(
-                                        text = label,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        modifier = Modifier.padding(horizontal = sp.sm6, vertical = sp.xxs),
-                                    )
-                                }
-                            }
-                        }
-                        if (showModelCustomInput || (currentModel != null && currentModel !in listOf("claude-3-5-sonnet", "gpt-4o", "deepseek-chat"))) {
-                            OutlinedTextField(
-                                value = currentModel.orEmpty(),
-                                onValueChange = { raw -> currentModel = raw.trim().take(80).ifBlank { null } },
-                                placeholder = {
-                                    Text(
-                                        text = stringResource(Res.string.team_exec_model_placeholder),
-                                        style = MaterialTheme.typography.bodySmall,
-                                    )
-                                },
-                                modifier = Modifier.fillMaxWidth(),
-                                textStyle = MaterialTheme.typography.bodySmall,
-                                singleLine = true,
-                            )
-                        } else {
-                            AppTextButton(
-                                text = stringResource(Res.string.team_member_model_custom_toggle),
-                                size = AppButtonSize.Small,
-                                onClick = { showModelCustomInput = true },
-                            )
-                        }
+                        DriverModelPicker(
+                            entry = modelCatalog?.get(driverKey.trim().lowercase()),
+                            currentModel = currentModel,
+                            onModelChange = { currentModel = it },
+                            // 不支持按次指定模型的驱动（如 zcode）没有「跟随默认」这一档：
+                            // 它只能在应用内选模型，给了会让人以为能覆盖（保存期也会被拒）。
+                            // dsh 有这一档 —— 它走 --patch 配置覆盖，是支持的。
+                            showFollowDefault = supportsPerTaskModel,
+                        )
                     }
 
                     // 5. 角色人设与提示词
@@ -714,16 +686,23 @@ private fun AgentMemberDetailDialog(
                     }
 
                     if (saveErrors.isNotEmpty()) {
-                        Text(
-                            text = saveErrors.joinToString("\n"),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.error,
-                        )
+                        Surface(
+                            shape = LocalCardShape.current,
+                            color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(
+                                text = saveErrors.joinToString("\n"),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                modifier = Modifier.padding(sp.sm),
+                            )
+                        }
                     }
                 } else {
                     // 只读展示（非宿主或没有执行环境）
                     Surface(
-                        shape = MaterialTheme.shapes.small,
+                        shape = LocalCardShape.current,
                         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
                         modifier = Modifier.fillMaxWidth(),
                     ) {
@@ -796,7 +775,17 @@ private fun AgentMemberDetailDialog(
                         }
                         val toSave = baseProfile.copy(members = updatedMembers)
                         val declaredIds = detail.members.map { it.agentId }.toSet()
-                        when (val result = teamExecutionPort!!.save(toSave, declaredIds)) {
+                        // UI 侧前置：目录**已知**但不含该模型 ⇒ 就地指出，不跑一趟宿主往返。
+                        // 目录缺失 / UNKNOWN 一律放行（「没验到」不是「验坏了」），权威判据
+                        // 仍在宿主侧 TeamExecutionValidation。
+                        val known = knownModelIdsOf(modelCatalog, driverKey)
+                        val badModel = currentModel?.takeIf { known != null && it !in known }
+                        if (badModel != null) {
+                            saveErrors = listOf(
+                                "member " + member.agentId + ": model '" + badModel.take(70) +
+                                    "' is not in driver '" + driverKey + "' catalog",
+                            )
+                        } else when (val result = teamExecutionPort!!.save(toSave, declaredIds)) {
                             is TeamExecutionSaveResult.Saved -> {
                                 onDismiss()
                             }

@@ -51,7 +51,6 @@ import com.kapp.tenon.domain.peer
 import com.kapp.tenon.ui.ContentWidths
 import com.kapp.tenon.ui.centerCapped
 import com.kapp.tenon.ui.components.AppButton
-import com.kapp.tenon.ui.components.AppBanner
 import com.kapp.tenon.ui.components.AppButtonSize
 import com.kapp.tenon.ui.components.AppButtonTone
 import com.kapp.tenon.ui.components.AppIconButton

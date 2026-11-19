@@ -106,6 +106,7 @@ class TeamExecutionResolverTest {
         val hit = assertIs<TeamExecutionResolver.Target.Hit>(target)
         assertEquals("dsh-lead", hit.seat.agentId, "执行主体是席位（宿主），不是组员单独开会话")
         assertEquals("m-coder", hit.member.agentId)
+        assertEquals(DispatchEntry.MEMBER, hit.entry, "组员 token ⇒ 单兵")
         assertEquals("ws-1", hit.profile.dirId)
         assertEquals(2, hit.profile.members.size)
     }
@@ -241,13 +242,94 @@ class TeamExecutionResolverTest {
     // 注意：resolver 的「未命中」结论是 Target.None（data object），不是 null ——
     // 与 core 的 resolveTeamMemberToken（返回 null）是两套形状，各有消费方。
 
-    /** 领队 token 不是组员 token：None ⇒ 既有单 agent 路径接管（§2：@leader 行为不变）。 */
+    /**
+     * **领队 token = 整队接活**（甲案）：`@lead-seat` 与 `@开发团队` 同义 —— 主理人不是
+     * 执行者，落点仍是编制里的 worker。
+     *
+     * 反向探针：把这条分支摘掉，`@lead-seat` 会落回 `Target.None` 被既有 kind 路径
+     * 当成「一个普通 agent」派单，团队编制（worker/reviewer）整份失效，且卡面看不出
+     * 异常 —— 这正是「点名主理人却没有队」的原始缺陷。
+     */
     @Test
-    fun aLeaderTokenIsNoneNotNotConfigured() {
+    fun aLeaderTokenEntersTheWholeTeamPath() {
         val store = memberStore(coderProfile())
-        assertIs<TeamExecutionResolver.Target.None>(
+        val hit = assertIs<TeamExecutionResolver.Target.Hit>(
             resolve(store, group(teamSeat()), "lead-seat"),
-            "领队 token 解析不出组员 ⇒ None（既有路径）；误判 NotConfigured 会拦死领队派单",
+        )
+        assertEquals(DispatchEntry.LEADER, hit.entry, "领队 token ⇒ 整队语义")
+        assertEquals("m-coder", hit.member.agentId, "执行主体仍是 worker，不是主理人席位")
+    }
+
+    /** 席位 agentId 也是领队 token 的一种写法（与席位名同判据）。 */
+    @Test
+    fun theSeatAgentIdIsAlsoALeaderToken() {
+        val store = memberStore(coderProfile())
+        val hit = assertIs<TeamExecutionResolver.Target.Hit>(
+            resolve(store, group(teamSeat()), "dsh-lead"),
+        )
+        assertEquals(DispatchEntry.LEADER, hit.entry)
+    }
+
+    /**
+     * **组员 token = 单兵**（甲案）：`@coder` 只让 coder 办这一件事 —— 不展开审查棒、
+     * 不问主理人。组员仍能从名册简报里看到队里还有谁（那是文本，不是调度）。
+     */
+    @Test
+    fun aMemberTokenIsASingleSoldier() {
+        val store = memberStore(coderProfile())
+        val hit = assertIs<TeamExecutionResolver.Target.Hit>(
+            resolve(store, group(teamSeat()), "coder"),
+        )
+        assertEquals(DispatchEntry.MEMBER, hit.entry, "组员 token ⇒ 单兵")
+        assertEquals("m-coder", hit.member.agentId)
+    }
+
+    /**
+     * 主理人同时被声明成组员（lead 的人设本就住执行档成员）时，`@他` = **整队**：
+     * 主理人语义优先于「某个组员」—— 他要的是「你们队看着办」，不是自己下场写代码。
+     */
+    @Test
+    fun namingTheLeaderWhoIsAlsoAMemberEntersTheTeamPath() {
+        val members = listOf(
+            TeamMemberInfo("dsh-lead", "lead", "主理"),
+            TeamMemberInfo("m-reviewer", "reviewer", "审查"),
+        )
+        val leaderIsMember = TeamExecutionProfile(
+            dirId = "ws-1", leaderAgentId = "dsh-lead", updatedAt = 0,
+            members = listOf(
+                TeamExecutionMemberSpec("dsh-lead", TeamExecutionKinds.WORKER, "codex"),
+                TeamExecutionMemberSpec("m-reviewer", TeamExecutionKinds.REVIEWER, "claude"),
+            ),
+        )
+        val store = memberStore(leaderIsMember)
+        val hit = assertIs<TeamExecutionResolver.Target.Hit>(
+            resolve(store, group(teamSeat(members = members)), "lead"),
+        )
+        assertEquals(DispatchEntry.LEADER, hit.entry, "点主理人 = 整队，不是单兵")
+        assertEquals("dsh-lead", hit.member.agentId, "执行主体是编制里的 worker（此处恰是主理人本人）")
+    }
+
+    /** 没有组员声明的席位不是队：它的 `@` 必须留给既有 kind 路径，别在这里拦。 */
+    @Test
+    fun aSeatWithoutDeclaredMembersStaysOnTheLegacyPath() {
+        val store = memberStore(coderProfile())
+        val bare = teamSeat(members = emptyList())
+        assertIs<TeamExecutionResolver.Target.None>(
+            resolve(store, group(bare), "lead-seat"),
+            "空席位（无 teamMembers）没有整队语义",
+        )
+    }
+
+    /** 领队 token 命中的队**没配执行档**：与 `@团队名` 报同一句，不能一个说 A 一个说 B。 */
+    @Test
+    fun aLeaderTokenOnAnUnconfiguredTeamIsNotConfigured() {
+        val store = memberStore()
+        val denied = assertIs<TeamExecutionResolver.Target.NotConfigured>(
+            resolve(store, group(teamSeat()), "lead-seat"),
+        )
+        assertTrue(
+            "not configured" in denied.reason,
+            "领队 token 与团队名必须同一句拒因：${denied.reason}",
         )
     }
 
@@ -298,6 +380,7 @@ class TeamExecutionResolverTest {
         )
         assertEquals("dsh-lead", hit.seat.agentId)
         assertEquals("m-coder", hit.member.agentId, "整队默认落在 worker 那一棒")
+        assertEquals(DispatchEntry.TEAM, hit.entry)
         assertEquals(2, hit.profile.members.size, "reviewer 照既有责任链走，不在这里丢")
     }
 

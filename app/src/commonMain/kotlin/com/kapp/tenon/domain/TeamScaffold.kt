@@ -2,9 +2,12 @@
 
 package com.kapp.tenon.domain
 
+import com.kapp.tenon.core.nowMillis
+import com.kapp.tenon.core.protocol.AgentDuties
 import com.kapp.tenon.core.protocol.AgentMemberName
 import com.kapp.tenon.core.protocol.Limits
 import com.kapp.tenon.core.protocol.TeamMemberDraft
+import com.kapp.tenon.core.protocol.sameAgent
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -47,12 +50,16 @@ data class TeamScaffoldSpec(
     /**
      * 一名组员的完整编制行。
      *
-     * @param agentId 团队内部稳定 id（`m-<slug>-<rand>`）；名册行与执行档**共用此键**。
-     * @param name `@` token（小写 ASCII slug）；中文进 [role]。
+     * @param agentId 团队内部稳定 id（`m-<slug>-<rand>` 新建行）；**复用行 = 员工 `employeeId`**
+     *   （方案 §3.4.1：复用是「引用」不是「快照」—— 名册行与执行档、员工档案共用此键）。
+     * @param name `@` token（小写 ASCII slug）；复用行 = 档案 [TeamScaffoldCandidate.token]，
+     *   **不是**档案中文名（群里的 `@` 按席位名匹配，写中文名等于让这一行派不出去）。
      * @param role 角色标签（编码/审查/测试…，自由文本）。
      * @param driverKey 执行驱动键（执行档保存校验要求 reviewer 与 worker **异厂商**，
      *   调用方给的兜底驱动对必须已满足这条）。
      * @param kind 取值域见 [TeamExecutionKindsUi]；整份方案**恰 1 worker**（编译期硬约束）。
+     * @param reused 是否复用已有员工。UI 用它画来源药丸，**不许拿 `agentId` 是否以 `m-`
+     *   开头来猜** —— 这是生成层的显式结论，不是 UI 的推断题。
      */
     data class Member(
         val agentId: String,
@@ -66,11 +73,12 @@ data class TeamScaffoldSpec(
          * —— 执行档回落默认审查模板，不造空串人设。
          */
         val prompt: String? = null,
+        val reused: Boolean = false,
     )
 
-    /** 名册行（团队档案写路径的入参形状）；新建行恒 [TeamMemberDraft.isNew]。 */
+    /** 名册行（团队档案写路径的入参形状）；新建行恒 [TeamMemberDraft.isNew]。人设随行落档。 */
     fun toMemberDrafts(): List<TeamMemberDraft> = members.map {
-        TeamMemberDraft(agentId = it.agentId, name = it.name, role = it.role, isNew = true)
+        TeamMemberDraft(agentId = it.agentId, name = it.name, role = it.role, isNew = true, prompt = it.prompt)
     }
 
     /** 执行档成员行（`TeamExecutionPort.save` 的入参形状）；模型跟随驱动默认。 */
@@ -93,6 +101,18 @@ public fun newTeamScaffoldAgentId(slugName: String): String {
 }
 
 /**
+ * 解析产物 = 方案 + `use` 契约的**如实计数**（方案 §3.4.1）：跳过的行要数出来给用户看
+ * （`N 行没找到对应的员工` / `N 行和领队或别的组员重了`），不许静默丢弃。
+ */
+data class TeamScaffoldDraft(
+    val spec: TeamScaffoldSpec,
+    /** `use` 指向的人池里没有 —— 丢行计数。 */
+    val missedUseRows: Int = 0,
+    /** `use` 指到领队本人 / 同一员工第二次 —— 它们**找到了**人，只是重复（单独计数，§4-14）。 */
+    val conflictUseRows: Int = 0,
+)
+
+/**
  * LLM 产物 → [TeamScaffoldSpec] 的解析与归一。
  *
  * 三条纪律（与 PlannerLlm 同源）：
@@ -103,21 +123,31 @@ public fun newTeamScaffoldAgentId(slugName: String): String {
  *    0 worker ⇒ 首行升 worker；多 worker ⇒ 降级成 reviewer（执行档保存校验恰 1 worker）；
  * 3. **缺省由调用方传**（队名 / 角色标签）：本文件生产源码不放 CJK 字面量（cjkLiteralGate），
  *    本地化文案是 UI 的事。
+ *
+ * ## `use` 契约（方案 §3.4.1，复用优先于新建）
+ *
+ * 组员行允许 `{"use":"<token|agentKey|label>", "kind":"…", "prompt":"…"}`：池里按
+ * token → agentKey → label 精确匹配（[TeamScaffoldRoster.find]）。复用行
+ * `agentId = employeeId`、`name = 档案 token`、`driverKey = 档案声明值`（直接读，不反解）、
+ * `reused = true`（**不许重算**）。`use` 未命中 ⇒ **丢行并计数**，不新造；只有它同时给了
+ * `name/role/driver` 才按新建处理。
  */
 object TeamScaffoldParser {
 
-    /** 解析失败 = 调用方回落模板；成功 = 归一后的可建方案。 */
+    /** 解析失败 = 调用方回落模板；成功 = 归一后的可建方案 + `use` 计数。 */
     fun parse(
         raw: String,
-        leaderKeys: Set<String>,
+        roster: TeamScaffoldRoster,
         driverKeys: Set<String>,
         fallbackWorkerDriver: String?,
         fallbackReviewerDriver: String?,
         defaultTeamName: String,
         defaultRole: String,
+        vendorOf: (String) -> String? = { null },
         newAgentId: (slugName: String) -> String = ::newTeamScaffoldAgentId,
-    ): TeamScaffoldSpec? {
+    ): TeamScaffoldDraft? {
         val root = parseJsonObject(raw) ?: return null
+        val leaderKeys = roster.leaders.map { it.agentKey }.toSet()
         val leader = root.str("leader")?.let { key -> canonicalKey(key, leaderKeys) }
             ?: return null
         val teamTitle = (root.str("teamName") ?: defaultTeamName)
@@ -125,8 +155,38 @@ object TeamScaffoldParser {
             .take(Limits.TEAM)
             .ifBlank { defaultTeamName.trim().take(Limits.TEAM).ifBlank { return null } }
         val takenNames = mutableSetOf<String>()
+        val usedCandidates = mutableSetOf<String>()
+        var missed = 0
+        var conflicts = 0
         val rows = (root["members"] as? JsonArray)?.mapNotNull { el ->
             val obj = el as? JsonObject ?: return@mapNotNull null
+            val useKey = obj.str("use")
+            if (useKey != null) {
+                // `use` 契约：找到人就复用，找不到**不新造**（丢行计数）；指到领队本人或
+                // 同一员工第二次 = 找到了但重复（单独计数，§4-14），同样不静默顶掉。
+                val candidate = roster.find(useKey) ?: run { missed++; return@mapNotNull null }
+                if (candidate.agentKey == leader || candidate.agentKey in usedCandidates) {
+                    conflicts++
+                    return@mapNotNull null
+                }
+                usedCandidates.add(candidate.agentKey)
+                val role = obj.str("role")?.trim()?.take(Limits.TEAM_ROLE)?.ifBlank { null }
+                    ?: candidate.duty.ifBlank { defaultRole }
+                // 复用行的名字必须是 token（群里 @ 得到），档案中文名只进预览灰字。
+                val name = AgentMemberName.slug(candidate.token).ifBlank { return@mapNotNull null }
+                    .let { AgentMemberName.unique(it, takenNames) }
+                    .also { takenNames += it }
+                val kind = normalizeKind(obj.str("kind"), (obj["worker"] as? JsonPrimitive)?.booleanOrNull)
+                return@mapNotNull TeamScaffoldSpec.Member(
+                    agentId = candidate.agentKey,
+                    name = name,
+                    role = role,
+                    driverKey = candidate.driverKey,
+                    kind = kind,
+                    prompt = obj.str("prompt")?.trim()?.take(PROMPT_MAX)?.ifBlank { null },
+                    reused = true,
+                )
+            }
             normalizeRow(
                 rawName = obj.str("name"),
                 rawRole = obj.str("role"),
@@ -145,18 +205,19 @@ object TeamScaffoldParser {
         } ?: return null
 
         val clamped = rows.take(Limits.TEAM_MEMBERS_MAX)
-        val enforced = enforceSingleWorker(clamped) ?: return null
+        val enforced = ensureOneWorker(clamped) ?: return null
         if (enforced.isEmpty()) return null
-        return TeamScaffoldSpec(
+        val workers = enforced.filter { m -> m.kind == TeamExecutionKindsUi.WORKER }
+        val escapeVendorOk = fallbackReviewerDriver?.takeIf { key ->
+            val vendor = vendorOf(key)
+            vendor != null && workers.all { vendorOf(it.driverKey) != vendor }
+        }
+        val spec = TeamScaffoldSpec(
             teamTitle = teamTitle,
             leaderAgentId = leader,
-            members = keepReviewersOffWorkerDriver(
-                enforced,
-                fallbackReviewerDriver?.takeIf {
-                    it != enforced.first { m -> m.kind == TeamExecutionKindsUi.WORKER }.driverKey
-                },
-            ),
+            members = keepReviewersOffWorkerDriver(enforced, workers, escapeVendorOk, vendorOf),
         )
+        return TeamScaffoldDraft(spec, missed, conflicts)
     }
 
     /** 组员人设提示词上限：与 TeamRosterDialog 的手写输入同一预算。 */
@@ -222,18 +283,26 @@ object TeamScaffoldParser {
     }
 
     /**
-     * 恰 1 worker（编译期硬约束的生成侧镜像）：0 ⇒ 首行升 worker；多 ⇒ 降级成 reviewer。
-     * reviewer 与 worker 同驱动（同厂商）会被执行档保存校验拒绝 ⇒ 在这一步换兜底键，
-     * 兜底键也救不回来就如实保留（让保存期的结构化原因说话，不静默造一版看似合法的档）。
+     * 至少 1 worker（生成侧兜底）：0 ⇒ 首行升 worker；**多 ⇒ 保留**（那是点将的候选池，
+     * 主理人按任务挑一个下场）。降级成 reviewer 等于把模型写的「两个都能干」悄悄改成
+     * 「只有一个人能干」，用户看不到这处改写。
+     *
+     * reviewer 与**任何一位** worker 同厂商（同驱动）都会被保存校验拒绝 ⇒ 在这一步换兜底键；
+     * 复用行自带档案底座，同样过这条校验（vendorOf 判厂商，兜底键也救不回来就如实保留
+     * —— 让保存期的结构化原因说话，不静默造一版看似合法的档）。
      */
     private fun keepReviewersOffWorkerDriver(
         rows: List<TeamScaffoldSpec.Member>,
+        workers: List<TeamScaffoldSpec.Member>,
         reviewerEscapeDriver: String?,
+        vendorOf: (String) -> String?,
     ): List<TeamScaffoldSpec.Member> {
-        val worker = rows.first { it.kind == TeamExecutionKindsUi.WORKER }
+        val workerVendors = workers.mapNotNull { vendorOf(it.driverKey) }.toSet()
         return rows.map { m ->
+            val vendor = vendorOf(m.driverKey)
+            val sameVendor = vendor != null && vendor in workerVendors
             if (m.kind != TeamExecutionKindsUi.REVIEWER ||
-                m.driverKey != worker.driverKey ||
+                !sameVendor ||
                 reviewerEscapeDriver == null
             ) {
                 m
@@ -243,25 +312,12 @@ object TeamScaffoldParser {
         }
     }
 
-    /** 恰 1 worker 的执行侧镜像：0 ⇒ 首行升 worker；多 ⇒ 降级成 reviewer。 */
-    private fun enforceSingleWorker(rows: List<TeamScaffoldSpec.Member>): List<TeamScaffoldSpec.Member>? {
+    /** 至少 1 worker 的执行侧镜像：0 ⇒ 首行升 worker；多 ⇒ 原样保留（点将候选池）。 */
+    private fun ensureOneWorker(rows: List<TeamScaffoldSpec.Member>): List<TeamScaffoldSpec.Member>? {
         if (rows.isEmpty()) return null
-        val workers = rows.filter { it.kind == TeamExecutionKindsUi.WORKER }
-        return when {
-            workers.isEmpty() -> rows.mapIndexed { i, m ->
-                if (i == 0) m.copy(kind = TeamExecutionKindsUi.WORKER) else m
-            }
-            workers.size == 1 -> rows
-            else -> {
-                val keep = workers.first().agentId
-                rows.map { m ->
-                    if (m.kind == TeamExecutionKindsUi.WORKER && m.agentId != keep) {
-                        m.copy(kind = TeamExecutionKindsUi.REVIEWER)
-                    } else {
-                        m
-                    }
-                }
-            }
+        if (rows.any { it.kind == TeamExecutionKindsUi.WORKER }) return rows
+        return rows.mapIndexed { i, m ->
+            if (i == 0) m.copy(kind = TeamExecutionKindsUi.WORKER) else m
         }
     }
 
@@ -286,13 +342,69 @@ object TeamScaffoldParser {
  * 过门（[TeamScaffoldParser]），失败自己落回落模板（[TeamScaffoldFallback]）——
  * UI 只面对「null = 生成不了」一个出口，不感知 LLM 与模板的分层。
  * 与 `teamExecutionPort` 同一条装配纪律：手机/预览不装配 = 界面不画入口。
+ *
+ * @param roster **候选池**（方案 §3.4.1）：员工档案 ∪ 本机卡片。池是生成层的唯一人选来源
+ *   —— LLM 与回落模板都从这里挑人；`pool.none { it.canLead }` 时生成层返回 null
+ *   （洞 B 契约：零员工没有领队，主行动是「新建员工」）。
  */
 fun interface TeamScaffoldBridge {
     suspend fun generate(
         need: String,
-        leaderKeys: Set<String>,
+        roster: TeamScaffoldRoster,
         defaults: TeamScaffoldDefaults,
     ): TeamScaffoldSpec?
+}
+
+/**
+ * 复用池里的一名候选人（方案 §3.4.1）。
+ *
+ * @property agentKey 候选键：档案行 = `employeeId`（复用行的名册键，也是派单键）；
+ *   未登记的本机卡片行 = 规范驱动键（kind 级）。
+ * @property label 人看的名字（档案名 / 卡片显示名）—— 只进预览灰字，**不进名册**
+ *   （名册行写 [token]，中文名派不出去）。
+ * @property token 名册行的 `@` token（档案 [EmployeeProfile.effectiveToken] / 卡片名 slug）。
+ * @property duty 归一职责（回落匹配的判据）。
+ * @property driverKey 声明底座：档案显式字段；未登记卡片由 `resolveKey` 反解 ——
+ *   解不出**不进池**（绝不猜）。空串永不出现。
+ * @property online 卡片在线事实；档案行 null（没有运行时事实就如实说不知道，不冒充离线）。
+ */
+data class TeamScaffoldCandidate(
+    val agentKey: String,
+    val label: String,
+    val token: String,
+    val duty: String,
+    val driverKey: String,
+    val model: String? = null,
+    val online: Boolean? = null,
+) {
+    /** `canLead` = 池里**有 `driverKey` 的那一行**，档案与卡片一视同仁（方案 §3.4.1）：
+     *  不要求有卡片、不要求 online、不要求有 agentId、不要求有席位。 */
+    val canLead: Boolean get() = driverKey.isNotBlank()
+}
+
+/**
+ * 复用池：单表，**别存第二份 leaders**（派生，不是字段）。
+ *
+ * 合并判据 = `employeeId` 精确（[sameEmployee]，与 `employeeProfileOf` 同一把尺子）；
+ * 没有 `employeeId` 的老数据回落 `sameAgent` 兼容（构建处 [teamScaffoldRoster]）。
+ * 去重键不是名字。
+ */
+data class TeamScaffoldRoster(val pool: List<TeamScaffoldCandidate>) {
+
+    /** 领队候选 = 池里 `canLead` 的行（派生，不是字段）。 */
+    val leaders: List<TeamScaffoldCandidate> get() = pool.filter { it.canLead }
+
+    /**
+     * `use` 契约的匹配（方案 §3.4.1）：池里按 **token → agentKey → label** 精确匹配
+     * （大小写不敏感）。null = 没找到 —— `use` 未命中**不新造**。
+     */
+    fun find(key: String?): TeamScaffoldCandidate? {
+        val k = key?.trim()?.lowercase().orEmpty()
+        if (k.isEmpty()) return null
+        return pool.firstOrNull { it.token.lowercase() == k }
+            ?: pool.firstOrNull { it.agentKey.lowercase() == k }
+            ?: pool.firstOrNull { it.label.lowercase() == k }
+    }
 }
 
 /**
@@ -309,6 +421,79 @@ data class TeamScaffoldDefaults(
     val role: String,
     val roles: List<String> = emptyList(),
 )
+
+/**
+ * 复用池装配（方案 §3.4.1）：**员工档案 ∪ 本机卡片**，一视同仁。
+ *
+ * ## 两条过滤，各挡一类错
+ *
+ * - **解不出底座的不进池**（A7）：档案 `driverKey` 空时由 `agentId` 反解一次，解不出就
+ *   如实缺席 —— 池里的行必须有明确底座，`canLead` 才立得住；绝不猜。
+ * - **同一人不进两行**：合并判据 = `employeeId` 精确；卡片没带引用的老数据回落
+ *   `sameAgent`（档案 agentId 与卡片键同 head 即同一人）。
+ *
+ * 卡片行给档案行补**在线事实**（预览的「当前离线」副行要的是真话）；卡片行自己
+ * （未登记的本机 agent）token 取显示名 slug、duty 落单兵默认 —— 没登记也能被复用。
+ */
+public fun RelayController.teamScaffoldRoster(): TeamScaffoldRoster {
+    val st = _state.value
+    val self = st.selfNodeId
+    val resolve = driverKeyResolveOf
+        ?: return TeamScaffoldRoster(emptyList()) // 手机/预览：没有名册事实，池如实为空
+    val cards = hubAgents(st.toAgentSlice(), st.toNodeSlice(), st.toSettingsSlice(), nowMillis())
+        .filter { it.hostNodeId == self }
+    val cardOnlineByEmployeeId = cards.filter { it.employeeId != null }.associateBy { it.employeeId!! }
+    val profileRows = mutableListOf<TeamScaffoldCandidate>()
+    val profileAgentIds = mutableListOf<String>()
+    for (profile in st.settings.employeeProfiles) {
+        val driver = profile.driverKey.ifBlank {
+            profile.agentId.takeIf { it.isNotBlank() }?.let(resolve).orEmpty()
+        }
+        if (driver.isBlank()) continue // 解不出不进池：池里的行必须有明确底座（不猜）
+        profileAgentIds.add(profile.agentId)
+        profileRows.add(
+            TeamScaffoldCandidate(
+                agentKey = profile.employeeId,
+                label = profile.name,
+                token = profile.effectiveToken(),
+                duty = profile.duty,
+                driverKey = driver,
+                model = profile.model,
+                // 在线事实从卡片补（同一员工）：档案没有运行时事实，如实借卡片的。
+                online = cardOnlineByEmployeeId[profile.employeeId]?.online,
+            ),
+        )
+    }
+    val claimedKeys = profileRows.map { it.agentKey.lowercase() }.toSet()
+    val cardRows = cards.mapNotNull { card ->
+        val key = card.agentKey?.trim().orEmpty()
+        if (key.isEmpty()) return@mapNotNull null
+        // 档案已覆盖的人不再出第二行（employeeId 精确；老数据 sameAgent 兼容）。
+        val claimed = (card.employeeId?.lowercase() in claimedKeys) ||
+            profileAgentIds.any { sameAgent(it, null, key) }
+        if (claimed) return@mapNotNull null
+        val driver = resolve(key) ?: return@mapNotNull null // 解不出不进池（绝不猜）
+        if (driver.isBlank()) return@mapNotNull null
+        TeamScaffoldCandidate(
+            agentKey = key,
+            label = card.displayName ?: key,
+            token = AgentMemberName.slug(card.displayName).ifBlank { AgentMemberName.slug(key) }
+                .ifBlank { key },
+            duty = AgentDuties.DEFAULT_SINGLE,
+            driverKey = driver,
+            model = null,
+            online = card.online,
+        )
+    }
+    // token 池内去重：两条行撞 token 时后到者加后缀（`AgentMemberName.unique` 与建档同款）。
+    val seen = mutableSetOf<String>()
+    val pool = (profileRows + cardRows).map { row ->
+        val unique = AgentMemberName.unique(row.token.lowercase(), seen)
+        seen.add(unique)
+        if (unique == row.token) row else row.copy(token = unique)
+    }
+    return TeamScaffoldRoster(pool)
+}
 
 /**
  * 回落模板：LLM 不可用（无 key / 超时 / 结构不合法）时的**确定性**建队方案。
@@ -344,39 +529,85 @@ object TeamScaffoldFallback {
 
     fun template(
         need: String,
-        leaderAgentId: String,
+        roster: TeamScaffoldRoster,
         workerDriver: String,
         reviewerDriver: String,
         defaults: TeamScaffoldDefaults,
-        newAgentId: (String) -> String,
+        vendorOf: (String) -> String? = { null },
+        newAgentId: (String) -> String = ::newTeamScaffoldAgentId,
     ): TeamScaffoldSpec? {
         if (workerDriver.isBlank() || reviewerDriver.isBlank()) return null
+        // **领队也是池里挑的**（方案 §3.4.1：回落模板不许 `leaderKeys.first()`）：
+        // 先按干活职责匹配（coder/ops/dev），再退而求其次取第一行可领队者 ——
+        // 两档都是判据，不是"取列表第一个"。池空（无可领队）= 生成层直接 null（洞 B 契约）。
+        val leader = roster.leaders.firstOrNull {
+            it.duty.lowercase() in WORKER_SLOT_WORDS
+        } ?: roster.leaders.firstOrNull() ?: return null
         val teamTitle = need.trim().take(12).ifBlank { defaults.teamTitle.trim().take(12) }
         val base = AgentMemberName.slug(teamTitle).ifBlank { "dev" }
         val labels = defaults.roles.map { it.trim() }.filter { it.isNotEmpty() }
         val taken = mutableSetOf<String>()
-        fun row(slug: String, role: String, driver: String, kind: String, prompt: String): TeamScaffoldSpec.Member {
-            val unique = AgentMemberName.unique("$base-$slug", taken)
+        val used = mutableSetOf(leader.agentKey)
+        fun pick(slotWords: Set<String>, slotLabel: String, slotDriver: String, kind: String, prompt: String): TeamScaffoldSpec.Member {
+            // 槽位先进池：按 duty 匹配（未用过的），再放宽到未用过的任何人 ——
+            // 复用优先于新建；同厂商校验不过就换下一个（reviewer 必须 != worker 厂商）。
+            val workerVendor = vendorOf(workerDriver)
+            val candidate = roster.pool
+                .filter { it.agentKey != leader.agentKey && it.agentKey !in used }
+                .firstOrNull {
+                    (slotWords.isEmpty() || it.duty.lowercase() in slotWords) &&
+                        (kind != TeamExecutionKindsUi.REVIEWER ||
+                            vendorOf(it.driverKey) == null || vendorOf(it.driverKey) != workerVendor)
+                }
+                ?: roster.pool
+                    .filter { it.agentKey != leader.agentKey && it.agentKey !in used }
+                    .firstOrNull {
+                        kind != TeamExecutionKindsUi.REVIEWER ||
+                            vendorOf(it.driverKey) == null || vendorOf(it.driverKey) != workerVendor
+                    }
+            if (candidate != null) {
+                used += candidate.agentKey
+                val unique = AgentMemberName.unique(
+                    AgentMemberName.slug(candidate.token).ifBlank { "$base-$slotLabel" },
+                    taken,
+                )
+                taken += unique
+                return TeamScaffoldSpec.Member(
+                    agentId = candidate.agentKey,
+                    name = unique,
+                    role = candidate.duty.ifBlank { slotLabel },
+                    driverKey = candidate.driverKey,
+                    kind = kind,
+                    prompt = prompt,
+                    reused = true,
+                )
+            }
+            // 池里凑不出这一槽才新建（`m-<slug>-<rand>`，与手动建队同形）。
+            val unique = AgentMemberName.unique("$base-$slotLabel", taken)
             taken += unique
             return TeamScaffoldSpec.Member(
                 agentId = newAgentId(unique),
                 name = unique,
-                role = role,
-                driverKey = driver,
+                role = labels.getOrElse(SLOT_LABELS.indexOf(slotLabel).coerceAtLeast(0)) { slotLabel },
+                driverKey = slotDriver,
                 kind = kind,
-                // 回落模板也带内置人设：AI 建队与回落模板的差距在「聪明」，不在
-                // 「有没有人设」—— 没人设的棒只会收到裸 goal（§workerInstruction）。
                 prompt = prompt,
             )
         }
         return TeamScaffoldSpec(
             teamTitle = teamTitle,
-            leaderAgentId = leaderAgentId,
+            leaderAgentId = leader.agentKey,
             members = listOf(
-                row("coder", labels.getOrElse(0) { "coder" }, workerDriver, TeamExecutionKindsUi.WORKER, FALLBACK_WORKER_PROMPT),
-                row("tester", labels.getOrElse(1) { "tester" }, reviewerDriver, TeamExecutionKindsUi.REVIEWER, FALLBACK_TESTER_PROMPT),
-                row("reviewer", labels.getOrElse(2) { "reviewer" }, reviewerDriver, TeamExecutionKindsUi.REVIEWER, FALLBACK_REVIEWER_PROMPT),
+                pick(WORKER_SLOT_WORDS, "coder", workerDriver, TeamExecutionKindsUi.WORKER, FALLBACK_WORKER_PROMPT),
+                pick(TESTER_SLOT_WORDS, "tester", reviewerDriver, TeamExecutionKindsUi.REVIEWER, FALLBACK_TESTER_PROMPT),
+                pick(REVIEWER_SLOT_WORDS, "reviewer", reviewerDriver, TeamExecutionKindsUi.REVIEWER, FALLBACK_REVIEWER_PROMPT),
             ),
         )
     }
+
+    /** 回落槽位的职责匹配词表（ASCII：duty 是归一后的 ASCII token）。 */
+    private val WORKER_SLOT_WORDS = setOf("coder", "ops", "dev", "developer", "worker")
+    private val TESTER_SLOT_WORDS = setOf("tester", "test", "qa")
+    private val REVIEWER_SLOT_WORDS = setOf("reviewer", "review", "audit")
+    private val SLOT_LABELS = listOf("coder", "tester", "reviewer")
 }

@@ -60,10 +60,13 @@ object HealSteering {
             add(buildJsonObject {
                 put("actionId", DRAWER_ACTION_ID)
                 put("label", "Type one instruction & retry")
+                put("labelKey", "card.action.heal_steer")
+                put("style", "primary")
             })
             add(buildJsonObject {
                 put("actionId", ABANDON_ACTION_ID)
                 put("label", "Give up, keep worktree")
+                put("labelKey", "card.action.heal_abandon")
             })
         }
         return JsonObject(card.toMap() + ("actions" to actions))

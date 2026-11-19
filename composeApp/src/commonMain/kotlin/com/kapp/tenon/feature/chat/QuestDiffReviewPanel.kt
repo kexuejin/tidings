@@ -27,6 +27,7 @@ import com.kapp.tenon.generated.resources.quest_diff_collapsed
 import com.kapp.tenon.generated.resources.quest_diff_review_title
 import com.kapp.tenon.generated.resources.quest_diff_too_large
 import com.kapp.tenon.ui.theme.LocalAppSpacing
+import com.kapp.tenon.ui.theme.accents
 import com.kapp.tenon.ui.SectionCard
 
 /**
@@ -90,7 +91,9 @@ fun QuestDiffReviewPanel(
                 val line = trimmed.lines[index]
                 val isCollapsed = line.type == QuestDiffParser.LineType.COLLAPSED
                 val (color, weight) = when (line.type) {
-                    QuestDiffParser.LineType.ADD -> MaterialTheme.colorScheme.primary to FontWeight.Medium
+                    // 与会话流卡内的新增行同色（accents.online 绿）：同一语义"新增"在
+                    // 白盒审查面板与卡片里不能一紫一绿 —— 两个数据源各写一份迟早不一致。
+                    QuestDiffParser.LineType.ADD -> MaterialTheme.accents.online to FontWeight.Medium
                     QuestDiffParser.LineType.DEL -> MaterialTheme.colorScheme.error to FontWeight.Medium
                     QuestDiffParser.LineType.HUNK -> MaterialTheme.colorScheme.tertiary to FontWeight.SemiBold
                     QuestDiffParser.LineType.COLLAPSED -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f) to FontWeight.Normal

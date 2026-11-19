@@ -90,6 +90,27 @@ class AgentTriggerRuleTest {
         assertEquals("跑一下测试", RelayController.extractAgentPrompt("@dsh-teahouse 跑一下测试", KINDS))
     }
 
+    /**
+     * 「@所有人」是**称呼**不是任务内容：真机 UX 轮现场（2026-11-19），`@所有人 @e2e
+     * 追加xx` 的工单标题是「@所有人 追加xx」—— 地址词漏进标题，用户点的 @e2e 被剥了、
+     * 群发称呼却留在卡面上。剥 agent mention 的同一条契约（D18：prompt 剥净 @）要
+     * 覆盖到称呼。
+     */
+    @Test
+    fun theAllMentionIsStrippedFromThePromptLikeAnyAgentMention() {
+        // 中文形态（手机端 zh locale 插入的 token）
+        assertEquals("追加xx", RelayController.extractAgentPrompt("@所有人 @dsh 追加xx", KINDS))
+        // 英文形态（桌面端 en locale 插入的 token；大小写不敏感）
+        assertEquals("追加xx", RelayController.extractAgentPrompt("@All @dsh 追加xx", KINDS))
+        assertEquals("追加xx", RelayController.extractAgentPrompt("@all 追加xx", KINDS))
+        // 词边界：`@allx` 不是称呼，原样保留
+        assertEquals("@allx 加一下", RelayController.extractAgentPrompt("@allx 加一下", KINDS))
+        // 没有 agent 点名时称呼照样剥（它在 any-mention 剥离集合里，与 agentKinds 无关）
+        assertEquals("重跑", RelayController.extractAgentPrompt("@所有人 重跑", emptySet()))
+        // 兜底不变：全剥空了就还原原文，绝不派一句空 prompt
+        assertEquals("@dsh", RelayController.extractAgentPrompt("@dsh", KINDS))
+    }
+
     @Test
     fun onlyAnAgentAuthoredMessageCountsAsTheReplyTarget() {
         fun msg(senderId: String?) = MessageUi(id = "m", peerId = "group:g-1", mine = false, text = "x", at = 1, senderId = senderId)

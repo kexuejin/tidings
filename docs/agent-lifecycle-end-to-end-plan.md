@@ -107,8 +107,9 @@
 | 结果回溯             | 会话卡 + 事件流；`PatchlessAnswer` 有正文即完成                                                                         | `AgentInvokeBoardCard` / 桌面壳                                   | 齐                                                     |
 
 > **本表按 `@HEAD` 读**（文件开头那张后缀表）。三条已知漂移，读到它们时按这里为准：
-> ①「员工创建 / 员工写路径」两行的现状对应 `@HEAD`；`@impl` 已把撞名改成 `sameEmployee`、
-> 加了建档两档（**但 MINT 的 UI 表单仍未做**）；②「团队创建」的 `groupIds` 现在是**写路径必填**
+> ①「员工创建 / 员工写路径」两行的现状对应 `@HEAD`；实现线上撞名已改成 `sameEmployee`、
+> 建档两档也都在，**MINT 的界面入口已补**（`EmployeeCreateDialog`，一张单页表单、无候选前置，
+> 见 §0「缺口 2」）；②「团队创建」的 `groupIds` 现在是**写路径必填**
 > （新建至少一个群），本轮定为改成可 0 个（§3）；③「授权」行的 `AgentExecPolicies` 是**每 agent
 > 一个两值串**（`list` / `anyMember`），不是 scope 集合 —— scope 在 grant 台账里
 > （`AgentGrantScopes`），两件事别混。
@@ -1464,6 +1465,27 @@ chip 上的码是给排查用的，人话是给用户的 —— 两个都要，�
 | **P2 异常面** | blocked 卡换成分类码 + 一颗主行动；登录/模型提示进卡片正文固定一行 | §3.5 / §3.6 | 7 个分类码各有测试 + 各有落地按钮；结果卡上这一行不折叠 |
 | **P3 打磨** | 员工编辑支持换运行时/模型；员工卡副行加运行时 logo；检测结果的时间戳与过期提示 | §3.2 / §3.3 | 换运行时只改 `driverKey`，`employeeId` 与既有席位不变；两处 logo 同一份 tint（§3.2 尺寸档） |
 
+> **进度（截至本轮，分支 `feat/agent-lifecycle-full`）**：
+> P0 已交付；**P1a 五项推论全绿**；**P1b 已交付**（建人表单 §3.3、复用池与 `use` 契约、
+> 团队与群解耦 + `TEAM_NOT_IN_GROUP`、名录按设备分组 + **空态四档**、七家盘面 + 品牌色块 +
+> 手动检测）；**P2 七码**、**P3 换运行时/副行 logo/检测时间戳**均已落。**真机 E2E（§7 第 5/6 条）
+> 已自动化并跑绿**：`tools/e2e/agent_dispatch_e2e.py`（夹具 → 手机真发 `@员工` → 断言卡状态机
+> `proposed → working → review_ready(100%)` 与 `DIR_NOT_ALLOWED` 分类码）。上一轮这里写的是
+> 「本机没有 GUI 宿主、客观跑不了」—— 那是我把问题放在了错的地方：缺的不是 GUI 宿主，是
+> **一条可复跑的触发与断言路径**；补上之后同时挖出三个真缺陷（执行桥用身份键当配置键、
+> 分类码没进单兵退单卡、目录指针不被认），已连同脚本一起交付。
+> 本轮另修的既有缺陷：`dsh` 在本机是坏的（`no agent factory registered`、27 个插件导入失败，
+> 缺 `@deepseek-ai/dsh-sandbox` / `dsh-util-values` 等 workspace 链接），与 `~/Library` 里的数据无关，
+> 在仓库外用裸 `dsh --profile headless "say hi"` 同样复现 —— 属**环境**，不属产品，故 E2E 的 worker
+> 做成可替换（见 §7 注）。
+> 验收读数：八模块串行 `--rerun-tasks` 全绿（core 1090 / app 1285 / orchestration 438 /
+> composeApp 897 + androidHost 450 / agentNode 677 / desktopApp 389 / cli 7 / agent-contract 26，
+> 0 失败）；十一道源码门 + 七道设计门里 **`designScreenDiffGate` 红**（见下），其余绿。
+> **`designScreenDiffGate` 的 5 组红是既有差异**：在 `82a0a1e7`（本方案改代码之前）与
+> `84e9b585`（阶段 2 快照）两个干净副本上跑同一个 `--check`，失败组**逐名一致**
+> （`m-agents|radius`、`d-agents|radius`、`d-home-more|d-nodes|d-settings|font-weight`），
+> 所以不是本轮 UI 弄红的，也**没有重刷基线**（棘轮不为变绿重刷）。
+
 **顺序理由**：
 - P1a 必须最先，且**身份与配置先于一切 UI** —— 撞名还按前缀全并时「同底座建第二个人」做不到
   （`SameDriverSecondEmployeeTest` 必红），后面「运行时 ≠ 员工」的产品承诺全是空话。
@@ -1535,8 +1557,84 @@ agent（§2.0），对它唯一成立的验收是「读不到就不画」（§4 
    运行时等于该员工的 `driverKey`（不是从键反解出来的）；这一行**没有名字输入框**；重建一支队 ⇒ 那行仍能被复用
    （池是实时的，不缓存）；把某个复用员工的运行时卸载后重新生成 ⇒ 该行写明「运行时已不在」并
    换了一个在位驱动；
-5. **真机**：群内 `@员工 一句话` ⇒ 会话卡出现，状态从 queued → working → done；
+5. **真机**：群内 `@员工 一句话` ⇒ 会话卡出现，状态 `proposed`（点将期，8s 倒计时自动开工）→
+   `working` → **`review_ready` 100%**（有产物，等机主合并；渲染层把这一档也画成「已完成」）。
+   零补丁但有正文时终态是 `done`，同样是成功路径 —— 把「等合并」判成失败是错的；
 6. **真机**：断开目录授权再派一次 ⇒ blocked 卡带 `DIR_NOT_ALLOWED` + 「去授权」，点进去落位正确。
+
+> **第 5/6 条已自动化**：`python3 tools/e2e/agent_dispatch_e2e.py`。脚本做的是「构造状态 → 触发 →
+> 断言」，夹具（员工档案 + 群席位 + `anyMember` 授权 + 项目目录）写的是宿主自己的落盘格式，
+> 触发走**手机端真发一条 `@员工`**，断言读宿主库里的卡 JSON 与宿主日志，失败自动留证
+> （ui dump / host.log / 库快照 / sandbox `task.log` 尾巴）。
+>
+> worker 可切：`--worker stub`（默认，`TENON_CODEX_CLI` 指向 `tools/e2e/stub_cli.sh`，行为确定：
+> 改一行 README + 睡 4s + 输出一条 `agent_message`，因此 `working` 态可观测、`harvest` 有 diff 可割）／
+> `--worker codex`（本机真 CLI，先跑一次真实一句话探活，探不通直接红）。
+>
+> **场景可切 `--scenario`**：`hello`（默认）验编排链本身；`weather` 验「真实天气项目的需求 → 开发」
+> —— 项目夹具预填本机 `~/weather-relay`，`TENON_CODEX_CLI` 指向 `tools/e2e/stub-weather-cli.sh`，
+> 替身写出一个真的实现 `WeatherProvider.fetchWeather` 契约、调 **Open-Meteo 免 key 接口**的 provider
+> （含注入 fetch 的确定性测试 + 把 `app.js` 的注入从 fixture 换成新 provider），断言在卡片状态机之外
+> 追加三条：`provider_written=1`、新增 provider 的测试全绿、`live_ok=1` 且拿到真实温度。
+> 这是「真实天气 API」这条链的端到端证据；live 探针单独留证、不混进编排链判据，`--offline` 可关
+> （完全是离线复跑，不断言真实温度）。**默认 OS 沙箱不开**才有网；开了 `TENON_OS_SANDBOX=strict`
+> 时 codex/dsh/claude 是 `air-gapped`，live 探针会失败（替身不崩、测试仍绿，只 live 这条红）。
+>
+> **`--scenario team`（团队责任链）**：验单兵之外唯一能走到「责任链编译 + 多棒交接 + 审查档」
+> 的路径。夹具写三处对齐的身份键——团队档案 `teamProfiles`（主键 `teamId`）、团队席位
+> （`entityType=team` + `teamName` + `teamMembers`）、执行档 v3 `team-execution.json`（主键
+> `(dirId, leaderAgentId)`，**无** groupId，`schemaVersion=3`）——恰好 1 worker(codex) +
+> 1 reviewer(dsh)（异厂商过门）。两棒各一个受控替身：worker 用 `stub_cli.sh` 造 README diff，
+> reviewer 用 `tools/e2e/stub-reviewer-cli.sh`（dsh 形态，只打一句 `VERDICT: PASS`、不写文件，
+> patchless 审查是产品合法路径）。手机侧 **@worker 组员 token `@coder`**（不是 @团队名——
+> adb 逐字符输入 `@` 会弹候选层吞掉后续字符，实测把 `@e2e-team` 打成 `@所有人`；点 `coder`
+> 候选则稳），`TeamExecutionResolver.resolveTeamMemberToken` 命中同一执行档编译责任链。
+> 状态机是 **`executing → review_ready`**（团队链无 8s 点将倒计时、无 `working` 档），终局必须
+> `review_ready` 而非 `done`；驱动证据是 `[CHAIN] ... reviewers passed` 日志（单兵的
+> `[OCGO-BRIDGE] invoke` 在团队路径不出现）。收回目录授权后团队路径出的是通用 blocked 卡
+> （banner 点明 workspace），**不带** `DIR_NOT_ALLOWED` 分类码（那是单兵退单卡分支）。
+>
+> **`--scenario weather --worker codex`（真 CLI 跑天气）**：替身专有的 `E2E_EVIDENCE ...` 标记
+> 只对 `--worker stub` 断言（真 CLI 不打这些标记）；真 worker 的天气判据是 `harvest` 割出的
+> `patch.diff` 里真有 `open-meteo` 代码 + 主流程的非空 patch 断言。真 codex 的调用形态是
+> `codex exec --json --sandbox ... <prompt>`（prompt 末尾位置参数，不是 `-p`），凭证走
+> `~/.codex/config.toml` 里配的 opencode-go 网关 + env `OPENCODE_API_KEY`，**不看**
+> `codex login status` 的 first-party 登录态（网关型 codex 没登录也可能是活的）。本机实测：
+> codex / dsh / opencode 三家一句话探活都 exit=0 且拿到 `final`/`result`，claude 未登录、agy 拉模型超时。
+>
+> **探活 exit=0 ≠ 派单能写文件（两次都踩过，正解已钉）**：探活是 read-only 一句话，不写文件；
+> 派单时 codex 默认用 `--sandbox workspace-write`，它**自己内部会套一层 seatbelt
+> (`sandbox-exec`)**。若宿主从**工具/Agent 沙箱**里拉起（CI、自动化环境），CLI 继承外层 profile，
+> 内层 `sandbox-exec` 被内核硬拒 —— `task.log` 出现 `sandbox_apply: Operation not permitted` +
+> codex 回报 "No files were changed" ⇒ 零补丁、卡片终态 `done`、`harvest patchBytes=0`。
+>
+> **正解不是「必须树外 Terminal」——那是个错误结论，已推翻。** 产品早有针对这个现场的开关：
+> `TENON_CODEX_SANDBOX=danger-full-access`（`CliSubprocessDriver.codexSandboxMode()`，
+> prompt 里明确写了「宿主已在 seatbelt 里时 codex 再套一层会 `sandbox_apply` 失败」）。
+> 设上之后 codex 只靠本仓的一次性 worktree 做隔离，内层 seatbelt 不再套 ⇒ 在嵌套沙箱里也能真写文件。
+> **受控实测（本机工具沙箱内、codex 0.145.0）**：同一个临时 git 仓跑一条「写 proof 文件」任务——
+> `workspace-write` ⇒ `file_change.status=failed`，codex 自报 `sandbox_apply: Operation not permitted`，
+> NO FILE；`danger-full-access` ⇒ `file_change.status=completed`，`WROTE: PROOF_OK`。两者唯一差别就是
+> 这一个 env。竞品Multica 同模型：daemon 用宿主真实环境跑 CLI、凭据隔离交给各家 CLI 自己的沙箱旗标
+> （见 `SandboxedCliDriver` KDoc）——「外层已隔离就别让 CLI 再套内层」是通行做法，不是绕开验收。
+>
+> **验收正确姿势**：`--worker codex` 时给宿主 env 加 `TENON_CODEX_SANDBOX=danger-full-access`
+> （脚本 `host_env()` 里注入），再判 `harvest` 的 `patch.diff` 有真代码。判据顺序：
+> ① grep `task.log` 的 `sandbox_apply`；② 有则先确认 `codexSandboxMode` 是否 `workspace-write`；
+> ③ 换成 `danger-full-access` 复验，再谈「CLI 没产出」是不是产品问题。
+>
+> **这条设计不是为了让验收变简单，而是为了让验收说人话**：这两条验的是宿主编排链
+> （身份键 → 执行档 → 逐成员授权 → 项目目录 → 工单 → 卡片状态机 → 产物收割），外部 CLI 只是
+> 链尾一格；把「某家 CLI 今天能不能连上模型」接进断言，环境一变就整片红，红了也定位不到产品。
+>
+> 自动化过程中挖出并修掉三个真缺陷（都不是本脚本的假设问题）：
+> ① **执行桥把身份键当配置键**（`invoke agent=emp-… cliDriver=null` ⇒ CLI 分支整段跳过、群里
+> 只有「没有完成这次任务」）⇒ 新增 `dispatchDriverKey`：档案 `driverKey` 优先、解析不出就原样
+> 带下去、**绝不猜**；
+> ② **分类码没接进单兵退单卡**（`DIR_NOT_ALLOWED` 只在团队路径产生，白名单根本没进入派单判据）⇒
+> `WorkspaceDenial` 拆 `NO_DIRECTORY` / `DIR_NOT_ALLOWED` 两码 + 退单卡带 `blockedCode`；
+> ③ **目录指针不被认**（`POST /v1/host/group-directory` 只写指针、不重建席位投影 ⇒ 单兵派单
+> 报 `no git workspace bound to group`）⇒ `dirPathOf` 端口 + 候选解析第 1b 段认目录指针。
 
 代码侧（**每个名字后面标的是「现在在哪」，不是「应该在哪」** —— 照这张表点名去 `find`，找不到就是没落地）：
 
@@ -1667,3 +1765,12 @@ agent（§2.0），对它唯一成立的验收是「读不到就不画」（§4 
   （发现心跳刷新，语义是链路可见）。落点已写进 §3.1 正文。
 - [已核实·review 四轮] `installUrl` 确实不存在（`CliDriverSpecs.Spec` 八字段里没有、全仓零命中），
   已从观察项升级为裁定：独立表 + 端口投影 + 缺项回落「复制安装命令」。落点已写进 §3.2 / §3.9 正文。
+- [已闭合] **缺口 2：MINT 只有后端、没有界面入口**。P1a 交付时 `EmployeeCreationSource.MINT`
+  已在写路径生效、预校验也分了流，但新建员工的对话框仍然只画「从候选里挑一个」，
+  候选为空就退成「去看看节点」—— 也就是 §2② 那个冷启动死锁在**界面上**原样还在。
+  现在 `EmployeeCreateDialog` 是一张 §3.3 的单页表单（运行时下拉 / 名字 / `@` token / 模型 / 职责），
+  **不再有「候选表」这个前置**：零 agent 上报也能建出第一个员工，零在位运行时才画「先接一个运行时」。
+  入口可见性由**写通路**决定（`onCreateEmployee = mintSubmit?.let { … }`），不是由「有没有候选」决定，
+  `EmployeeProfileWiringGuardTest` 钉住这一条 —— 这与旧版「候选为空 ⇒ 表单不展开」是同一类错误的
+  两面：把「有没有数据」当成「能不能开始」。**这条修改的意义不在表单长相**：它把「建人不要求有
+  agent 在跑」从文档口径变成了可执行的入口。

@@ -814,6 +814,24 @@ class RelayController(
         get() = invokeCtl.onHostCardAction
         set(value) { invokeCtl.onHostCardAction = value }
 
+    /**
+     * 底座是否在位（`driverCatalog()`）：MINT 建档的预校验输入（方案 §3.3）。
+     * null = 本壳提供不了名册（手机/测试）⇒ MINT 不拦（与「台账空放行」同一条宽容纪律）；
+     * 非 null 时返回 false 的底座拒绝建档（防建出一个派不出去的员工）。
+     *
+     * 入参既可能是 MINT 档案的规范 `driverKey`，也可能是 REGISTER_EXISTING 的实例键
+     * （装配侧做 `resolveKey` 归一，两种都能答）。
+     */
+    var driverInCatalogOf: ((agentId: String) -> Boolean)? = null
+
+    /**
+     * 实例键 → 规范 `driverKey` 的反解（A7 老数据兼容）：REGISTER_EXISTING 建档没给
+     * `driverKey` 时，由 `agentId` 反解一次落进档案；解不出返回 null（档案落空串，
+     * 派单期如实报 `NO_DRIVER` —— 不猜、不回落默认驱动）。
+     * null = 本壳提供不了名册（手机/测试）⇒ 档案落空串。
+     */
+    var driverKeyResolveOf: ((raw: String) -> String?)? = null
+
     /** 标签路由桥（T-G2 ③）：tag → 承接节点 id（null = 无匹配，调用方走失败横幅）。 */
     var peerTagRouter: ((tag: String) -> String?)?
         get() = invokeCtl.peerTagRouter
@@ -1417,12 +1435,26 @@ class RelayController(
 
     override suspend fun generateTeamScaffold(
         need: String,
-        leaderKeys: Set<String>,
         defaults: TeamScaffoldDefaults,
-    ): TeamScaffoldSpec? = teamScaffoldBridge?.generate(need, leaderKeys, defaults)
+    ): TeamScaffoldSpec? {
+        val bridge = teamScaffoldBridge ?: return null
+        // 池在**域层**构建（方案 §3.4.1）：员工档案 ∪ 本机卡片，同一份 settings 与投影，
+        // 领队候选/复用判断不再由 UI 传第二份 —— 之前 UI 自己从卡片拼 leaderKeys，就是
+        // 「同一个池两个来源」的分叉起点。
+        return bridge.generate(need, teamScaffoldRoster(), defaults)
+    }
 
     override val teamScaffoldAvailable: Boolean
         get() = teamScaffoldBridge != null
+
+    /**
+     * MINT 建档（方案 §3.3「新建员工」表单落点）：拒绝枚举**回表单字段**（token 被占 /
+     * 底座不在位），不横幅 —— 横幅说不出「哪个字段」。真身在 [EmployeeProfileWritePath]
+     * 同包的 [mintEmployeeEntry] —— 命令面只有一份。
+     */
+    override val employeeMintWriter:
+        (String, String?, String, String, String) -> DeclarationRejection? =
+        { driverKey, model, name, token, duty -> mintEmployeeEntry(driverKey, model, name, token, duty) }
 
     /** 项目目录端口：invokeCtl 同字段（DesktopExtension 装配 DesktopHostDirectoryPort）。 */
     override var hostDirectoryPort: HostDirectoryPort?
@@ -1446,10 +1478,21 @@ class RelayController(
         employeeId: String?,
         name: String,
         duty: String,
+        source: EmployeeCreationSource,
+        driverKey: String?,
+        model: String?,
     ) {
         // 位置实参：`employeeId = employeeId` 这种命名实参会命中源码守卫的
         // 「档案引用写入点」探针（守卫认的是赋值形状），造成一次假红。
-        saveEmployeeProfileEntry(agentId, employeeId, name, duty)
+        saveEmployeeProfileEntry(
+            agentId,
+            employeeId,
+            name,
+            duty,
+            source = source,
+            driverKey = driverKey,
+            model = model,
+        )
     }
 
     /**
@@ -1473,8 +1516,9 @@ class RelayController(
         leaderAgentId: String,
         members: List<com.kapp.tenon.core.protocol.TeamMemberDraft>,
         groupIds: List<String>,
+        description: String,
     ) {
-        saveTeamProfileEntry(teamId, name, leaderAgentId, members, groupIds)
+        saveTeamProfileEntry(teamId, name, leaderAgentId, members, groupIds, description)
     }
 
     /** 「添加团队」：把整支队加进一个群（群信息授权面板的落点）。 */
@@ -3320,10 +3364,9 @@ class RelayController(
             val kinds = agentKinds
                 .mapNotNull { it.trim().lowercase().takeIf { k -> k.isNotEmpty() } }
                 .distinct()
-                .sorted()
             return kinds.filter { kind ->
                 agentMentionRegex(setOf(kind))?.containsMatchIn(text) == true
-            }
+            }.sorted()
         }
 
         /** 这条消息是不是 agent 说的（`senderId` 形如 `agent:<host>:<id>`）。 */
@@ -3445,16 +3488,31 @@ class RelayController(
          * （"Hey @dsh what…" 变成 "Hey  what…"），那是这个函数该收拾的，不该由调用方或测试替它擦。
          * 也**不**剥 mention 之外的前缀 —— "Hey" 可能是用户有意写的。
          */
+        /**
+         * 「@所有人」的已知语言形态（来源：composeApp `chat_mention_all` 词条）。
+         *
+         * 它是**称呼**不是任务内容：工单标题与提示词里都不该出现。发送端的 locale
+         * 与宿主无关（手机中文打「@所有人」、桌面英文打「@All」），所以两种形态都要
+         * 剥；词条加语言时这里同步 —— GroupMentionAllTokenParityTest 钉住词条与常量
+         * 的一致性。词边界与 [agentMentionRegex] 同一条否定前瞻（`@allx` 不算）。
+         */
+        private val MENTION_ALL_TOKENS = setOf("所有人", "all")
+
+        private val mentionAllRegex = Regex(
+            "(?i)@(?:" + MENTION_ALL_TOKENS.joinToString("|") { Regex.escape(it) } + ")(?![a-z0-9_])",
+        )
+
         fun extractAgentPrompt(
             text: String,
             agentKinds: Set<String>,
         ): String {
             val regex = agentMentionRegex(agentKinds)
-                ?: return text.trim().ifBlank { text }
-            return text.replace(regex, "")
+            val stripped = text
+                .replace(regex ?: Regex("(?!x)x"), "")
+                .replace(mentionAllRegex, "")
                 .replace(Regex("[ \t]+"), " ")
                 .trim()
-                .ifBlank { text }
+            return stripped.ifBlank { text.trim().ifBlank { text } }
         }
 
         internal fun isGroupText(envelope: Envelope): Boolean =

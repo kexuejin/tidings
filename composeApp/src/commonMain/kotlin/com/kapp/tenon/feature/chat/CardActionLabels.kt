@@ -4,11 +4,16 @@ package com.kapp.tenon.feature.chat
 
 import androidx.compose.runtime.Composable
 import com.kapp.tenon.generated.resources.Res
+import com.kapp.tenon.generated.resources.card_action_approve_prototype
 import com.kapp.tenon.generated.resources.card_action_cancel_task
+import com.kapp.tenon.generated.resources.card_action_heal_abandon
+import com.kapp.tenon.generated.resources.card_action_heal_steer
 import com.kapp.tenon.generated.resources.card_action_merge
 import com.kapp.tenon.generated.resources.card_action_open_prototype
 import com.kapp.tenon.generated.resources.card_action_open_quest
 import com.kapp.tenon.generated.resources.card_action_reply
+import com.kapp.tenon.generated.resources.card_action_reject_revision
+import com.kapp.tenon.generated.resources.card_action_request_review
 import com.kapp.tenon.generated.resources.card_action_resume
 import com.kapp.tenon.generated.resources.card_action_override
 import com.kapp.tenon.generated.resources.card_action_retry
@@ -43,6 +48,8 @@ internal object CardActionLabelKeys {
         "card.action.start_task" to Res.string.card_action_start_task,
         "card.action.cancel_task" to Res.string.card_action_cancel_task,
         "card.action.open_prototype" to Res.string.card_action_open_prototype,
+        "card.action.approve_prototype" to Res.string.card_action_approve_prototype,
+        "card.action.approve-prototype" to Res.string.card_action_approve_prototype,
         "card.action.send_as_adjustment" to Res.string.card_action_send_as_adjustment,
         "card.action.send_as_new_task" to Res.string.card_action_send_as_new_task,
         "card.action.reply" to Res.string.card_action_reply,
@@ -54,12 +61,20 @@ internal object CardActionLabelKeys {
         "card.action.merge" to Res.string.card_action_merge,
         "card.action.merge_patch" to Res.string.card_action_merge,
         "card.action.merge-patch" to Res.string.card_action_merge,
+        // 带一个占位符（组员名，随 `labelArgs` 下来）：文案要说清「请谁」，
+        // 不然三颗按钮并排时人还得回头翻编制。
+        "card.action.request_review" to Res.string.card_action_request_review,
+        "card.action.reject_revision" to Res.string.card_action_reject_revision,
         "card.action.retry" to Res.string.card_action_retry,
         "card.action.override" to Res.string.card_action_override,
         "card.action.retry_quest" to Res.string.card_action_retry,
         "card.action.retry-quest" to Res.string.card_action_retry,
         "card.action.open_quest" to Res.string.card_action_open_quest,
         "card.action.open-quest" to Res.string.card_action_open_quest,
+        "card.action.heal_steer" to Res.string.card_action_heal_steer,
+        "card.action.heal-steer" to Res.string.card_action_heal_steer,
+        "card.action.heal_abandon" to Res.string.card_action_heal_abandon,
+        "card.action.heal-abandon" to Res.string.card_action_heal_abandon,
     )
 }
 

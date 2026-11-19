@@ -4,7 +4,7 @@ package com.kapp.tenon.domain
 
 import com.kapp.tenon.core.protocol.AgentDuties
 import com.kapp.tenon.core.protocol.GroupMeta
-import com.kapp.tenon.core.protocol.sameAgent
+import com.kapp.tenon.core.protocol.sameEmployee
 
 /**
  * 员工**档案管理**的一行：登记簿视角，不是运行时视角。
@@ -39,72 +39,9 @@ public data class AgentEmployeeProfileUi(
     val token: String,
     val duty: String,
     val groupNames: List<String>,
+    val driverKey: String = "",
+    val model: String? = null,
 )
-
-/**
- * 一个**可以被登记**的 agent：候选行的全部内容（点它就是「给这个人建档」）。
- *
- * 与 [AgentEmployeeProfileUi] 的区别是「谁」：那一档说的是**已经有了档案**的人，
- * 这一档说的是**还没有档案**的本机 agent。两者互斥（[employeeProfileCandidates] 已按
- * 身份键把已建档的剔掉），所以档案页永远不会给出一张「点了会说已存在」的行。
- *
- * @property agentId 身份键（写路径的 `Create.agentId`，也是 `sameAgent` 归一的输入）。
- * @property name 现有显示名（档案名没有，所以是席位 token 或身份键）—— 只做**识别**用，
- *   不预填进档案姓名：档案名的意义就是人给的名字，预填一个 `dsh-coder` 只会被原样存下去。
- * @property hostName 宿主显示名（这台机器）。null = 节点表里还不认识它。
- */
-public data class AgentEmployeeCandidateUi(
-    val agentId: String,
-    val name: String,
-    val hostName: String?,
-)
-
-/**
- * 本机**还没建档**的 agent（档案页「新建档案」的候选表）。
- *
- * ## 为什么从卡片流取，而不是从「本机 agent 台账」自己扫一遍
- *
- * 卡片流（[hubAgents]）已经把同一件事算过一次：会话与宣告按身份键聚成一个实体、宿主机
- * 归到 `hostNodeId`、档案引用落在 `employeeId`。再扫一遍 `agentWorkspaces` 就是第二份
- * 归一化 —— 短 id（`dsh`）与实例 id（`dsh-029bbbf3`）会在这两份里各聚一次，于是候选表
- * 与名录对同一个 agent 给出两行（或一行都不给）。
- *
- * ## 两条过滤，各挡一类错
- *
- * 1. **只留本机**（`hostNodeId == selfNodeId`）：档案住宿主本机设置，把别人的 agent 登记成
- *    自己的员工，`Create` 的台账检查会以 `EMPLOYEE_UNKNOWN` 拒掉（那张卡的真实所有权在对面）。
- * 2. **只留没有档案的**：`employeeId != null` 的实体已有档案，这里再列一次就是「点了说已存在」。
- *    判据用 `employeeId` 而不是名字/身份键 —— 那是投影给的**引用**，与注销时摘的是同一条。
- *
- * `agentKey == null`（未上报类型）不进候选：没有身份键就没有可写的 `agentId`，
- * 造一个出来只会得到一座派不出去的幽灵。
- */
-public fun employeeProfileCandidates(
-    cards: List<AgentHubUi>,
-    selfNodeId: String,
-): List<AgentEmployeeCandidateUi> {
-    val self = selfNodeId.trim()
-    if (self.isEmpty()) return emptyList()
-    val seen = LinkedHashSet<String>()
-    return cards
-        .asSequence()
-        .filter { it.hostNodeId == self && it.employeeId == null }
-        .mapNotNull { card ->
-            val agentId = card.agentKey?.trim().orEmpty()
-            if (agentId.isEmpty()) return@mapNotNull null
-            // 同一身份键只留一行（卡片流按宿主+身份键聚类，重复来自同一 agent 的多条来源）。
-            if (!seen.add(agentId.lowercase())) return@mapNotNull null
-            AgentEmployeeCandidateUi(
-                agentId = agentId,
-                // 档案名 → 席位 token → 身份键：投影已经按这个顺序算好 `displayName`，
-                // 只剩「都没有」这一档（未上报）落回身份键 —— 候选行得有标题。
-                name = card.displayName?.trim()?.takeIf { it.isNotEmpty() } ?: agentId,
-                hostName = card.hostName,
-            )
-        }
-        .sortedBy { it.name }
-        .toList()
-}
 
 /**
  * 本机登记过的员工档案（档案管理页的唯一数据源）。
@@ -135,6 +72,8 @@ public fun employeeProfileLedger(settingsSlice: SettingsSlice): List<AgentEmploy
                 token = profile.effectiveToken(),
                 duty = AgentDuties.normalize(profile.duty),
                 groupNames = groups.groupsReferencingEmployee(profile.employeeId).map { it.name },
+                driverKey = profile.driverKey,
+                model = profile.model,
             )
         }
         .sortedBy { it.name }
@@ -143,15 +82,16 @@ public fun employeeProfileLedger(settingsSlice: SettingsSlice): List<AgentEmploy
 /**
  * 员工卡 → 它的**本机**档案（卡片行上那颗「编辑」键的唯一判据）。
  *
- * ## 为什么不能只按 agentId 找
+ * ## 判据是 employeeId 精确相等（三层正交模型）
  *
- * 员工身份键是 `(hostNodeId, agentId)`，而 `employeeProfiles` 只住宿主本机设置。
- * 只拿 `agentId` 去撞，配上 [sameAgent] 的前缀归一（`dsh` 会认下 `dsh-…`），
- * 就会把**别人机器上**的 `dsh-coder` 认成本机这一位 —— 于是远端卡片上出现一颗
- * 点了会改本机档案的编辑键。这类错最难自证：两边的名字一模一样，用户以为
- * 自己改的是「那台机器上的那个人」。
+ * 身份锚是 `employeeId`，`agentId`（含 hex）只是路由线索。若拿 [sameAgent] 去撞
+ * `agentId`，同底座的两个真人会并到第一份档案（洞 E）—— 第二个人永远找不到自己的
+ * 编辑入口。这里改用 [sameEmployee] 按 `card.employeeId` 精确匹配，各归各档。
  *
- * 所以这里**先按宿主**再过身份：宿主不是本机 ⇒ 没有档案，一颗键都不给。
+ * ## 为什么还要先看宿主
+ *
+ * `employeeProfiles` 只住宿主本机设置：远端卡即便碰巧带着相同 employeeId，也不该在本机
+ * 冒出一颗编辑键。所以宿主不是本机 ⇒ 没有档案，一颗键都不给。
  *
  * @param selfNodeId 本机节点 id；空串（身份还在恢复）时一律 null —— 宁可暂时不给入口，
  *   也不拿一个未知身份去配对。
@@ -163,7 +103,5 @@ public fun employeeProfileOf(
 ): AgentEmployeeProfileUi? {
     val self = selfNodeId.trim()
     if (self.isEmpty() || card.hostNodeId != self) return null
-    val key = card.agentKey?.trim().orEmpty()
-    if (key.isEmpty()) return null
-    return profiles.firstOrNull { sameAgent(it.agentId, null, key) }
+    return profiles.firstOrNull { sameEmployee(it.employeeId, card.employeeId) }
 }

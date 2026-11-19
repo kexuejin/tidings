@@ -4,6 +4,7 @@ package com.kapp.tenon.feature.agents
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
@@ -12,8 +13,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -23,37 +27,47 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.Icon
+import androidx.compose.ui.unit.dp
+import com.kapp.tenon.generated.resources.ic_groups
+import com.kapp.tenon.generated.resources.ic_user
+import com.kapp.tenon.generated.resources.team_profile_desc_hint
+import com.kapp.tenon.generated.resources.team_profile_leader_focus_title
+import com.kapp.tenon.generated.resources.team_profile_leader_role_desc
+import com.kapp.tenon.generated.resources.team_profile_leader_select_placeholder
+import com.kapp.tenon.generated.resources.team_profile_member_select_placeholder
+import com.kapp.tenon.generated.resources.team_profile_members_sub_desc
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import com.kapp.tenon.core.protocol.AVATAR_LEGACY_INITIAL_VALUE
+import com.kapp.tenon.ui.components.PeerAvatar
+import org.jetbrains.compose.resources.painterResource
 import com.kapp.tenon.core.protocol.TeamMemberDraft
+import com.kapp.tenon.domain.TeamProfile
 import com.kapp.tenon.generated.resources.Res
+import com.kapp.tenon.generated.resources.team_profile_member_name_label
+import com.kapp.tenon.generated.resources.team_profile_member_role_label
 import com.kapp.tenon.generated.resources.agent_empty_exit_title
 import com.kapp.tenon.generated.resources.common_cancel
 import com.kapp.tenon.generated.resources.team_profile_dialog_title_edit
 import com.kapp.tenon.generated.resources.team_profile_dialog_title_new
-import com.kapp.tenon.generated.resources.team_profile_groups_hint
 import com.kapp.tenon.generated.resources.team_profile_groups_in
 import com.kapp.tenon.generated.resources.team_profile_groups_label
 import com.kapp.tenon.generated.resources.team_profile_groups_none
 import com.kapp.tenon.generated.resources.team_profile_groups_optional
-import com.kapp.tenon.generated.resources.team_profile_leader_hint
-import com.kapp.tenon.generated.resources.team_profile_leader_label
-import com.kapp.tenon.generated.resources.team_profile_member_empty
 import com.kapp.tenon.generated.resources.team_profile_members_label
 import com.kapp.tenon.generated.resources.team_profile_name_hint
-import com.kapp.tenon.generated.resources.team_profile_name_label
-import com.kapp.tenon.generated.resources.team_profile_member_name_label
-import com.kapp.tenon.generated.resources.team_profile_member_role_label
 import com.kapp.tenon.generated.resources.team_profile_no_leaders
 import com.kapp.tenon.generated.resources.team_profile_prereq_body
 import com.kapp.tenon.generated.resources.team_profile_save_edit
 import com.kapp.tenon.generated.resources.team_profile_save_new
-import com.kapp.tenon.generated.resources.team_roster_add_member
 import com.kapp.tenon.generated.resources.team_roster_remove_member
-import com.kapp.tenon.ui.components.AppButtonSize
-import com.kapp.tenon.ui.components.AppTextButton
-import com.kapp.tenon.ui.components.AppButtonTone
+import com.kapp.tenon.generated.resources.ic_close
+import com.kapp.tenon.generated.resources.ic_chevd
+import com.kapp.tenon.ui.components.AppIconButton
 import com.kapp.tenon.ui.components.RelayDialog
 import com.kapp.tenon.ui.components.RelayDialogButton
 import com.kapp.tenon.ui.components.newDraft
@@ -62,7 +76,7 @@ import com.kapp.tenon.ui.theme.LocalCardShape
 import org.jetbrains.compose.resources.stringResource
 
 /** 领队候选：一个本机可上报的 agent（`agentKey` 是档案键，`label` 是人看的名）。 */
-internal data class TeamLeaderOption(val agentKey: String, val label: String)
+public data class TeamLeaderOption(val agentKey: String, val label: String)
 
 /**
  * 打开「编辑团队」时喂给对话框的初值。
@@ -76,6 +90,7 @@ internal data class TeamEditTarget(
     val name: String,
     val leaderAgentId: String?,
     val members: List<TeamMemberDraft>,
+    val description: String = "",
 )
 
 /**
@@ -85,7 +100,7 @@ internal data class TeamEditTarget(
  *   取消勾也不会把它摘出去 —— 从群里移除是那个群的决定（`DetachTeam`），
  *   不该藏在「编辑团队」里。
  */
-internal data class TeamGroupOption(val groupId: String, val name: String, val joined: Boolean)
+public data class TeamGroupOption(val groupId: String, val name: String, val joined: Boolean)
 
 /**
  * 这一屏能勾选的群 = **还没引用这支队伍**的那些。
@@ -120,15 +135,23 @@ internal fun addableTeamGroups(options: List<TeamGroupOption>): List<TeamGroupOp
  *   只画前置条件与「去看看节点」；不画一张永远存不下去的表单。
  * @param initialLeaderAgentId 编辑态的领队（新建时传 null ⇒ 取第一个候选）。
  */
+// 公开面：androidApp 的 screenshotTest 跨模块组装预览；生产入口仍在本模块。
 @Composable
-internal fun TeamProfileDialog(
+public fun TeamProfileDialog(
     profileKey: String?,
     initialName: String,
     leaders: List<TeamLeaderOption>,
     initialLeaderAgentId: String?,
     initialMembers: List<TeamMemberDraft>,
+    initialDescription: String = "",
     groups: List<TeamGroupOption>,
-    onSave: (name: String, leaderAgentId: String, members: List<TeamMemberDraft>, groupIds: List<String>) -> Unit,
+    onSave: (
+        name: String,
+        leaderAgentId: String,
+        members: List<TeamMemberDraft>,
+        groupIds: List<String>,
+        description: String,
+    ) -> Unit,
     onDismiss: () -> Unit,
     /**
      * 前置条件不满足时的出路：去节点页确认宿主在线。
@@ -189,13 +212,14 @@ internal fun TeamProfileDialog(
         )
     }
     var members by remember { mutableStateOf(initialMembers) }
+    var description by remember(initialDescription) { mutableStateOf(initialDescription) }
     // 只记「这次要新加进去的群」；已加入的群不进这个集合（勾了也不重复加）。
     var pickedGroups by remember { mutableStateOf(emptySet<String>()) }
 
     val addableGroups = addableTeamGroups(groups)
     // **不勾群也能保存**（「先建档、后加群」）：没有席位的团队在群里/手机上确实看不见，
     // 但那是一个**知情选择**，不是非法输入 —— 出路是群信息的「添加团队」。
-    // 界面的责任是说清代价（见下方 `team_profile_groups_optional`），不是把按钮置灰。
+    // 界面的责任是说清代价（下方群段落的 `team_profile_groups_optional`），不是把按钮置灰。
     val canSave = name.isNotBlank() &&
         leaderKey != null &&
         members.isNotEmpty() &&
@@ -204,157 +228,368 @@ internal fun TeamProfileDialog(
     RelayDialog(
         onDismissRequest = onDismiss,
         title = {
-            Text(
-                stringResource(
-                    if (profileKey == null) {
-                        Res.string.team_profile_dialog_title_new
-                    } else {
-                        Res.string.team_profile_dialog_title_edit
-                    },
-                ),
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(
+                    text = stringResource(
+                        if (profileKey == null) {
+                            Res.string.team_profile_dialog_title_new
+                        } else {
+                            Res.string.team_profile_dialog_title_edit
+                        },
+                    ),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                AppIconButton(
+                    icon = Res.drawable.ic_close,
+                    contentDescription = stringResource(Res.string.common_cancel),
+                    onClick = onDismiss,
+                )
+            }
         },
         content = {
             Column(
                 modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(sp.sm),
             ) {
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it },
-                    label = { Text(stringResource(Res.string.team_profile_name_label)) },
-                    placeholder = { Text(stringResource(Res.string.team_profile_name_hint)) },
-                    singleLine = true,
+                // 1. 头像 + 团队名称（同一行对齐，对齐 Multica 与原型）
+                Row(
                     modifier = Modifier.fillMaxWidth(),
-                )
-
-                SectionLabel(stringResource(Res.string.team_profile_leader_label))
-                if (leaders.isEmpty()) {
-                    Text(
-                        text = stringResource(Res.string.team_profile_no_leaders),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                } else if (profileKey != null) {
-                    // 编辑态**不给换领队**：换领队 = 换席位（旧 leader 的 teamId 要摘、
-                    // 新 leader 的席位要建），那是另一条命令（DetachTeam + AttachTeam），
-                    // 不是「改个名字」。这里画成只读，而不是给一排点了不生效的 chip ——
-                    // 那正是本仓最贵的故障形态（改了没反应、也没报错）。
-                    Text(
-                        text = leaders.firstOrNull { it.agentKey == leaderKey }?.label ?: (leaderKey ?: ""),
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                } else {
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(sp.xs),
-                        verticalArrangement = Arrangement.spacedBy(sp.xs),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(sp.md),
+                ) {
+                    Surface(
+                        shape = LocalCardShape.current,
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        modifier = Modifier.size(48.dp),
                     ) {
-                        leaders.forEach { option ->
-                            SelectChip(
-                                label = option.label,
-                                selected = option.agentKey == leaderKey,
-                                onClick = { leaderKey = option.agentKey },
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                painter = painterResource(Res.drawable.ic_groups),
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(sp.lg),
                             )
                         }
                     }
-                    Text(
-                        text = stringResource(Res.string.team_profile_leader_hint),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-
-                SectionLabel(stringResource(Res.string.team_profile_members_label))
-                if (members.isEmpty()) {
-                    Text(
-                        text = stringResource(Res.string.team_profile_member_empty),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                // 行索引就是身份：不按名字找（改名字不该让光标跳行）。
-                members.forEachIndexed { index, draft ->
-                    MemberRow(
-                        draft = draft,
-                        onNameChange = { value ->
-                            members = members.mapIndexed { i, d ->
-                                if (i == index) d.copy(name = value) else d
-                            }
-                        },
-                        onRoleChange = { value ->
-                            members = members.mapIndexed { i, d ->
-                                if (i == index) d.copy(role = value) else d
-                            }
-                        },
-                        onRemove = { members = members.filterIndexed { i, _ -> i != index } },
-                    )
-                }
-                AppTextButton(
-                    text = stringResource(Res.string.team_roster_add_member),
-                    onClick = {
-                        // id 现在就定死（编辑保全）：之后改名不重算，执行档才对得上。
-                        members = members + newDraft(
-                            name = "",
-                            role = "",
-                            takenTokens = emptySet(),
-                            existing = members,
-                        )
-                    },
-                    size = AppButtonSize.Small,
-                )
-
-                SectionLabel(stringResource(Res.string.team_profile_groups_label))
-                if (groups.isEmpty()) {
-                    Text(
-                        text = stringResource(Res.string.team_profile_groups_none),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                } else {
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(sp.xs),
-                        verticalArrangement = Arrangement.spacedBy(sp.xs),
-                    ) {
-                        addableGroups.forEach { option ->
-                            SelectChip(
-                                label = option.name,
-                                selected = option.groupId in pickedGroups,
-                                onClick = {
-                                    pickedGroups = if (option.groupId in pickedGroups) {
-                                        pickedGroups - option.groupId
-                                    } else {
-                                        pickedGroups + option.groupId
-                                    }
-                                },
-                            )
-                        }
-                        // 已加入的群画成只读 chip：把「它已经在哪」和「这次还能加哪」
-                        // 放在同一行，用户不必去别的屏对。
-                        groups.filter { it.joined }.forEach { option ->
+                    OutlinedTextField(
+                        value = name,
+                        onValueChange = { name = it },
+                        placeholder = {
                             Text(
-                                text = option.name + " · " +
-                                    stringResource(Res.string.team_profile_groups_in),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.padding(horizontal = sp.xxs, vertical = sp.xxs),
+                                text = stringResource(Res.string.team_profile_name_hint),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                            )
+                        },
+                        singleLine = true,
+                        shape = MaterialTheme.shapes.medium,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
+                            unfocusedBorderColor = Color.Transparent,
+                            focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                            focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                            unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                        ),
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+
+                // 2. 团队简介（全宽文本域，紧接头像+名称下方，对齐原型与 Multica）
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(sp.xxs),
+                ) {
+                    OutlinedTextField(
+                        value = description,
+                        onValueChange = { if (it.length <= TeamProfile.MAX_DESCRIPTION_LENGTH) description = it },
+                        placeholder = {
+                            Text(
+                                text = stringResource(Res.string.team_profile_desc_hint),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                            )
+                        },
+                        minLines = 2,
+                        maxLines = 3,
+                        shape = MaterialTheme.shapes.medium,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
+                            unfocusedBorderColor = Color.Transparent,
+                            focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                            focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                            unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                        ),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text(
+                        text = "${description.length} / ${TeamProfile.MAX_DESCRIPTION_LENGTH}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                        modifier = Modifier.fillMaxWidth(),
+                        textAlign = TextAlign.End,
+                    )
+                }
+
+                // 4. 队长智能体
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(sp.xs),
+                ) {
+                    Text(
+                        text = stringResource(Res.string.team_profile_leader_focus_title),
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Text(
+                        text = stringResource(Res.string.team_profile_leader_role_desc),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (leaders.isEmpty()) {
+                        Text(
+                            text = stringResource(Res.string.team_profile_no_leaders),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    } else {
+                        val selectedLeader = leaders.firstOrNull { it.agentKey == leaderKey }
+                        var leaderMenuExpanded by remember { mutableStateOf(false) }
+                        Box(modifier = Modifier.fillMaxWidth()) {
+                            Surface(
+                                shape = MaterialTheme.shapes.small,
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .then(if (profileKey == null) Modifier.clickable { leaderMenuExpanded = true } else Modifier),
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = sp.sm, vertical = sp.sm6),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(sp.xs),
+                                    ) {
+                                        if (selectedLeader != null) {
+                                            PeerAvatar(
+                                                name = selectedLeader.label,
+                                                avatar = AVATAR_LEGACY_INITIAL_VALUE,
+                                                size = sp.md10,
+                                                shape = CircleShape,
+                                            )
+                                            Text(
+                                                text = selectedLeader.label,
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = FontWeight.Medium,
+                                                color = MaterialTheme.colorScheme.onSurface,
+                                            )
+                                        } else {
+                                            Icon(
+                                                painter = painterResource(Res.drawable.ic_user),
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.size(sp.sm),
+                                            )
+                                            Text(
+                                                text = stringResource(Res.string.team_profile_leader_select_placeholder),
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            )
+                                        }
+                                    }
+                                    if (profileKey == null) {
+                                        Icon(
+                                            painter = painterResource(Res.drawable.ic_chevd),
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.size(sp.sm),
+                                        )
+                                    }
+                                }
+                            }
+                            DropdownMenu(
+                                expanded = leaderMenuExpanded,
+                                onDismissRequest = { leaderMenuExpanded = false },
+                            ) {
+                                leaders.forEach { option ->
+                                    DropdownMenuItem(
+                                        text = {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(sp.xs),
+                                            ) {
+                                                PeerAvatar(
+                                                    name = option.label,
+                                                    avatar = AVATAR_LEGACY_INITIAL_VALUE,
+                                                    size = sp.md10,
+                                                    shape = CircleShape,
+                                                )
+                                                Text(text = option.label)
+                                            }
+                                        },
+                                        onClick = {
+                                            leaderKey = option.agentKey
+                                            leaderMenuExpanded = false
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 5. 附加成员（可选）
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(sp.xs),
+                ) {
+                    Text(
+                        text = stringResource(Res.string.team_profile_members_label),
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Text(
+                        text = stringResource(Res.string.team_profile_members_sub_desc),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (members.isNotEmpty()) {
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(sp.xs),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            members.forEachIndexed { index, draft ->
+                                MemberCompactRow(
+                                    draft = draft,
+                                    onNameChange = { newName ->
+                                        members = members.mapIndexed { i, d ->
+                                            if (i == index) d.copy(name = newName) else d
+                                        }
+                                    },
+                                    onRoleChange = { newRole ->
+                                        members = members.mapIndexed { i, d ->
+                                            if (i == index) d.copy(role = newRole) else d
+                                        }
+                                    },
+                                    onRemove = {
+                                        members = members.filterIndexed { i, _ -> i != index }
+                                    },
+                                )
+                            }
+                        }
+                    }
+
+                    // 附加成员选择触发器（对齐 Multica 与原型）
+                    Surface(
+                        shape = MaterialTheme.shapes.small,
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                members = members + newDraft(
+                                    name = "",
+                                    role = "",
+                                    takenTokens = emptySet(),
+                                    existing = members,
+                                )
+                            },
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = sp.sm, vertical = sp.sm6),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(sp.xs),
+                            ) {
+                                Icon(
+                                    painter = painterResource(Res.drawable.ic_user),
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(sp.sm),
+                                )
+                                Text(
+                                    text = stringResource(Res.string.team_profile_member_select_placeholder),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            Icon(
+                                painter = painterResource(Res.drawable.ic_chevd),
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(sp.sm),
                             )
                         }
                     }
+                }
+
+                // 6. 入驻协同群聊
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(sp.xs),
+                ) {
                     Text(
-                        text = stringResource(Res.string.team_profile_groups_hint),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        text = stringResource(Res.string.team_profile_groups_label),
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
                     )
-                    // 新建且一个群都没勾：如实说代价与出路。这不是「不推荐」，是**两个都成立**的
-                    // 选择 —— 先建档的人往往还没决定这支队进哪个群。
-                    if (profileKey == null && pickedGroups.isEmpty()) {
+                    if (groups.isEmpty()) {
                         Text(
-                            text = stringResource(Res.string.team_profile_groups_optional),
-                            style = MaterialTheme.typography.labelSmall,
+                            text = stringResource(Res.string.team_profile_groups_none),
+                            style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                    } else {
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(sp.xs),
+                            verticalArrangement = Arrangement.spacedBy(sp.xs),
+                        ) {
+                            addableGroups.forEach { option ->
+                                SelectChip(
+                                    label = option.name,
+                                    selected = option.groupId in pickedGroups,
+                                    onClick = {
+                                        pickedGroups = if (option.groupId in pickedGroups) {
+                                            pickedGroups - option.groupId
+                                        } else {
+                                            pickedGroups + option.groupId
+                                        }
+                                    },
+                                )
+                            }
+                            groups.filter { it.joined }.forEach { option ->
+                                Text(
+                                    text = option.name + " · " +
+                                        stringResource(Res.string.team_profile_groups_in),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.padding(horizontal = sp.xxs, vertical = sp.xxs),
+                                )
+                            }
+                        }
+                        if (pickedGroups.isEmpty() && groups.none { it.joined }) {
+                            Text(
+                                text = stringResource(Res.string.team_profile_groups_optional),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
                 }
             }
@@ -380,6 +615,7 @@ internal fun TeamProfileDialog(
                             leader,
                             members.map { it.copy(name = it.name.trim(), role = it.role.trim()) },
                             pickedGroups.toList(),
+                            description.trim(),
                         )
                     }
                 },
@@ -391,62 +627,79 @@ internal fun TeamProfileDialog(
     )
 }
 
-/** 段标题：一句话 + 与正文字号差一档（与团队编制对话框同一套层次）。 */
+/** 一行紧凑协同组员：头像 + 组内名/角色两个内联输入 + 移除按钮。 */
 @Composable
-private fun SectionLabel(text: String) {
-    Text(
-        text = text,
-        style = MaterialTheme.typography.labelMedium,
-        fontWeight = FontWeight.SemiBold,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(top = LocalAppSpacing.current.sm6),
-    )
-}
-
-/** 一行组员：组内名 + 角色 + 移除。两列等宽（窄屏也不折行）。 */
-@Composable
-private fun MemberRow(
+private fun MemberCompactRow(
     draft: TeamMemberDraft,
     onNameChange: (String) -> Unit,
     onRoleChange: (String) -> Unit,
     onRemove: () -> Unit,
 ) {
     val sp = LocalAppSpacing.current
+    val fieldColors = OutlinedTextFieldDefaults.colors(
+        focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
+        unfocusedBorderColor = Color.Transparent,
+        focusedContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.6f),
+        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+        focusedTextColor = MaterialTheme.colorScheme.onSurface,
+        unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+    )
     Surface(
-        // 卡片圆角走既有 token（与团队卡、员工卡同一档）：这里是"一块卡"，不是按钮。
-        shape = LocalCardShape.current,
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+        shape = MaterialTheme.shapes.small,
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f),
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Column(Modifier.padding(sp.sm)) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(sp.sm6),
-                modifier = Modifier.fillMaxWidth(),
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(sp.xs),
+            modifier = Modifier.padding(horizontal = sp.xs, vertical = sp.xxs),
+        ) {
+            PeerAvatar(
+                name = draft.name.ifBlank { stringResource(Res.string.team_profile_member_name_label) },
+                avatar = AVATAR_LEGACY_INITIAL_VALUE,
+                size = sp.xl,
+                shape = CircleShape,
+            )
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(sp.xxs),
             ) {
                 OutlinedTextField(
                     value = draft.name,
                     onValueChange = onNameChange,
-                    // 这里填的是**组内名**（`TeamMemberDraft.name`），不是角色：
-                    // 借用编制对话框的「角色名称」会让 `member` 看起来像岗位，
-                    // 而它其实是这个人在这支队里的名字。
-                    label = { Text(stringResource(Res.string.team_profile_member_name_label)) },
                     singleLine = true,
-                    modifier = Modifier.weight(1f),
+                    shape = MaterialTheme.shapes.small,
+                    textStyle = MaterialTheme.typography.bodySmall,
+                    placeholder = {
+                        Text(
+                            text = stringResource(Res.string.team_profile_member_name_label),
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    },
+                    colors = fieldColors,
+                    modifier = Modifier.fillMaxWidth(),
                 )
                 OutlinedTextField(
                     value = draft.role,
                     onValueChange = onRoleChange,
-                    label = { Text(stringResource(Res.string.team_profile_member_role_label)) },
                     singleLine = true,
-                    modifier = Modifier.weight(1f),
+                    shape = MaterialTheme.shapes.small,
+                    textStyle = MaterialTheme.typography.bodySmall,
+                    placeholder = {
+                        Text(
+                            text = stringResource(Res.string.team_profile_member_role_label),
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    },
+                    colors = fieldColors,
+                    modifier = Modifier.fillMaxWidth(),
                 )
             }
-            AppTextButton(
-                text = stringResource(Res.string.team_roster_remove_member),
+            AppIconButton(
+                icon = Res.drawable.ic_close,
+                contentDescription = stringResource(Res.string.team_roster_remove_member),
                 onClick = onRemove,
-                tone = AppButtonTone.Danger,
-                size = AppButtonSize.Small,
+                modifier = Modifier.size(sp.md10),
             )
         }
     }

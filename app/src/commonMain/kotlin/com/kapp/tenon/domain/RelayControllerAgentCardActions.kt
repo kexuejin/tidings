@@ -23,6 +23,19 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 
 /**
+ * 看板卡的「不可逆终态」：只允许有一个 —— 补丁已合并的 `merged`。
+ *
+ * 另三个看似终态的态都有合法的**回退**路径，不能挡：`blocked` 会经 retry/自愈
+ * 重发 working（复用同一 cardId）、`aborted` 可被用户重新开工、`done` 是零产物成功。
+ * 把它们当终态拦回归，等于把这些卡的合法重跑全废掉（真机 retry 现场就是 blocked→working）。
+ * 只有 `merged` 一旦成立就不该再被 working/review_ready 刷回去 —— 那会让用户以为
+ * 合并没成功、再点一次合并，git apply 一次已合入的补丁必然冲突。
+ *
+ * `review_ready` 更不是终态：它就是被 `merged` 覆盖的那一态。
+ */
+internal fun isCardTerminalState(state: String): Boolean = state == "merged"
+
+/**
  * 看板卡的**动作域**：资格判定（§4.8）、原子记账（§7.3-2）、rev 串行分配、全群广播、
  * 终态翻面、合流反查。
  *
@@ -197,6 +210,21 @@ internal class RelayControllerAgentCardActions(
                     (row.renderCard?.get("cardId") as? JsonPrimitive)?.contentOrNull == id
                 }
             }
+            // 终态单调：rev 单调只防旧帧，不防「更高 rev 的中间态」。自愈重试/迟到
+            // 的 Card 事件若带 working/review_ready 覆盖一张已 merged/aborted/blocked/done
+            // 的卡，会把终态刷回进行中，而翻面时按钮已摘 —— 用户再也点不到正确出口。
+            // 终态优先于 rev：这里直接拒绝这类回归帧，不动落库、不发广播。
+            val incomingState = (card["state"] as? JsonPrimitive)?.contentOrNull
+            val existingState = (existingSlot?.renderCard?.get("state") as? JsonPrimitive)?.contentOrNull
+            if (incomingState != null && existingState != null &&
+                isCardTerminalState(existingState) && !isCardTerminalState(incomingState)
+            ) {
+                println(
+                    "[CARD] drop terminal regression card=" + cardId +
+                        " from=" + existingState + " to=" + incomingState,
+                )
+                return@withLock null
+            }
             val existingRev = (existingSlot?.renderCard?.get("rev") as? JsonPrimitive)?.contentOrNull?.toIntOrNull() ?: 0
             val passedRev = (card["rev"] as? JsonPrimitive)?.contentOrNull?.toIntOrNull() ?: 1
             // **有槽位就严格递增**：`maxOf(传入 rev, 既有 + 1)`。
@@ -267,6 +295,8 @@ internal class RelayControllerAgentCardActions(
             }
             out
         }
+        // 终态回归帧已在锁内被拒（返回 null），不落库也不广播。
+        if (finalCard == null) return
         // **先落库、再发帧**（与 `broadcastAgentState` 同一条纪律）。
         if (meta != null) {
             val rt = host.runtime ?: run {
@@ -290,8 +320,16 @@ internal class RelayControllerAgentCardActions(
                     senderId = AgentSenderId.of(st.selfNodeId, agentId),
                     envelopeId = envelopeId,
                     card = finalCard,
-                    agentSessionId = cardSessionId,
-                    agentSessionTitle = cardSessionTitle,
+                    // **不带 agentSessionId/agentSessionTitle**：群文本的会话归属
+                    // 必须与 agentCursor 成对（validateMsg 的成对校验），而卡广播没有
+                    // 事件游标可带。此前把 sessionId 单独带上，每个接收端整帧拒收
+                    // （bad-payload:msg）→ 无 ACK → 入队 → 重放自解码也拒 → 从队列删除：
+                    // 带着会话归属的卡（工单一开跑就有的那些帧：executing/review_ready/
+                    // blocked/failed 终态）在**每一个**对端的界面上都不存在，且发送侧
+                    // 全程无错。会话归属仍在两个不受影响的地方：卡 JSON 自己的
+                    // `sessionId`/`agentSessionId`（随 card 键原样过线），以及本机落库行
+                    // （上面 handleAppend/Replace 里的同名字段，宿主历史照画分段线）。
+                    // 手机端分段线回落 id 前缀判据 —— 与这些帧从未送达过的历史一致。
                 )
             }.onFailure { t ->
                 println(
