@@ -25,6 +25,13 @@ import java.io.Reader
 object DriverLineLimits {
     /** 单行字符数上限（≈ 1 MiB 的 UTF-8，事件帧预算的 4 倍余量）。 */
     const val MAX_LINE_CHARS: Int = 256 * 1024
+
+    /**
+     * 单次任务**输出总量**上限（≈ 4 MiB）。单行有界挡不住「几百万行短输出」——
+     * 那会在 `outputTail` 里堆到 OOM，表现为「进程被杀」，不像驱动的 bug。
+     * 值的口径：给 stderr 尾巴与瞬时判别留足尾部，同时把堆占用钉在常量级。
+     */
+    const val MAX_TOTAL_CHARS: Int = 4 * 1024 * 1024
 }
 
 /** [BoundedLineReader.readLine] 的结果。 */
@@ -115,5 +122,41 @@ class BoundedLineReader(
             return pending
         }
         return reader.read()
+    }
+}
+
+/**
+ * 有界输出尾部缓冲：只保留最近 [limit] 字符，替代裸 [StringBuilder] 的 `outputTail`。
+ *
+ * 为什么必须换成它而不是「判长度时再截」：与 [BoundedLineReader] 同理——等堆到上限再判，
+ * OOM 已经发生。这里在**每次写入时**就把总长钉在上限内，超出的头部边写边丢。
+ *
+ * 语义取舍：只留尾部。驱动消费这份缓冲只为了两件事——瞬时失败判别（看输出里有没有
+ * STREAM_CLOSED / 5xx 标记）与终局错误的 stderr 尾巴，两者都只需最近的一段；丢头部
+ * 不影响判定，却把「跑得越久越占内存」改成常量级。跨行截断时第一行可能是不完整的
+ * 半行——尾巴只取最后几行且取前 strip，半行不会成为误导性的诊断行。
+ *
+ * 非线程安全：一个实例只在一个读循环里写。
+ */
+class BoundedOutputTail(private val limit: Int = DriverLineLimits.MAX_TOTAL_CHARS) {
+    private val sb = StringBuilder()
+
+    /** 追加完整一行（含换行）。超长时整行仍可能超过 limit，但下一行写入会立刻裁回。 */
+    fun appendLine(line: String) {
+        sb.append(line).append('\n')
+        trim()
+    }
+
+    /** 当前保留的尾部内容（可能从半行开始）。 */
+    override fun toString(): String = sb.toString()
+
+    /**
+     * 裁到 [limit] 以内。用 `delete(0, n)` 而非逐字符：StringBuilder 的头部删除是
+     * System.arraycopy，对几 MB 缓冲也只在超限时发生一次（之后回到 limit 以下），
+     * 不是每行都付代价。
+     */
+    private fun trim() {
+        val excess = sb.length - limit
+        if (excess > 0) sb.delete(0, excess)
     }
 }

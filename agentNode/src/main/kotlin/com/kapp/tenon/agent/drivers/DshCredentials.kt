@@ -25,7 +25,10 @@ import java.io.File
 object DshCredentials {
 
     const val ENV_KEY = "DEEPSEEK_API_KEY"
-    private const val CREDENTIALS_FILE = ".dsh/.credentials.yaml"
+
+    /** 凭证文件（相对 `HOME`）。判定层按 JSON 的 `authProbe.credentialFile` 查同一份文件时，
+     * 由覆盖守卫比对两处字面量，避免「界面说没有、注入却拿到了」这种两套路径的分叉。 */
+    internal const val CREDENTIALS_FILE = ".dsh/.credentials.yaml"
 
     /**
      * 返回该递给子进程的 key；null = 两处都拿不到（调用方如实让 CLI 自己报缺凭证，
@@ -37,6 +40,10 @@ object DshCredentials {
      * 装配门槛：有没有**任何** provider 凭证来源。出厂路由认 env 的
      * [ENV_KEY]；用户自配路由（headless profile 的默认模型覆盖）由
      * credentials-local 服务读同一份 `~/.dsh/.credentials.yaml`——文件在即视为有源。
+     *
+     * **这不是登录态判据**：装配期 HOME 缺失时它返回 false（不注入，让 CLI 自己报缺凭证）。
+     * 登录态要求「HOME 已知且文件不在」才敢说「确定未登录」，所以那条走
+     * `DriverAuthProbes.hasDeclaredCredential`（返回 `Boolean?`，null = 判不了）。
      */
     fun hasCredentialFile(env: Map<String, String> = System.getenv(), home: String? = null): Boolean {
         if (resolve(env, home) != null) return true

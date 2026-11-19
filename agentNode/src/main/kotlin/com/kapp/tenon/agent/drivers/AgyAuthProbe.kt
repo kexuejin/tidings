@@ -24,8 +24,14 @@ import kotlinx.coroutines.withContext
  * （省 6s）；quest 里再次观察到 auth 等待行时 [invalidate]（token 可能被清了）。
  */
 class AgyAuthProbe(
-    /** 探针命令；默认 `agy models`。测试可注入假命令。 */
-    private val command: List<String> = listOf("agy", "models"),
+    /**
+     * 探针命令；默认走发现器解析（见 [resolvedCommand]）。测试可注入假命令。
+     *
+     * 不再硬编码 `agy`：GUI 启动的宿主只有最小 PATH，裸 `ProcessBuilder("agy")` 在 agy 只装于
+     * `~/.local/bin` 或经 `TENON_AGY_CLI` 指定时找不到 ⇒ `IOException → UNKNOWN`（放行），
+     * 症状推迟到真派单才显形。发现器返回的是**可执行绝对路径**，用它启动直接绕开 PATH 问题。
+     */
+    private val command: List<String> = resolvedCommand(),
     private val timeoutMs: Long = DEFAULT_TIMEOUT_MS,
     /** 探测执行钩子（测试计数用）；生产缺省空实现。 */
     internal var probeHook: () -> Unit = {},
@@ -90,6 +96,24 @@ class AgyAuthProbe(
     companion object {
         const val DEFAULT_TIMEOUT_MS: Long = 20_000L
 
+        /**
+         * 生产装配：走 [CliDiscovery.resolveAgyCli] 拿 agy 的可执行路径（认 `TENON_AGY_CLI`
+         * 显式覆盖 → PATH → 应用包约定目录），拼上 `models` 子命令。
+         *
+         * 与模型目录探针、七家装配共用同一发现器 ⇒ 两者看到的是同一个 agy。找不到时回落裸
+         * `agy` 名字：此时 [runOnce] 的 `start()` 抛 IOException → UNKNOWN 放行，与「命令缺失」
+         * 同一口径，不替正式运行做决定。测试可注入合成 env 断言这条回落，不碰本机。
+         */
+        fun resolvedCommand(
+            env: Map<String, String> = System.getenv(),
+            pathDirs: List<String> = CliDiscovery.pathDirsOf(env),
+        ): List<String> {
+            // 子命令骨架取自 JSON 投影（argv[0] 必为 ${cliPath}，由 codegen 钉死），
+            // 这里只把首项换成发现到的绝对路径，不另写一份 "models"。
+            val head = CliDiscovery.resolveAgyCli(env, pathDirs) ?: CliDiscovery.AGY_BIN
+            return listOf(head) + spec.argv.drop(1)
+        }
+
         /** 给 FAILED 通知的登录指引（与 QuestAuthWaitDetector 的改写同用户口径）。 */
         const val LOGIN_REMEDIATION: String =
             "agy CLI is not logged in (pre-flight check). Run `agy` once in a terminal on the host " +
@@ -97,20 +121,27 @@ class AgyAuthProbe(
                 "the keychain. Then retry this quest."
 
         /**
-         * 纯分类：退出码 + 输出 → 登录态。
+         * 纯分类：退出码 + 输出 → 登录态。判据（marker / ignoreCase / exit）从 JSON 投影的 agy
+         * `authProbe` 读，机制委托给按 key 取声明的 [DriverAuthProbes.classify] —— 这里只把通用的
+         * 三态折成本类的枚举，不另写一份判定顺序。
          *
          * - exit 0 = 已登录（models 列表正常返回）；
          * - 输出带「未登录」签名 = 未登录（CLI 的既定报错文案，真机日志实证）；
          * - 其余（网络问题、命令缺失）= UNKNOWN —— **放行**：预检只拦「确定未登录」，
            不替正式运行做任何其他决定。
          */
-        fun classify(exitCode: Int, output: String): State = when {
-            exitCode == 0 -> State.AUTHENTICATED
-            output.contains(NOT_LOGGED_IN_MARKER, ignoreCase = true) -> State.NOT_AUTHENTICATED
-            else -> State.UNKNOWN
-        }
+        fun classify(exitCode: Int, output: String): State =
+            when (DriverAuthProbes.classify(DriverKeys.AGY, exitCode, output)) {
+                DriverAuthProbes.State.AUTHENTICATED -> State.AUTHENTICATED
+                DriverAuthProbes.State.NOT_AUTHENTICATED -> State.NOT_AUTHENTICATED
+                DriverAuthProbes.State.UNKNOWN -> State.UNKNOWN
+            }
 
-        const val NOT_LOGGED_IN_MARKER: String = "not logged into antigravity"
+        /** agy 的未登录签名取自 JSON 投影（`authProbe.notAuthenticatedMarker`），不再有本地 const。 */
+
+        private val spec: CliDriverSpecs.AuthProbeSpec
+            get() = CliDriverSpecs.authProbeOf(DriverKeys.AGY)
+                ?: error("driver-specs.json 缺 agy 的 authProbe 声明")
 
         private const val OUTPUT_CAPTURE_CHARS: Int = 8_000
     }

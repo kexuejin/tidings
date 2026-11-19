@@ -24,6 +24,35 @@ class OsSandboxGuardTest {
         assertTrue(OsSandboxGuard.isStrictRequested(mapOf("TENON_OS_SANDBOX" to "STRICT")), "开关值大小写不敏感")
     }
 
+    /**
+     * 声明面 → 执行面的三档映射逐一核对（换错一档 = 「声明断网、实际全网」，且没有编译错）。
+     *
+     * 在册驱动当前全是 OPEN，经驱动查表只能验到这一档，所以直译函数单独可测。
+     */
+    @Test
+    fun declaredPolicyMapsEveryTierByItsOwnName() {
+        assertEquals(
+            OsSandboxGuard.NetworkPolicy.OPEN,
+            OsSandboxGuard.of(CliDriverSpecs.NetworkPolicy.OPEN),
+        )
+        assertEquals(
+            OsSandboxGuard.NetworkPolicy.LOOPBACK,
+            OsSandboxGuard.of(CliDriverSpecs.NetworkPolicy.LOOPBACK),
+        )
+        assertEquals(
+            OsSandboxGuard.NetworkPolicy.AIR_GAPPED,
+            OsSandboxGuard.of(CliDriverSpecs.NetworkPolicy.AIR_GAPPED),
+        )
+        // 查表入口与直译同口径（裸键也能查：stripCliSuffix 幂等）。
+        for (key in CliDriverSpecs.keys) {
+            assertEquals(
+                OsSandboxGuard.of(CliDriverSpecs.networkPolicyOf(key)),
+                OsSandboxGuard.declaredPolicyOf(DriverKeys.cliDriverId(key)),
+                "$key 的声明→执行映射对裸键与 driverId 必须一致",
+            )
+        }
+    }
+
     @Test
     fun seatbeltProfileThreeTiersShapeCorrectly() {
         // AIR_GAPPED：纯 deny（恢复 main 原状——loopback 三行曾让被提示注入的
@@ -43,10 +72,31 @@ class OsSandboxGuardTest {
         // 逐 IP 白名单在本机不可表达。
         assertTrue(!loopback.contains("(allow network*)"), "loopback 档不得全开")
 
-        // OPEN：云后端 CLI（agy/claude/codex/dsh 的模型 API 必须出网）。
+        // OPEN：云后端 CLI（内置驱动全集的模型 API 必须出网）。
         val open = OsSandboxGuard.seatbeltProfile(OsSandboxGuard.NetworkPolicy.OPEN)
         assertTrue(open.contains("(allow network*)"))
         assertTrue(!open.contains("(deny network*)"), "OPEN 形态不得再写 deny")
+    }
+
+    /**
+     * 给"LOOPBACK 给 claude/opencode 用上"这条审计建议的**反证守卫**。
+     *
+     * 这两家既要连云端模型 API，又要连 127.0.0.1:8788 的 MCP。OPEN = `allow network*`
+     * 两者都放行；LOOPBACK = `deny network*` 只留 localhost，设上去模型 API 当场断。
+     * 所以它们必须用 OPEN，audit 那条建议与"模型 API 必须出网"自相矛盾，这里按证据收口。
+     */
+    @Test
+    fun openPolicyIsTheOnlyTierServingBothCloudApiAndLoopbackMcp() {
+        val open = OsSandboxGuard.seatbeltProfile(OsSandboxGuard.NetworkPolicy.OPEN)
+        assertTrue(
+            open.contains("(allow network*)") && !open.contains("(deny network*)"),
+            "OPEN 必须同时放行云端 API 与 loopback MCP（network* 覆盖 localhost，无需单独规则）",
+        )
+        val loopback = OsSandboxGuard.seatbeltProfile(OsSandboxGuard.NetworkPolicy.LOOPBACK)
+        assertTrue(
+            loopback.contains("(deny network*)") && !loopback.contains("(allow network*)"),
+            "LOOPBACK 断云端——给需要模型 API 的驱动用会静默断网，故内置驱动全集不采用此档",
+        )
     }
 
     @Test

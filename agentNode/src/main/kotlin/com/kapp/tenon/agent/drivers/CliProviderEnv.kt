@@ -18,8 +18,13 @@ package com.kapp.tenon.agent.drivers
  *
  * ## 三条纪律
  *
- * 1. **白名单，不是全量环境**。只搬下面列出的变量；`AWS_SECRET_*`、`PATH`、
- *    `HOME` 之类一概不带。给子进程的东西越少，泄漏面越小。
+ * 1. **这里是「主动注入集」，不是「子进程能看到的全部」**。下面每张表列的是本驱动需要宿主
+ *    **显式给**的键（凭证 / 自定义上游 / 代理 / 配置目录）。除这些之外，子进程还继承宿主
+ *    全量环境 —— 那是刻意的：清空继承会把 `git`/`ssh` 通道（`SSH_AUTH_SOCK`、`GIT_*`）、
+ *    编码（`LANG`/`LC_ALL`）、临时目录（`TMPDIR`）一起掐掉，症状是「命令跑通了、推不上去」，
+ *    而 CLI 只报它自己的话，没有一处会说是环境缺了东西。顺序与代价见 [CliChildEnv]。
+ *    所以「注入面」与「隔离面」是两件事：隔离靠沙箱工作目录、沙箱 HOME 交换
+ *    （只链凭证目录）与 `TENON_OS_SANDBOX=strict`，不靠这张表。
  * 2. **值只进子进程环境**。不写日志、不进台账、不进卡片、不落盘 —— 与 T-3a
  *    `envOverrides` 同一条纪律。要说明「注入了什么」时只报**变量名**
  *    （见 [describe]）。
@@ -33,122 +38,28 @@ object CliProviderEnv {
     const val ENV_ZCODE_PERSONAL_CONFIG = "ZCODE_PERSONAL_PROVIDER_CONFIG_FILE"
 
     /**
-     * Claude Code：Anthropic 兼容面。
+     * 凭证白名单的**唯一真源**在 `agent-contract/driver-specs.json`（经生成物投影，
+     * `:driverSpecDrift` 判漂移）。这里只留「为什么会是这张清单」的理由，值由投影提供。
      *
-     * `ANTHROPIC_BASE_URL` **不带 `/v1`** —— SDK 自己拼 `/v1/messages`，多写一段
-     * 会变成 `/v1/v1/messages`（实测 404）。`ANTHROPIC_CUSTOM_HEADERS` 用来带
-     * 网关要求的 `x-opencode-session`（缺了直接 400）。
+     * 改 JSON 前先读这些理由：
+     * - Claude：`ANTHROPIC_BASE_URL` 不带 `/v1`（SDK 自己拼，多写变 `/v1/v1/messages` 报 404）；
+     *   `ANTHROPIC_CUSTOM_HEADERS` 带网关要的 `x-opencode-session`。
+     * - Codex：要配置目录 `CODEX_HOME`（上游写在 config.toml），加 `OPENCODE_API_KEY`。
+     * - opencode：走 `OPENCODE_CONFIG` 指向的 json；必须带 `*_PROXY`（它不读系统代理，
+     *   缺了直连网关报「模型不可用」）；刻意不递 `OPENCODE_BASE_URL`（会重建 provider 丢 headers）。
+     * - agy：Google 登录态继承，无可配上游 ⇒ 空集是刻意的。
+     * - dsh：出厂认 `DEEPSEEK_API_KEY`，自配路由认 `OPENCODE_API_KEY`，补代理。
+     * - codebuddy：`CODEBUDDY_INTERNET_ENVIRONMENT` 决定端点（漏了中国版报认证失败）；
+     *   `CODEBUDDY_IS_SANDBOX` 只透传不主动设值（避免静默放宽安全面）。
+     * - zcode：`ZCODE_API_KEY`/`ZHIPU_API_KEY` + 两只 provider 配置路径 + `ZCODE_` 代理前缀。
      */
-    private val CLAUDE = listOf(
-        "ANTHROPIC_BASE_URL",
-        "ANTHROPIC_API_KEY",
-        "ANTHROPIC_AUTH_TOKEN",
-        "ANTHROPIC_MODEL",
-        "ANTHROPIC_SMALL_FAST_MODEL",
-        "ANTHROPIC_CUSTOM_HEADERS",
-    )
-
-    /**
-     * Codex：上游写在 `$CODEX_HOME/config.toml` 的 `model_providers` 里，所以这里
-     * 要的是**配置目录**（不是 base URL），加上 `env_key` 指向的那只 key。
-     *
-     * 注意 `CODEX_HOME` 指到真目录 = 把 codex 自己的 config/auth 递给 codex 自己，
-     * 这是它拿到凭证的正路；`.ssh` 之类不在其中（沙箱 `HOME` 仍是隔离的）。
-     */
-    private val CODEX = listOf(
-        "CODEX_HOME",
-        "OPENCODE_API_KEY",
-    )
-
-    /**
-     * opencode：自定义 provider 走 `OPENCODE_CONFIG` 指向的 json，key 从环境取。
-     *
-     * 另外要**出网路径**（`*_PROXY`）：这不是凭证，但不给它就连不上模型。
-     * 实测：沙箱只递白名单 env ⇒ opencode 直连 zen 网关，
-     * 网关回 `Model is unavailable`（同一份配置、同一个 key，走宿主代理时是 200）。
-     * 也就是说它自己**不读系统代理设置**：少这两只变量，看起来像「模型不可用」，
-     * 其实是「根本没走到那条线路」。代理变量不含密文，递进去不扩大泄漏面。
-     *
-     * **刻意不递 `OPENCODE_BASE_URL`**（实测，同一分钟两次对照）：它在子进程里会让
-     * opencode 自己按这只变量重建 provider，把配置里的 `headers` 丢掉 —— 网关随即回
-     * `Model is unavailable`（同一份配置，去掉这只变量就 200）。上游地址由宿主读它、
-     * 写进 [OpenCodeConfig] 生成的那份 json，子进程只需要路径。
-     */
-    private val OPENCODE = listOf(
-        "OPENCODE_API_KEY",
-        "OPENCODE_CONFIG",
-        "HTTPS_PROXY",
-        "HTTP_PROXY",
-        "ALL_PROXY",
-        "NO_PROXY",
-        "https_proxy",
-        "http_proxy",
-        "all_proxy",
-        "no_proxy",
-    )
-
-    /**
-     * agy（Antigravity）：Google 登录态继承，**没有**可配的自定义上游。
-     * 显式留空而不是「顺手把整份 env 塞进去」—— 空集才说明这里确实不需要。
-     */
-    private val AGY = emptyList<String>()
-
-    /**
-     * dsh（DeepSeek Harness CLI）：出厂路由认 env 的 `DEEPSEEK_API_KEY`；自配路由
-     * （如 dsh-opencode-go）认 `OPENCODE_API_KEY`；出网同 opencode：补代理变量。
-     */
-    private val DSH = listOf(
-        "DEEPSEEK_API_KEY",
-        "OPENCODE_API_KEY",
-        "DSH_PERMISSION_MODE",
-        "HTTPS_PROXY",
-        "HTTP_PROXY",
-        "ALL_PROXY",
-        "NO_PROXY",
-        "https_proxy",
-        "http_proxy",
-        "all_proxy",
-        "no_proxy",
-    )
-
-    /**
-     * CodeBuddy CLI：两种认证形态（API Key / Auth Token）都认；`CODEBUDDY_INTERNET_ENVIRONMENT`
-     * 决定连哪个端点，中国版漏了它只会报「认证失败」而不是「没装」，必须一并递进去。
-     * `CODEBUDDY_IS_SANDBOX` 是 HIGH/CRITICAL 工具整档放开的开关——**不主动设值**，
-     * 只让宿主显式配置时通过白名单，避免静默放宽安全面。
-     */
-    private val CODEBUDDY = listOf(
-        "CODEBUDDY_API_KEY",
-        "CODEBUDDY_AUTH_TOKEN",
-        "CODEBUDDY_INTERNET_ENVIRONMENT",
-        "CODEBUDDY_BASE_URL",
-        "CODEBUDDY_IS_SANDBOX",
-        "HTTPS_PROXY",
-        "HTTP_PROXY",
-        "ALL_PROXY",
-        "NO_PROXY",
-        "https_proxy",
-        "http_proxy",
-        "all_proxy",
-        "no_proxy",
-    )
-
-    /** ZCode CLI：登录态在 `~/.zcode/v2`，自定义 provider 走 env / 配置文件；代理带 `ZCODE_` 前缀。 */
-    private val ZCODE = listOf(
-        "ZCODE_API_KEY",
-        "ZHIPU_API_KEY",
-        ENV_ZCODE_BUILTIN_CONFIG,
-        ENV_ZCODE_PERSONAL_CONFIG,
-        "ZCODE_HTTP_PROXY",
-        "HTTPS_PROXY",
-        "HTTP_PROXY",
-        "ALL_PROXY",
-        "NO_PROXY",
-        "https_proxy",
-        "http_proxy",
-        "all_proxy",
-        "no_proxy",
-    )
+    private val CLAUDE get() = CliDriverSpecs.envKeysOf(DriverKeys.cliDriverId("claude"))
+    private val CODEX get() = CliDriverSpecs.envKeysOf(DriverKeys.cliDriverId("codex"))
+    private val OPENCODE get() = CliDriverSpecs.envKeysOf(DriverKeys.cliDriverId("opencode"))
+    private val AGY get() = CliDriverSpecs.envKeysOf(DriverKeys.cliDriverId("agy"))
+    private val DSH get() = CliDriverSpecs.envKeysOf(DriverKeys.cliDriverId("dsh"))
+    private val CODEBUDDY get() = CliDriverSpecs.envKeysOf(DriverKeys.cliDriverId("codebuddy"))
+    private val ZCODE get() = CliDriverSpecs.envKeysOf(DriverKeys.cliDriverId("zcode"))
 
     fun forClaude(env: Map<String, String> = System.getenv()): Map<String, String> = pick(CLAUDE, env)
 
@@ -164,18 +75,28 @@ object CliProviderEnv {
 
     fun forZcode(env: Map<String, String> = System.getenv()): Map<String, String> = pick(ZCODE, env)
 
+    /**
+     * driverId → 该家的凭证白名单，从身份卡键集派生（真源在 JSON）。
+     * [forDriver] 与 [declaredKeys] 都读它。加一家驱动只要 JSON + 投影，这里自动跟上，
+     * 不再有「值取到了、诊断面却显示没声明」的双份映射漂移。
+     */
+    private val allowlistsByDriverId: Map<String, List<String>> =
+        CliDriverSpecs.builtins.associate { spec ->
+            val driverId = DriverKeys.cliDriverId(spec.key)
+            driverId to CliDriverSpecs.envKeysOf(driverId)
+        }
+
     /** 按 driverId 取该 CLI 的凭证；认不出的 driverId = 空集（不猜、不乱给）。 */
     fun forDriver(driverId: String, env: Map<String, String> = System.getenv()): Map<String, String> =
-        when (driverId) {
-            DriverKeys.cliDriverId("claude") -> forClaude(env)
-            DriverKeys.cliDriverId("codex") -> forCodex(env)
-            DriverKeys.cliDriverId("opencode") -> forOpencode(env)
-            DriverKeys.cliDriverId("agy") -> forAgy(env)
-            DriverKeys.cliDriverId("dsh") -> forDsh(env)
-            DriverKeys.cliDriverId("codebuddy") -> forCodebuddy(env)
-            DriverKeys.cliDriverId("zcode") -> forZcode(env)
-            else -> emptyMap()
-        }
+        pick(allowlistsByDriverId[driverId].orEmpty(), env)
+
+    /**
+     * 该驱动**声明**的白名单键名（只有名字，永远不含值）。
+     *
+     * 诊断面要回答的是「宿主给了几只 / 声明了几只」——声明 10 只、宿主只给了 1 只，
+     * 与「这家本来就不需要凭证」，运维动作完全不同。认不出的 driverId = 空集。
+     */
+    fun declaredKeys(driverId: String): List<String> = allowlistsByDriverId[driverId].orEmpty()
 
     /**
      * 供提示行使用的**变量名**摘要（绝不含值）。

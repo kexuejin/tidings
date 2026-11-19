@@ -2,7 +2,9 @@
 
 package com.kapp.tenon.agent.drivers
 
+import com.kapp.tenon.testsupport.GuardSourceScan
 import java.io.File
+import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -156,6 +158,70 @@ class AgyAuthProbeTest {
         assertTrue(
             state != AgyAuthProbe.State.NOT_AUTHENTICATED,
             "旧行为确实漏检——证明本测试区分得出两个世界",
+        )
+    }
+
+    // ---- 发现器装配（P2-b）：探针与执行/目录探针必须看到同一个 agy ----
+
+    private fun fakeAgy(dir: String, name: String = CliDiscovery.AGY_BIN): String {
+        val f = File(dir, name)
+        f.writeText("#!/bin/sh\nexit 0\n")
+        f.setExecutable(true)
+        return f.absolutePath
+    }
+
+    @Test
+    fun explicitEnvOverridePicksThatAgy() {
+        // TENON_AGY_CLI 显式指定：发现器最高优先级，探针必须用那只，不是 PATH 里的 agy。
+        val dir = Files.createTempDirectory("agy-probe-env").toFile().absolutePath
+        val chosen = fakeAgy(dir, "my-agy")
+        val other = fakeAgy(dir, "other-agy")
+        val command = AgyAuthProbe.resolvedCommand(
+            env = mapOf(CliDiscovery.ENV_AGY_CLI to chosen),
+            pathDirs = listOf(dir),
+        )
+        assertEquals(chosen, command.first())
+        assertEquals(listOf(chosen, "models"), command)
+    }
+
+    @Test
+    fun pathDirsAreSearchedWhenNoExplicitOverride() {
+        // GUI 最小 PATH / ~/.local/bin：发现器按 pathDirs 找到可执行文件，探针用绝对路径启动。
+        val dir = Files.createTempDirectory("agy-probe-path").toFile().absolutePath
+        val found = fakeAgy(dir)
+        val command = AgyAuthProbe.resolvedCommand(env = emptyMap(), pathDirs = listOf(dir))
+        assertEquals(found, command.first(), "必须经发现器按 PATH 目录找到 agy 的绝对路径")
+    }
+
+    @Test
+    fun missingAgyFallsBackToBareNameAndStartFailureIsUnknown() {
+        // 没装时回落裸名 => start() 抛 IOException => catch 里 UNKNOWN 放行。
+        val command = AgyAuthProbe.resolvedCommand(env = emptyMap(), pathDirs = listOf("/nonexistent/tenon-agy"))
+        assertEquals(listOf(CliDiscovery.AGY_BIN, "models"), command)
+        val probe = AgyAuthProbe(command = command)
+        kotlinx.coroutines.runBlocking { assertEquals(AgyAuthProbe.State.UNKNOWN, probe.probe()) }
+    }
+
+    @Test
+    fun productionConstructionSitesGoThroughDiscovery() {
+        // 变异探针 1：把 resolvedCommand 改回 listOf("agy","models") ⇒ 下面两条红。
+        val probeCode = GuardSourceScan.stripComments(
+            GuardSourceScan.read("agentNode/src/main/kotlin/com/kapp/tenon/agent/drivers/AgyAuthProbe.kt"),
+        )
+        assertTrue(
+            "CliDiscovery.resolveAgyCli(env, pathDirs)" in probeCode,
+            "resolvedCommand 必须走 CliDiscovery.resolveAgyCli",
+        )
+        assertTrue("command: List<String> = resolvedCommand()" in probeCode, "默认构造必须走发现器")
+
+        // 变异探针 2：把 snapshotWithDefaults 的构造改回 AgyAuthProbe() 裸默认 ⇒ 此条红。
+        // 裸默认读的是诊断进程自己的 env，合成 env 注入的 agy 路径就失效了（诊断假绿）。
+        val doctorCode = GuardSourceScan.stripComments(
+            GuardSourceScan.read("agentNode/src/main/kotlin/com/kapp/tenon/agent/drivers/DriverAuthJudgement.kt"),
+        )
+        assertTrue(
+            "AgyAuthProbe(command = AgyAuthProbe.resolvedCommand(env))" in doctorCode,
+            "诊断装配必须把传入的 env 交给发现器，不能回落诊断进程自己的 PATH",
         )
     }
 }

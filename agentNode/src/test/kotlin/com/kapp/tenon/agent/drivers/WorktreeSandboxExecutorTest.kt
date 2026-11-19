@@ -687,21 +687,46 @@ class WorktreeSandboxExecutorTest {
      * t-1-64fef602/task.log）。本条把「每家内置驱动都有挂载」钉成清单内容，
      * 同时钉住反向纪律：敏感目录不许进清单。
      */
+    /**
+     * 每家内置 CLI 的登录态目录。目录名是敏感值，按 [CliDriverSpecs] 的纪律**不搬进身份卡**，
+     * 留在守卫；但键集在下方钉死等于 [CliDriverSpecs.keys]，新增/删除驱动却没同步本表即红。
+     *
+     * - claude 两个：~/.claude 与 ~/.claude.json（MCP 配置另在 prepareSandboxHome 补写）；
+     * - agy 两个：~/.agy 走 useRealHome 的真实 HOME（keyring 对假 HOME 有内部之门，
+     *   挂 .agy/.gemini 均读不到 token），~/.gemini 留作旧版兼容挂载；
+     * - opencode 无同名 HOME 目录：走 provider env（OPENCODE_API_KEY），其 ~/.config/opencode
+     *   由 [prepareSandboxHomeMountsHostOpencodeConfigIfPresent] 单独行为级守，此处给空表不重复。
+     */
+    private val credentialDirsByKey: Map<String, List<String>> = mapOf(
+        "codex" to listOf(".codex"),
+        "claude" to listOf(".claude", ".claude.json"),
+        "agy" to listOf(".agy", ".gemini"),
+        "dsh" to listOf(".dsh"),
+        "codebuddy" to listOf(".codebuddy"),
+        "zcode" to listOf(".zcode"),
+        "opencode" to emptyList(),
+    )
+
+    /**
+     * 凭据挂载白名单 = 各家 CLI 驱动的登录态所在目录，缺一个那个驱动就在沙箱里
+     * 必死于认证（真机验收红证 t-1-64fef602/task.log）。本条用 [CliDriverSpecs] 键集对账，
+     * 钉住「每家内置驱动都有挂载落点」；同时钉反向纪律：敏感目录不许进清单。
+     */
     @Test
     fun sandboxCredentialEntriesCoverEveryBuiltinCliAndNoSensitiveDir() {
         val entries = WorktreeSandboxExecutor.SANDBOX_CREDENTIAL_ENTRIES
-        // 内置五驱动（`DriverKeys` / `AgentProfiles`，不是插件）：claude / codex / agy / dsh / opencode。
-        // claude 的登录态在 ~/.claude（+ ~/.claude.json），codex 在 ~/.codex，
-        // dsh 的 profiles 在 ~/.dsh；opencode 走 provider env（OPENCODE_API_KEY），
-        // 不依赖 $HOME 凭据目录。agy 的登录态走系统 keyring 且对 HOME 有 CLI 内部
-        // 之门（挂 .agy/.gemini 均不解——2026-11-15 实测），沙箱内跑不通，改走
-        // useRealHome 真实 HOME（agy 驱动专用）；.agy 挂载保留作旧版兼容。
-        // 这一条要跟 BuiltinPluginSeeder 的种子清单对齐。
-        for (required in listOf(".codex", ".claude", ".claude.json", ".agy", ".dsh")) {
-            assertTrue(
-                entries.contains(required),
-                "凭据挂载清单缺 $required —— 该驱动在沙箱里会必死于认证（缺输入=失败不可见）",
-            )
+        assertEquals(
+            CliDriverSpecs.keys,
+            credentialDirsByKey.keys,
+            "凭据挂载守卫必须与内置驱动身份卡同步：新增驱动要补登录态目录映射，否则它会在沙箱里必死于认证",
+        )
+        for ((key, dirs) in credentialDirsByKey) {
+            for (dir in dirs) {
+                assertTrue(
+                    entries.contains(dir),
+                    "$key 的凭据目录 $dir 不在挂载清单 —— 该驱动在沙箱里会必死于认证（缺输入=失败不可见）",
+                )
+            }
         }
         // 反向纪律：白名单不许扩进宿主敏感目录。
         for (forbidden in listOf(".ssh", ".gnupg", ".aws", ".workbuddy", ".workbuddy-ai")) {

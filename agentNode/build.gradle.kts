@@ -31,3 +31,36 @@ dependencies {
     // 与 :app / :desktopApp 同一套工具；它只被测试引用，永不进产物。
     testImplementation(project(":testsupport"))
 }
+
+/**
+ * 驱动自检：把「这家 CLI 会怎么被拉起」一次摊开（找到? / 路径 / 版本 / 登录态 /
+ * 模型数 / sandbox HOME 覆盖 / 生产装配的 argv 预览）。
+ *
+ * 为什么是个 Gradle 任务而不是产品功能：驱动缺陷几乎都是静默的（退出码 0、事件流正常），
+ * 只有真机派单才暴露。有了它，改一行 argv 模板就能当场看见结果，
+ * 不必每次都走「装信任 → 配对 → 真派单」。
+ *
+ * 任务住在驱动库（而不是编排层或桌面壳）：它问的每一件事都属于这一层，
+ * 库被别的产品拿走时自检能力跟着走。用法见 `DriverDoctorMain` 的 KDoc。
+ */
+tasks.register<JavaExec>("driverDoctor") {
+    group = "verification"
+    description = "Runs the local driver self-check (discovery / auth / models / real argv)."
+    mainClass.set("com.kapp.tenon.agent.drivers.DriverDoctorMainKt")
+    classpath = sourceSets["main"].runtimeClasspath
+}
+
+/**
+ * 有一类守卫读的是**仓库根上的文档**（`GateListSyncGuardTest` 比对 AGENTS.md / README /
+ * CI 三处清单），Gradle 看不见这层依赖：只改文档时 `:agentNode:test` 会被判 UP-TO-DATE
+ * 直接跳过，本地于是永远绿的 —— 而 CI 是全新检出、必然重跑，两边结论相反。
+ *
+ * 把这三份文件声明成任务输入，本地的「改文档没同步清单」才会当场红。
+ */
+tasks.named<org.gradle.api.tasks.testing.Test>("test") {
+    inputs.files(
+        rootProject.file("AGENTS.md"),
+        rootProject.file("README.md"),
+        rootProject.file(".github/workflows/ci.yml"),
+    ).withPropertyName("repositoryGateListDocs")
+}

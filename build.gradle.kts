@@ -31,6 +31,14 @@ apply(from = "tools/cjk-literal-gate.gradle.kts")
 apply(from = "tools/design-contract-gate.gradle.kts")
 
 
+// 驱动规格数据化门禁：driver-specs.json 真源 → DriverSpecTable.generated.kt。
+// 实现（投影器 + 漂移门禁）在 tools/driver-spec-gate.gradle.kts 与同目录的 Python 工具。
+//   ./gradlew :driverSpecDrift       JSON 与生成物漂移即红（CI）
+//   ./gradlew :driverSpecProject     改了真源后重新投影生成物
+//   ./gradlew :driverSpecSelfTest    投影器量具自检
+apply(from = "tools/driver-spec-gate.gradle.kts")
+
+
 // 注释里的 `X.kt:NN` 行号引用会被重构悄悄冲掉且毫无编译错误；
 // 这条门禁把它换成符号名。注册 :staleCommentRefGate / :staleCommentRefGateBaseline。
 apply(from = "tools/stale-comment-ref-gate.gradle.kts")

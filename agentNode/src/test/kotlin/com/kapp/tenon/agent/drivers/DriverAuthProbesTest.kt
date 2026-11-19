@@ -15,12 +15,16 @@ class DriverAuthProbesTest {
 
     @Test
     fun exitZeroMeansAuthenticated() {
-        assertEquals(DriverAuthProbes.State.AUTHENTICATED, DriverAuthProbes.classify(0, ""))
+        assertEquals(
+            DriverAuthProbes.State.AUTHENTICATED,
+            DriverAuthProbes.classify(DriverKeys.AGY, 0, ""),
+        )
     }
 
     @Test
     fun notLoggedInSignatureMeansNotAuthenticated() {
         val state = DriverAuthProbes.classify(
+            DriverKeys.AGY,
             1,
             "You are not logged into Antigravity. Please sign in.",
         )
@@ -29,9 +33,39 @@ class DriverAuthProbesTest {
 
     @Test
     fun missingCommandOrTimeoutStaysUnknown() {
-        assertEquals(DriverAuthProbes.State.UNKNOWN, DriverAuthProbes.classify(127, "command not found"))
-        assertEquals(DriverAuthProbes.State.UNKNOWN, DriverAuthProbes.classify(-1, ""))
-        assertEquals(DriverAuthProbes.State.UNKNOWN, DriverAuthProbes.classify(1, "network unreachable"))
+        assertEquals(DriverAuthProbes.State.UNKNOWN, DriverAuthProbes.classify(DriverKeys.AGY, 127, "command not found"))
+        assertEquals(DriverAuthProbes.State.UNKNOWN, DriverAuthProbes.classify(DriverKeys.AGY, -1, ""))
+        assertEquals(DriverAuthProbes.State.UNKNOWN, DriverAuthProbes.classify(DriverKeys.AGY, 1, "network unreachable"))
+    }
+
+    /**
+     * marker 判定按 key 取声明，不恒定用 agy 的那一份。
+     *
+     * codex 声明的是 CLI_CMD（没有 `authenticatedOn`/marker）⇒ 拿 agy 的「exit 0 = 已登录」
+     * 去套它会得 AUTHENTICATED。这里要求 UNKNOWN：判据只能来自**被判定那家**的声明。
+     */
+    @Test
+    fun classifyReadsTheDeclarationOfTheDriverBeingJudged() {
+        assertEquals(
+            DriverAuthProbes.State.UNKNOWN,
+            DriverAuthProbes.classify("codex", 0, "gemini-3.8-flash-high"),
+            "非 CLI_MARKER 的驱动不许套用 agy 的 exit-0 判据",
+        )
+        assertEquals(
+            DriverAuthProbes.State.UNKNOWN,
+            DriverAuthProbes.classify("no-such-driver", 0, "not logged into antigravity"),
+            "没有声明的键一律 UNKNOWN（判不了 ≠ 已登录）",
+        )
+    }
+
+    @Test
+    fun strongSnapshotKeepsTheKeyItWasAskedAbout() {
+        assertEquals(
+            "dsh",
+            DriverAuthProbes.strongSnapshot("dsh", DriverAuthProbes.State.AUTHENTICATED)?.driverKey,
+            "快照归属必须是被探测的那家，不许借用 agy 的键",
+        )
+        assertNull(DriverAuthProbes.strongSnapshot("dsh", null))
     }
 
     @Test
@@ -49,15 +83,15 @@ class DriverAuthProbesTest {
     }
 
     @Test
-    fun agySnapshotPassesThroughNullWithoutInventingAState() {
-        assertNull(DriverAuthProbes.agySnapshot(null))
+    fun strongSnapshotPassesThroughNullWithoutInventingAState() {
+        assertNull(DriverAuthProbes.strongSnapshot(DriverKeys.AGY, null))
         assertEquals(
             DriverAuthProbes.Snapshot(
                 DriverKeys.AGY,
                 DriverAuthProbes.State.NOT_AUTHENTICATED,
                 DriverAuthProbes.Evidence.STRONG,
             ),
-            DriverAuthProbes.agySnapshot(DriverAuthProbes.State.NOT_AUTHENTICATED),
+            DriverAuthProbes.strongSnapshot(DriverKeys.AGY, DriverAuthProbes.State.NOT_AUTHENTICATED),
         )
     }
 
@@ -66,6 +100,44 @@ class DriverAuthProbesTest {
         assertFalse(DriverAuthProbes.hasCredential(mapOf("K" to "   "), "K"))
         assertFalse(DriverAuthProbes.hasCredential(emptyMap(), "K"))
         assertTrue(DriverAuthProbes.hasCredential(mapOf("K" to "sk-x"), "K", "OTHER"))
+    }
+
+    /**
+     * FILE 型声明的通用判据：env key 在位 / 凭证文件非空 ⇒ 有凭证物；两处都没有 ⇒ 没有。
+     *
+     * 判据读的是**声明**（`credentialKeys` + `credentialFile`），所以新增一家 FILE 驱动不必
+     * 再往判定层加分支。这里用 dsh 的声明（唯一在册的 FILE）验证实现与声明对得上。
+     */
+    @Test
+    fun declaredCredentialCoversEnvKeyAndCredentialFile() {
+        val spec = CliDriverSpecs.authProbeOf("dsh") ?: throw AssertionError("dsh 缺 authProbe 声明")
+        val home = kotlin.io.path.createTempDirectory("file-probe-home").toFile().apply { deleteOnExit() }
+        val env = mapOf("HOME" to home.absolutePath)
+
+        assertEquals(
+            false, DriverAuthProbes.hasDeclaredCredential(env, spec),
+            "空 HOME、无 env key ⇒ 两处都没有凭证物",
+        )
+        // HOME 读不到 = 不知道该查哪个目录 ⇒ null（判不了），不许折成 false（确定没有）。
+        assertNull(
+            DriverAuthProbes.hasDeclaredCredential(emptyMap(), spec),
+            "没有 HOME ⇒ 判不了，不许冒充「确定未登录」",
+        )
+        assertEquals(
+            true, DriverAuthProbes.hasDeclaredCredential(env + (DshCredentials.ENV_KEY to "sk-x"), spec),
+            "声明的 env key 在位即算有",
+        )
+        assertEquals(
+            false, DriverAuthProbes.hasDeclaredCredential(env + (DshCredentials.ENV_KEY to "  "), spec),
+            "空白值当没有（与 CliProviderEnv.pick 同口径）",
+        )
+
+        val file = home.resolve(spec.credentialFile ?: throw AssertionError("dsh 缺 credentialFile"))
+        file.parentFile.mkdirs()
+        file.writeText("", Charsets.UTF_8)
+        assertEquals(false, DriverAuthProbes.hasDeclaredCredential(env, spec), "空凭证文件不算有凭证")
+        file.writeText("DEEPSEEK_API_KEY: sk-x\n", Charsets.UTF_8)
+        assertEquals(true, DriverAuthProbes.hasDeclaredCredential(env, spec), "非空凭证文件算有")
     }
 
     private fun tempSetting(content: String): String {

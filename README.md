@@ -174,7 +174,7 @@ open Tenon.xcodeproj
 ./gradlew :cjkLiteralGate :constructionTraceGate :staleCommentRefGate \
           :domainComposeFreeGate :commonJvmApiGate :envDependentTestGate :designSpecDrift \
           :designTokenUsageGate :designStateSlotGate :designLocaleParityGate \
-          :jlinkModulesGate --continue
+          :jlinkModulesGate :driverSpecDrift :driverSpecSelfTest --continue
 python3 tools/unused-imports.py --check
 python3 tools/check-design-palette.py --css-vars
 ```

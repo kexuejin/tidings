@@ -1,0 +1,257 @@
+{
+  "schemaVersion": 1,
+  "note": "内置 CLI 驱动的唯一真源。由 :driverSpecProject 投影成 DriverSpecTable.generated.kt；两者漂移由 :driverSpecDrift 在 CI 判红。drivers 里的身份卡 10 字段 + 行为声明（envKeys/networkPolicy/sandboxMode/discovery/argv/modelProbe/authProbe）是每家声明；顶层 sandboxHomeLinks/launch/probeLimits 是全局声明。行为机制（发现路径搜索、模型 patch 写盘、探针 parser、登录态判定顺序与退出码纪律、证据强度映射）仍在代码里，表里只放声明、正则/golden 夹具与占位符。aliases 不在本表：它是身份地基（DriverKeys），已是单一真源且守卫钉死不许第二份。",
+  "argvPlaceholders": ["prompt", "model", "sandbox", "patch", "session"],
+  "probeLimits": {
+    "modelCatalogTtlMs": 600000,
+    "modelProbeTimeoutMs": 20000,
+    "note": "模型目录缓存 TTL（10 分钟）与单次列表命令超时（20s）。机制在 DriverModelCatalog，值在这里。"
+  },
+  "drivers": [
+    {
+      "key": "codex",
+      "displayName": "Codex",
+      "vendor": "openai",
+      "role": "WORKER",
+      "supportsPerTaskModel": true,
+      "modelFlag": "--model",
+      "modelMechanism": null,
+      "shortName": null,
+      "workerPriority": 1,
+      "reviewerPriority": null,
+      "envKeys": ["CODEX_HOME", "OPENCODE_API_KEY"],
+      "networkPolicy": "OPEN",
+      "sandboxMode": {
+        "envVar": "TENON_CODEX_SANDBOX",
+        "allowed": ["read-only", "workspace-write", "danger-full-access"],
+        "default": "workspace-write"
+      },
+      "discovery": { "envVar": "TENON_CODEX_CLI", "bin": "codex", "extraBinRelative": null, "extraPathDirs": [] },
+      "argv": {
+        "plain": ["exec", "--json", "--sandbox", "${sandbox}", "${model}", "${prompt}"]
+      },
+      "modelProbe": { "kind": "LIST", "argv": ["debug", "models"], "parser": "codex-json" },
+      "authProbe": {
+        "kind": "CLI_CMD",
+        "argv": ["${cliPath}", "login", "status"],
+        "signals": [
+          { "verdict": "NOT_AUTHENTICATED", "regex": "not\\s+logged\\s+in", "ignoreCase": true },
+          { "verdict": "AUTHENTICATED", "regex": "logged\\s+in", "ignoreCase": true }
+        ],
+        "golden": [
+          { "exitCode": 0, "text": "Not logged in\n", "verdict": "NOT_AUTHENTICATED" },
+          { "exitCode": 1, "text": "Not logged in\n", "verdict": "NOT_AUTHENTICATED" },
+          { "exitCode": 0, "text": "Logged in as user@example.com\n", "verdict": "AUTHENTICATED" },
+          { "exitCode": 0, "text": "some noise", "verdict": "UNKNOWN" }
+        ]
+      }
+    },
+    {
+      "key": "claude",
+      "displayName": "Claude Code",
+      "vendor": "anthropic",
+      "role": "WORKER",
+      "supportsPerTaskModel": true,
+      "modelFlag": "--model",
+      "modelMechanism": null,
+      "shortName": null,
+      "workerPriority": 2,
+      "reviewerPriority": 3,
+      "envKeys": ["ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_MODEL", "ANTHROPIC_SMALL_FAST_MODEL", "ANTHROPIC_CUSTOM_HEADERS"],
+      "networkPolicy": "OPEN",
+      "sandboxMode": null,
+      "discovery": { "envVar": "TENON_CLAUDE_CLI", "bin": "claude", "extraBinRelative": null, "extraPathDirs": [] },
+      "argv": {
+        "plain": ["-p", "${prompt}", "--output-format", "stream-json", "--verbose", "${model}"],
+        "sandbox": ["-p", "${prompt}", "--output-format", "stream-json", "--verbose", "--permission-mode", "bypassPermissions", "${model}"]
+      },
+      "modelProbe": { "kind": "NONE", "note": "--help 无列模型子命令；--model 说明里的 fable/opus/sonnet 是别名不是目录" },
+      "authProbe": {
+        "kind": "CLI_CMD",
+        "argv": ["${cliPath}", "auth", "status"],
+        "signals": [
+          { "verdict": "NOT_AUTHENTICATED", "regex": "\"loggedIn\"\\s*:\\s*false", "ignoreCase": false },
+          { "verdict": "AUTHENTICATED", "regex": "\"loggedIn\"\\s*:\\s*true", "ignoreCase": false }
+        ],
+        "golden": [
+          { "exitCode": 0, "text": "{\"loggedIn\": false, \"authMethod\": \"none\"}", "verdict": "NOT_AUTHENTICATED" },
+          { "exitCode": 1, "text": "{\"loggedIn\": false}", "verdict": "NOT_AUTHENTICATED" },
+          { "exitCode": 0, "text": "{\"loggedIn\": true, \"authMethod\": \"oauth\"}", "verdict": "AUTHENTICATED" },
+          { "exitCode": 0, "text": "{\"status\": \"ok\"}", "verdict": "UNKNOWN" }
+        ]
+      }
+    },
+    {
+      "key": "agy",
+      "displayName": "Antigravity",
+      "vendor": "google",
+      "role": "WORKER",
+      "supportsPerTaskModel": true,
+      "modelFlag": "--model",
+      "modelMechanism": null,
+      "shortName": null,
+      "workerPriority": 4,
+      "reviewerPriority": 4,
+      "envKeys": [],
+      "networkPolicy": "OPEN",
+      "sandboxMode": null,
+      "discovery": { "envVar": "TENON_AGY_CLI", "bin": "agy", "extraBinRelative": null, "extraPathDirs": [] },
+      "argv": {
+        "plain": ["-p", "${prompt}", "--output-format", "stream-json", "${model}"],
+        "sandbox": ["-p", "${prompt}", "--output-format", "stream-json", "--mode", "auto", "--dangerously-skip-permissions", "${model}"]
+      },
+      "modelProbe": { "kind": "LIST", "argv": ["models"], "parser": "two-column" },
+      "authProbe": {
+        "kind": "CLI_MARKER",
+        "argv": ["${cliPath}", "models"],
+        "authenticatedOn": "EXIT_ZERO",
+        "notAuthenticatedMarker": "not logged into antigravity",
+        "markerIgnoreCase": true,
+        "golden": [
+          { "exitCode": 0, "text": "gemini-3.8-flash-high\tGemini 3.8 Flash (High)\n", "verdict": "AUTHENTICATED" },
+          { "exitCode": 1, "text": "error getting token source: You are not logged into Antigravity.", "verdict": "NOT_AUTHENTICATED" },
+          { "exitCode": 1, "text": "You Are Not Logged Into ANTIGRAVITY.", "verdict": "NOT_AUTHENTICATED" },
+          { "exitCode": 1, "text": "connection refused", "verdict": "UNKNOWN" },
+          { "exitCode": 2, "text": "network unreachable", "verdict": "UNKNOWN" },
+          { "exitCode": -1, "text": "", "verdict": "UNKNOWN" }
+        ]
+      }
+    },
+    {
+      "key": "opencode",
+      "displayName": "OpenCode",
+      "vendor": "opencode",
+      "role": "BOTH",
+      "supportsPerTaskModel": true,
+      "modelFlag": "--model",
+      "modelMechanism": null,
+      "shortName": null,
+      "workerPriority": 3,
+      "reviewerPriority": 2,
+      "envKeys": ["OPENCODE_API_KEY", "OPENCODE_CONFIG", "HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY", "NO_PROXY", "https_proxy", "http_proxy", "all_proxy", "no_proxy"],
+      "networkPolicy": "OPEN",
+      "sandboxMode": null,
+      "discovery": { "envVar": "TENON_OPENCODE_CLI", "bin": "opencode", "extraBinRelative": null, "extraPathDirs": [".opencode/bin"] },
+      "argv": {
+        "plain": ["run", "--standalone", "--auto", "--format", "json", "${model}", "${prompt}"]
+      },
+      "modelProbe": { "kind": "LIST", "argv": ["models"], "parser": "two-column" },
+      "authProbe": {
+        "kind": "CLI_CMD",
+        "argv": ["${cliPath}", "auth", "list"],
+        "signals": [
+          { "verdict": "AUTHENTICATED", "regex": "stored", "ignoreCase": true },
+          { "verdict": "NOT_AUTHENTICATED", "blank": true }
+        ],
+        "golden": [
+          { "exitCode": 0, "text": "OpenCode Go  OpenCode Go  stored\n", "verdict": "AUTHENTICATED" },
+          { "exitCode": 0, "text": "", "verdict": "NOT_AUTHENTICATED" },
+          { "exitCode": 0, "text": "some providers but no creds", "verdict": "UNKNOWN" }
+        ],
+        "authenticatedIsHint": true,
+        "note": "auth list 里的 stored 只证明存过凭证，不保证还有效 ⇒ 命中已登录也只给 HINT，不画绿灯"
+      }
+    },
+    {
+      "key": "dsh",
+      "displayName": "DeepSeek Harness",
+      "vendor": "deepseek",
+      "role": "BOTH",
+      "supportsPerTaskModel": true,
+      "modelFlag": null,
+      "modelMechanism": "CONFIG_PATCH",
+      "shortName": "DeepSeek",
+      "workerPriority": 5,
+      "reviewerPriority": 1,
+      "envKeys": ["DEEPSEEK_API_KEY", "OPENCODE_API_KEY", "DSH_PERMISSION_MODE", "HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY", "NO_PROXY", "https_proxy", "http_proxy", "all_proxy", "no_proxy"],
+      "networkPolicy": "OPEN",
+      "sandboxMode": null,
+      "discovery": { "envVar": "TENON_DSH_CLI", "bin": "dsh", "extraBinRelative": null, "extraPathDirs": [] },
+      "argv": {
+        "plain": ["${patch}", "--profile", "headless", "--json", "${prompt}"],
+        "resumePlain": ["${patch}", "--profile", "headless", "--json", "--session-id", "${session}", "${prompt}"]
+      },
+      "modelProbe": {
+        "kind": "CONFIG",
+        "argv": ["--profile", "headless", "--dump-config"],
+        "parser": "dsh-default",
+        "catalogSource": { "provider": "dsh-opencode-go", "driver": "opencode", "prefix": "opencode-go/" }
+      },
+      "authProbe": {
+        "kind": "FILE",
+        "credentialKeys": ["DEEPSEEK_API_KEY"],
+        "credentialFile": ".dsh/.credentials.yaml",
+        "note": "凭证在位只给 HINT 不画绿灯；hasCredential/hasCredentialFile 判定机制在 DriverAuthJudgement"
+      }
+    },
+    {
+      "key": "codebuddy",
+      "displayName": "CodeBuddy",
+      "vendor": "tencent",
+      "role": "BOTH",
+      "supportsPerTaskModel": true,
+      "modelFlag": "--model",
+      "modelMechanism": null,
+      "shortName": null,
+      "workerPriority": 6,
+      "reviewerPriority": 5,
+      "envKeys": ["CODEBUDDY_API_KEY", "CODEBUDDY_AUTH_TOKEN", "CODEBUDDY_INTERNET_ENVIRONMENT", "CODEBUDDY_BASE_URL", "CODEBUDDY_IS_SANDBOX", "HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY", "NO_PROXY", "https_proxy", "http_proxy", "all_proxy", "no_proxy"],
+      "networkPolicy": "OPEN",
+      "sandboxMode": null,
+      "discovery": { "envVar": "TENON_CODEBUDDY_CLI", "bin": "codebuddy", "extraBinRelative": "WorkBuddy.app/Contents/Resources/app.asar.unpacked/cli/bin/codebuddy", "extraPathDirs": [] },
+      "argv": {
+        "plain": ["-p", "${prompt}", "--output-format", "stream-json", "--verbose", "${model}"],
+        "sandbox": ["-p", "${prompt}", "--output-format", "stream-json", "--verbose", "-y", "${model}"],
+        "resumePlain": ["--resume", "${session}", "-p", "${prompt}", "--output-format", "stream-json", "--verbose", "${model}"],
+        "resumeSandbox": ["--resume", "${session}", "-p", "${prompt}", "--output-format", "stream-json", "--verbose", "-y", "${model}"]
+      },
+      "modelProbe": { "kind": "NONE", "note": "本机未安装，无法取得可信输出；不按『应该有』猜列表子命令" },
+      "authProbe": {
+        "kind": "NONE",
+        "note": "auth session 路径哈希不可靠，-p 探测会触发真实派单；恒 UNKNOWN/HINT，机制在 DriverAuthJudgement"
+      }
+    },
+    {
+      "key": "zcode",
+      "displayName": "ZCode",
+      "vendor": "zhipu",
+      "role": "BOTH",
+      "supportsPerTaskModel": false,
+      "modelFlag": null,
+      "modelMechanism": null,
+      "shortName": null,
+      "workerPriority": 7,
+      "reviewerPriority": 6,
+      "envKeys": ["ZCODE_API_KEY", "ZHIPU_API_KEY", "ZCODE_BUILTIN_PROVIDER_CONFIG_FILE", "ZCODE_PERSONAL_PROVIDER_CONFIG_FILE", "ZCODE_HTTP_PROXY", "HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY", "NO_PROXY", "https_proxy", "http_proxy", "all_proxy", "no_proxy"],
+      "networkPolicy": "OPEN",
+      "sandboxMode": null,
+      "discovery": { "envVar": "TENON_ZCODE_CLI", "bin": "zcode", "extraBinRelative": "ZCode.app/Contents/Resources/glm/zcode.cjs", "extraPathDirs": [] },
+      "argv": {
+        "plain": ["-p", "${prompt}", "--mode", "yolo", "--json", "--no-color"],
+        "note": "zcode 不支持按次选模型，模板里刻意没有 ${model}"
+      },
+      "modelProbe": { "kind": "NONE", "note": "本机未安装，无法取得可信输出；不支持按次选模型" },
+      "authProbe": {
+        "kind": "NONE",
+        "note": "只有 setting.json 里选过模型这个弱信号（zcodeHasModelSelected，机制在代码）；恒 HINT 不画绿灯"
+      }
+    }
+  ],
+  "launch": {
+    "nodeExtensions": [".cjs", ".js"],
+    "note": "这些后缀的 CLI 不能自己执行，交给 node 并把路径作为首参。按路径后缀判定，不按驱动 key。"
+  },
+  "sandboxHomeLinks": [
+    { "path": ".codex", "owner": "codex" },
+    { "path": ".claude", "owner": "claude" },
+    { "path": ".claude.json", "owner": "claude" },
+    { "path": ".gemini", "owner": "agy", "note": "Google 登录态缓存，agy 驱动需要" },
+    { "path": ".agy", "owner": "agy" },
+    { "path": ".dsh", "owner": "dsh" },
+    { "path": ".codebuddy", "owner": "codebuddy" },
+    { "path": ".zcode", "owner": "zcode" },
+    { "path": ".npm", "owner": "shared", "note": "npm 缓存，node 形态驱动复用" },
+    { "path": ".nvm", "owner": "shared", "note": "node 版本管理" },
+    { "path": ".gitconfig", "owner": "shared", "note": "git 提交身份，子进程推代码需要" }
+  ]
+}

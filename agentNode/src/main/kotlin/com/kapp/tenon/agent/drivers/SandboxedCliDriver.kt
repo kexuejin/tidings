@@ -64,10 +64,23 @@ class SandboxedCliDriver(
      */
     private val useRealHome: Boolean = false,
     /**
-     * 该驱动的网络策略（三档见 [OsSandboxGuard.NetworkPolicy]）：quest 内置
-     * 驱动全集 = OPEN（模型 API 必须出网，air-gapped 下必死）。
+     * 该驱动的网络策略（三档见 [OsSandboxGuard.NetworkPolicy]）：quest 内置驱动全集 = OPEN
+     * （模型 API 必须出网，air-gapped 下必死）。
+     *
+     * **默认值读真源**：`driver-specs.json` 的 `networkPolicy` 经
+     * [OsSandboxGuard.declaredPolicyOf] 转成执行面枚举。曾经这里是字面量 `OPEN`，而 JSON 里
+     * 的声明零消费——把某家改成 AIR_GAPPED 只会写进生成物、不影响任何一条命令，症状是
+     * 「策略改了没反应」。缺席不兜底：查不到该驱动就抛（投影漏了）。
+     *
+     * 为什么「默认放开」这个方向是对的：过去默认是 AIR_GAPPED，未显式传的四家
+     * （claude/codex/opencode/dsh）静默跑在断网策略下——strict 沙箱里模型 API、
+     * 以及 claude/opencode 要连的 127.0.0.1:8788 MCP 全被 `deny network*` 掐死，
+     * 症状是「认证超时 / 工具连不上」，没人会想到是默认参数。
+     *
+     * 注意 OPEN 已含 loopback（`allow network*`）——不要再给任何一家设 LOOPBACK：
+     * 那档是 `deny network*` 只留 localhost，会把模型 API 一起断掉。
      */
-    private val networkPolicy: OsSandboxGuard.NetworkPolicy = OsSandboxGuard.NetworkPolicy.AIR_GAPPED,
+    private val networkPolicy: OsSandboxGuard.NetworkPolicy = OsSandboxGuard.declaredPolicyOf(driverId),
     private val newSessionId: () -> String = { java.util.UUID.randomUUID().toString() },
     /** 瞬时失败判别与重试档位：与 [CliSubprocessDriver] 同一默认（provider 断流/5xx 白名单）。 */
     private val transientOf: (exitCode: Int, output: String) -> Boolean =
@@ -88,8 +101,13 @@ class SandboxedCliDriver(
 ) : AgentDriver {
 
     /**
-     * 兼容构造：只关心 prompt 的装配处与测试（模型按追加形态拼）。
-     * 生产装配处该用主构造显式定旗标位置，理由见 [CliSubprocessDriver.argSpec]。
+     * 兼容构造：只收 prompt，模型按**末尾追加**拼。
+     *
+     * **生产装配一律用主构造**（显式给出旗标位置），本构造现在只服务测试探针。
+     * 原因是它把「模型插在哪」交给追加行为，而各家 CLI 的位置约束不同：
+     * codex / opencode 的 prompt 是**末尾位置参数**，追加在它后面的 `--model x` 会被
+     * 当成 prompt 的一部分吞掉 —— CLI 退出码 0、事件流正常、全链路不报错。
+     * 这类缺陷只能靠 [ProductionDriverArgvGuardTest] 这种「测装配」的守卫拦。
      */
     constructor(
         driverId: String,
@@ -207,6 +225,20 @@ class SandboxedCliDriver(
         modelKey = modelKey,
     )
 
+    /**
+     * 本次尝试的完整 argv —— 与裸驱动同一口径，生产与守卫共用这一个出口。
+     *
+     * 沙箱分支过去用单参 `argSpec` + 「末尾追加模型」的兼容构造，于是「模型插在哪」由
+     * 追加行为决定，而不是由该 CLI 的参数形态决定 —— codex/opencode 的 trailing 位置参数
+     * 就是这么被吃掉的。现在两条分支都从 [argSpec] 的双参形态取，位置显式。
+     */
+    internal fun attemptArgv(prompt: String, resumedCliSessionId: String?): List<String> =
+        if (resumedCliSessionId != null && resumeSpec != null) {
+            resumeSpec.args(resumedCliSessionId, prompt, model)
+        } else {
+            argSpec(prompt, model)
+        }
+
     override suspend fun executeTask(
         sessionId: String,
         prompt: String,
@@ -254,13 +286,10 @@ class SandboxedCliDriver(
         var resumedCliSessionId: String? = null
         val totalAttempts = 1 + maxExtraAttempts.coerceAtLeast(0)
         for (attempt in 1..totalAttempts) {
-            // 近邻判别的输出累积：瞬时判别与续跑 id 都从这里取（CLI 输出量有限，全量可承受）。
-            val outputTail = StringBuilder()
-            val attemptArgs = if (attempt > 1 && resumeSpec != null && resumedCliSessionId != null) {
-                resumeSpec.args(resumedCliSessionId!!, prompt)
-            } else {
-                argSpec(prompt, model)
-            }
+            // 近邻判别的输出累积：瞬时判别与续跑 id 都从这里取。总量有上限（BoundedOutputTail），
+            // 沙箱是生产路径，长任务几百万行输出不能把宿主堆吃光。
+            val outputTail = BoundedOutputTail()
+            val attemptArgs = attemptArgv(prompt, if (attempt > 1) resumedCliSessionId else null)
             val env = envOverrides +
                 mapOf(DriverKeys.ENV_HOOK_SESSION_ID to sessionId) +
                 if (useRealHome) {
@@ -277,7 +306,7 @@ class SandboxedCliDriver(
                 env = env,
                 networkPolicy = networkPolicy,
                 onLine = { line ->
-                    outputTail.append(line).append('\n')
+                    outputTail.appendLine(line)
                     if (resumedCliSessionId == null) {
                         resumeSpec?.sessionIdFromLine?.invoke(line)?.let { resumedCliSessionId = it }
                     }
@@ -320,7 +349,7 @@ class SandboxedCliDriver(
                             outcome.message
                         }
                         onEvent(DriverEvent.Card(endCardJson(taskId, wsPath, STATE_BLOCKED, ledger)))
-                        onEvent(DriverEvent.Error(ledger + CliSubprocessDriver.stderrTailOf(outputTail)))
+                        onEvent(DriverEvent.Error(ledger + CliSubprocessDriver.stderrTailOf(outputTail.toString())))
                         return
                     }
                 }

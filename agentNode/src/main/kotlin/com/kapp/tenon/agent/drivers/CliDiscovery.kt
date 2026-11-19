@@ -19,36 +19,52 @@ import java.io.File
  */
 object CliDiscovery {
 
+    /**
+     * 发现参数的**唯一真源**在 `agent-contract/driver-specs.json`（每家的 discovery 声明，
+     * 经生成物投影，`:driverSpecDrift` 判漂移）。下面这些常量保留原标识符供全仓引用，
+     * 值改从投影派生——加一家驱动只改 JSON，不再有一份散落的 env 名/bin 名清单。
+     *
+     * 搜索机制（显式 env → PATH → 应用包 → 额外目录，可执行文件判定）仍在本对象代码里。
+     */
+    private fun specOf(key: String): CliDriverSpecs.DiscoverySpec =
+        CliDriverSpecs.discoveryOf(DriverKeys.cliDriverId(key))
+            ?: error("driver-specs.json 缺 $key 的 discovery 声明")
+
     /** 显式指定 Claude Code 可执行文件的 env 名。 */
-    const val ENV_CLAUDE_CLI = "TENON_CLAUDE_CLI"
+    val ENV_CLAUDE_CLI get() = specOf("claude").envVar
+    val ENV_CODEX_CLI get() = specOf("codex").envVar
 
-    /** 显式指定 Codex 可执行文件的 env 名。 */
-    const val ENV_CODEX_CLI = "TENON_CODEX_CLI"
-
-    const val CLAUDE_BIN = "claude"
-    const val CODEX_BIN = "codex"
+    val CLAUDE_BIN get() = specOf("claude").bin
+    val CODEX_BIN get() = specOf("codex").bin
 
     /** Antigravity CLI（形态 A）：Google 登录态继承，无 Key 可配。 */
-    const val ENV_AGY_CLI = "TENON_AGY_CLI"
-    const val AGY_BIN = "agy"
+    val ENV_AGY_CLI get() = specOf("agy").envVar
+    val AGY_BIN get() = specOf("agy").bin
 
     /** opencode CLI：配置文件走 `OPENCODE_CONFIG`（见 [OpenCodeConfig]）。 */
-    const val ENV_OPENCODE_CLI = "TENON_OPENCODE_CLI"
-    const val OPENCODE_BIN = "opencode"
+    val ENV_OPENCODE_CLI get() = specOf("opencode").envVar
+    val OPENCODE_BIN get() = specOf("opencode").bin
 
     /** DeepSeek Harness CLI：key 走 `~/.dsh/.credentials.yaml`（见 [DshCredentials]）。 */
-    const val ENV_DSH_CLI = "TENON_DSH_CLI"
-    const val DSH_BIN = "dsh"
+    val ENV_DSH_CLI get() = specOf("dsh").envVar
+    val DSH_BIN get() = specOf("dsh").bin
 
     /** CodeBuddy CLI：独立安装的 `codebuddy`，也随 WorkBuddy.app 内置。 */
-    const val ENV_CODEBUDDY_CLI = "TENON_CODEBUDDY_CLI"
-    const val CODEBUDDY_BIN = "codebuddy"
-    const val CODEBUDDY_APP_BIN_RELATIVE = "WorkBuddy.app/Contents/Resources/app.asar.unpacked/cli/bin/codebuddy"
+    val ENV_CODEBUDDY_CLI get() = specOf("codebuddy").envVar
+    val CODEBUDDY_BIN get() = specOf("codebuddy").bin
+
+    /**
+     * 应用包内相对路径，**仅供展示/测试拼路径**；生产候选构造直接读 nullable 值，
+     * 因为 `orEmpty()` 会把「没声明」变成空串、拼出一个 `/Applications/` 目录候选。
+     */
+    val CODEBUDDY_APP_BIN_RELATIVE get() = specOf("codebuddy").extraBinRelative.orEmpty()
 
     /** ZCode CLI：PATH 上的 `zcode`，或桌面应用包里的 [ZCODE_CJS_RELATIVE]。 */
-    const val ENV_ZCODE_CLI = "TENON_ZCODE_CLI"
-    const val ZCODE_BIN = "zcode"
-    const val ZCODE_CJS_RELATIVE = "ZCode.app/Contents/Resources/glm/zcode.cjs"
+    val ENV_ZCODE_CLI get() = specOf("zcode").envVar
+    val ZCODE_BIN get() = specOf("zcode").bin
+
+    /** 同 [CODEBUDDY_APP_BIN_RELATIVE]：对外是展示值，生产内部走 nullable。 */
+    val ZCODE_CJS_RELATIVE get() = specOf("zcode").extraBinRelative.orEmpty()
 
     fun resolveClaudeCli(
         env: Map<String, String> = System.getenv(),
@@ -78,7 +94,10 @@ object CliDiscovery {
         pathDirs: List<String> = pathDirsOf(env),
     ): String? {
         val dirs = mutableListOf<String>()
-        env["HOME"]?.takeIf { it.isNotBlank() }?.let { dirs.add(it + "/.opencode/bin") }
+        val home = env["HOME"]?.takeIf { it.isNotBlank() }
+        for (rel in specOf("opencode").extraPathDirs) {
+            if (home != null) dirs.add(home + "/" + rel)
+        }
         dirs.addAll(pathDirs)
         return resolve(env[ENV_OPENCODE_CLI], OPENCODE_BIN, dirs)
     }
@@ -100,9 +119,12 @@ object CliDiscovery {
         pathDirs: List<String> = pathDirsOf(env),
     ): String? {
         resolve(env[ENV_CODEBUDDY_CLI], CODEBUDDY_BIN, pathDirs)?.let { return it }
+        // 没声明应用包副本就不该造候选：`orEmpty()` 会拼出 `/Applications/`（目录），
+        // 虽然被下面的 `isFile` 挡住，但那属于「拿空串冒充路径」，不做。
+        val rel = specOf("codebuddy").extraBinRelative ?: return null
         val candidates = listOfNotNull(
-            env["HOME"]?.takeIf { it.isNotBlank() }?.let { "$it/Applications/$CODEBUDDY_APP_BIN_RELATIVE" },
-            "/Applications/$CODEBUDDY_APP_BIN_RELATIVE",
+            env["HOME"]?.takeIf { it.isNotBlank() }?.let { "$it/Applications/$rel" },
+            "/Applications/$rel",
         )
         return candidates.firstNotNullOfOrNull { path ->
             File(path).takeIf { it.isFile && it.canExecute() }?.absolutePath
@@ -121,21 +143,51 @@ object CliDiscovery {
         val explicit = env[ENV_ZCODE_CLI]?.trim().takeUnless { it.isNullOrEmpty() }
         if (explicit != null) return File(explicit).takeIf { it.isFile }?.absolutePath
         resolve(null, ZCODE_BIN, pathDirs)?.let { return it }
+        // 同 codebuddy：没声明就不造 `/Applications/` 这种空串候选。
+        val rel = specOf("zcode").extraBinRelative ?: return null
         val candidates = listOfNotNull(
-            env["HOME"]?.takeIf { it.isNotBlank() }?.let { "$it/Applications/$ZCODE_CJS_RELATIVE" },
-            "/Applications/$ZCODE_CJS_RELATIVE",
+            env["HOME"]?.takeIf { it.isNotBlank() }?.let { "$it/Applications/$rel" },
+            "/Applications/$rel",
         )
         return candidates.firstNotNullOfOrNull { path -> File(path).takeIf { it.isFile }?.absolutePath }
+    }
+
+    /**
+     * 档案键 → 该家 CLI 的路径，**这一张表就是「键 → 发现器」的唯一映射**。
+     *
+     * 存在的理由：装配侧与诊断侧都要按同一套键去取路径。以前各自写一个 `when (key)`，
+     * 加一家忘了补其中一处，症状是「装是装了，诊断面说找不到」——两边都能编译。
+     * 认不出的键返回 null（不猜、不回落到别人的二进制）。
+     */
+    fun resolveFor(
+        key: String,
+        env: Map<String, String> = System.getenv(),
+        pathDirs: List<String> = pathDirsOf(env),
+    ): String? = when (key) {
+        // 分支条件必须是 **driver key 字面量**，不能写 `CLAUDE_BIN` 这类投影属性：
+        // 那个值来自 JSON 的 `discovery.bin`，一旦某家把 bin 改名（`agy` → `antigravity`），
+        // 这里会静默匹配不到 ⇒ 诊断面说「没装」、装配面（直接调 resolveXxxCli）却正常，
+        // 两边结论相反且都不报错。bin 名回答「找什么文件」，key 回答「这是哪家」，别混用。
+        "claude" -> resolveClaudeCli(env, pathDirs)
+        "codex" -> resolveCodexCli(env, pathDirs)
+        "agy" -> resolveAgyCli(env, pathDirs)
+        "opencode" -> resolveOpencodeCli(env, pathDirs)
+        "dsh" -> resolveDshCli(env, pathDirs)
+        "codebuddy" -> resolveCodebuddyCli(env, pathDirs)
+        "zcode" -> resolveZcodeCli(env, pathDirs)
+        else -> null
     }
 
     /**
      * 启动形态：`.cjs` / `.js` 运行时不能自己执行，要交给 `node`；
      * 普通 bin 原样返回。调用方把前缀插在参数最前面（prompt 之前）。
      */
-    fun launchOf(cliPath: String): Pair<String, List<String>> = when {
-        cliPath.endsWith(".cjs", ignoreCase = true) || cliPath.endsWith(".js", ignoreCase = true) ->
-            "node" to listOf(cliPath)
-        else -> cliPath to emptyList()
+    fun launchOf(cliPath: String): Pair<String, List<String>> {
+        // node 后缀判定来自 JSON 真源的 launch 声明（加一种脚本形态只改 JSON）。
+        val isNodeScript = CliDriverSpecs.launch.nodeExtensions.any {
+            cliPath.endsWith(it, ignoreCase = true)
+        }
+        return if (isNodeScript) "node" to listOf(cliPath) else cliPath to emptyList()
     }
 
     /**

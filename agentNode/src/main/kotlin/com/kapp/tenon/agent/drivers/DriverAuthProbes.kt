@@ -37,22 +37,60 @@ object DriverAuthProbes {
     )
 
     /**
-     * 纯分类：退出码 + 输出 → 三态。与 `AgyAuthProbe.classify` 同口径，抽成纯函数便于
-     * 合成输入测试（不许依赖本机装没装 CLI）。签名命中即 NOT_AUTHENTICATED；其余
-     * （含超时 / 命令缺失的哨兵值）UNKNOWN 放行。
+     * 纯分类：退出码 + 输出 → 三态。`CLI_MARKER` 类驱动的唯一判定入口（`AgyAuthProbe` 委托到这里），
+     * 抽成纯函数便于合成输入测试（不许依赖本机装没装 CLI）。marker / ignoreCase / exit 判据从
+     * **该家**的 JSON 投影读；签名命中即 NOT_AUTHENTICATED；其余（含超时 / 命令缺失的哨兵值）
+     * UNKNOWN 放行。
+     *
+     * **按 key 读声明**，不按驱动名取某一份固定声明：`CLI_MARKER` 不是 agy 专属机制——第二家
+     * 声明这个 kind 时用它自己的 marker 判。曾经这里硬读 `authProbeOf(DriverKeys.AGY)`，
+     * 于是任何别的 `CLI_MARKER` 驱动都会被 agy 的签名套一遍，假绿/假红都可能。
      */
-    fun classify(exitCode: Int, output: String): State = when {
-        exitCode == 0 -> State.AUTHENTICATED
-        output.contains(AgyAuthProbe.NOT_LOGGED_IN_MARKER, ignoreCase = true) -> State.NOT_AUTHENTICATED
-        else -> State.UNKNOWN
+    fun classify(driverKey: String, exitCode: Int, output: String): State {
+        val spec = CliDriverSpecs.authProbeOf(driverKey) ?: return State.UNKNOWN
+        return when {
+            spec.authenticatedOnExitZero && exitCode == 0 -> State.AUTHENTICATED
+            // marker 缺失时不许判成「确定未登录」：contains("") 恒真，会把探针失败伪装成
+            // 一个确切结论。codegen 已保证 CLI_MARKER 必带 marker，这里只做 fail-safe 兜底。
+            spec.notAuthenticatedMarker
+                ?.let { output.contains(it, ignoreCase = spec.markerIgnoreCase) } == true ->
+                State.NOT_AUTHENTICATED
+            else -> State.UNKNOWN
+        }
     }
 
     /**
-     * 由 `agy models` 的真实结果生成 STRONG 快照；null 状态（未接探针 / 本机没有 agy）
-     * 原样返回 null，让调用方按「端口读不到」处理，而不是造一条 UNKNOWN 顶数。
+     * 真跑探针的 STRONG 快照；null 状态（未接探针 / 本机没装该 CLI）原样返回 null，让调用方
+     * 按「端口读不到」处理，而不是造一条 UNKNOWN 顶数。
+     *
+     * key 由调用方传入（不写死 AGY）：快照的归属必须是**被探测的那家**，否则界面会把一家的
+     * 结论挂到另一家头上。
      */
-    fun agySnapshot(state: State?): Snapshot? = state?.let {
-        Snapshot(DriverKeys.AGY, it, Evidence.STRONG)
+    fun strongSnapshot(driverKey: String, state: State?): Snapshot? = state?.let {
+        Snapshot(driverKey, it, Evidence.STRONG)
+    }
+
+    /**
+     * `FILE` 型声明（[CliDriverSpecs.AuthProbeKind.FILE]）的通用判据：声明的 env key 任一在位，
+     * 或声明的凭证文件（相对 `HOME`）存在且非空。
+     *
+     * **为什么读声明而不是按驱动名调某个专用函数**：dsh 的 `hasCredentialFile` 位置完全已知，
+     * 于是曾经把「dsh」写死在判定层。新增一家 FILE 驱动时那条 `key == "dsh"` 命不中，结论
+     * 静默落到兜底的 UNKNOWN/HINT，丢掉「确定缺凭证」的快败提示。判据进声明后，新增 FILE
+     * 驱动自动生效。
+     *
+     * **null = 判不了**（`HOME` 读不到，或声明里既无 env key 也无凭证文件）。不许把它折成
+     * `false`：那会把「我们看不到凭证位置」说成「确定没有凭证」，界面就会指着一个其实存在的
+     * `~/.dsh/.credentials.yaml` 让用户去配 key。launchd / 精简 env / 测试夹具下 HOME 都可能缺席。
+     *
+     * 只回答「有没有凭证物」，不回答「凭证还有效」——证据强度由 [hintSnapshot] 钉成 HINT。
+     */
+    fun hasDeclaredCredential(env: Map<String, String>, spec: CliDriverSpecs.AuthProbeSpec): Boolean? {
+        if (hasCredential(env, *spec.credentialKeys.toTypedArray())) return true
+        val relative = spec.credentialFile?.takeIf { it.isNotBlank() } ?: return null
+        val home = env["HOME"]?.takeIf { it.isNotBlank() } ?: return null
+        val file = java.io.File(home, relative)
+        return file.isFile && file.length() > 0L
     }
 
     /**
@@ -60,16 +98,14 @@ object DriverAuthProbes {
      * 在位 ⇒ UNKNOWN（不是 AUTHENTICATED —— 文件在不代表 token 还有效）。这条不对称是故意的：
      * 弱证据只能用于「快败提示」，不能用于「放行绿灯」，后者必须留给真跑探针。
      *
-     * @param credentialPresent 凭证物是否在位
+     * @param credentialPresent 凭证物是否在位；null = 判不了（缺 HOME / 无凭证声明）⇒ UNKNOWN，
+     *   与「在位」同为放行档，但语义不同：一个是「看到了」，一个是「看不到」。
      */
-    fun hintSnapshot(driverKey: String, credentialPresent: Boolean): Snapshot = Snapshot(
+    fun hintSnapshot(driverKey: String, credentialPresent: Boolean?): Snapshot = Snapshot(
         driverKey = driverKey,
-        state = if (credentialPresent) State.UNKNOWN else State.NOT_AUTHENTICATED,
+        state = if (credentialPresent == false) State.NOT_AUTHENTICATED else State.UNKNOWN,
         evidence = Evidence.HINT,
     )
-
-    /** CLI 侧 auth session 文件是否存在（只读 exists，不读内容、不解密、不打印）。 */
-    fun authSessionExists(path: String): Boolean = runCatching { java.io.File(path).isFile }.getOrDefault(false)
 
     /** 环境变量里是否至少有一只非空凭证（空白值当没有，与 CliProviderEnv.pick 同口径）。 */
     fun hasCredential(env: Map<String, String>, vararg keys: String): Boolean =

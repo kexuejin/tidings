@@ -46,6 +46,11 @@
 # :designStateSlotGate）。它们挡的是"颜色有门禁所以精致、间距没有门禁所以随手写字面量"
 # 那类不对称：spec 与代码逐键漂移、token 采用率回退、状态槽覆盖缩小，三者任一都报红。
 #
+# 驱动规格同理，但真源是 JSON 而不是 Markdown：`agent-contract/driver-specs.json` 是
+# 七家 CLI 的唯一真相，`:driverSpecDrift` 重新投影后与仓库里的生成物逐字节比对，
+# `:driverSpecSelfTest` 反过来喂一批已知坏规格、要求量具本身必须报错。前者挡
+# "改了 JSON 没重投影"（生成物是 DO NOT EDIT），后者挡"门禁看起来在跑、其实什么都放行"。
+#
 # 代码侧的门禁管不到**设计源自己**：prototype/relay.html 有四个自检工具
 # （check-render / check-contrast / check-refs / shoot-relay --verify-only），
 # 2026-10-15 起接在本文件末尾。它们挡的是"稿子改了但验收图没重拍"这一整类。
@@ -224,6 +229,8 @@ jobs:
             :domainComposeFreeGate \
             :commonJvmApiGate \
             :envDependentTestGate \
+            :driverSpecDrift \
+            :driverSpecSelfTest \
             :designSpecDrift \
             :designTokenUsageGate \
             :designStateSlotGate \

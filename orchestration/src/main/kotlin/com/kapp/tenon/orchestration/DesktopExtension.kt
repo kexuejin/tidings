@@ -6,6 +6,7 @@ import com.kapp.tenon.agent.AgentExecPolicyStore
 import com.kapp.tenon.agent.DelegationTeam
 import com.kapp.tenon.agent.DelegationTeamConfigParser
 import com.kapp.tenon.agent.drivers.AgentProfiles
+import com.kapp.tenon.agent.drivers.DriverAuthJudgement
 import com.kapp.tenon.agent.executeCliTask
 import com.kapp.tenon.agent.schedule.MissedFirePolicies
 import com.kapp.tenon.core.protocol.AgentGrantScopes
@@ -585,38 +586,17 @@ class DesktopExtension(
                             // 降级成 UNKNOWN，绝不能冒到 UI 弹模态错误框把配置页卡死。
                             // 探针自身已把命令缺失/超时降级为 UNKNOWN，这里防的是未来
                             // 改动重新引入抛出（含 agy 未安装时 start() 的 IOException）。
-                            runCatching {
-                                when (agyAuthProbe.probe()) {
-                                    com.kapp.tenon.agent.drivers.AgyAuthProbe.State.AUTHENTICATED ->
-                                        com.kapp.tenon.agent.drivers.DriverAuthProbes.State.AUTHENTICATED
-                                    com.kapp.tenon.agent.drivers.AgyAuthProbe.State.NOT_AUTHENTICATED ->
-                                        com.kapp.tenon.agent.drivers.DriverAuthProbes.State.NOT_AUTHENTICATED
-                                    com.kapp.tenon.agent.drivers.AgyAuthProbe.State.UNKNOWN ->
-                                        com.kapp.tenon.agent.drivers.DriverAuthProbes.State.UNKNOWN
-                                }
-                            }.getOrDefault(com.kapp.tenon.agent.drivers.DriverAuthProbes.State.UNKNOWN)
+                            DriverAuthJudgement.agyStateOf(agyAuthProbe)
                         },
                         // codex / claude / opencode：跑厂家自己的只读 status 子命令。
                         // 路径与 driverCatalog 同源（都是 CliDiscovery 的 resolve 结果），
                         // 探针拿不到路径就返回 null ⇒ 映射层降级 UNKNOWN，不冤枉成未登录。
                         cliAuthState = { key ->
-                            val cliPath = when (key) {
-                                "codex" -> com.kapp.tenon.agent.drivers.CliDiscovery.resolveCodexCli()
-                                "claude" -> com.kapp.tenon.agent.drivers.CliDiscovery.resolveClaudeCli()
-                                "opencode" -> com.kapp.tenon.agent.drivers.CliDiscovery.resolveOpencodeCli()
-                                else -> null
-                            }
-                            when (
-                                com.kapp.tenon.agent.drivers.CliAuthProbes.probe(
-                                    key, cliPath, cliAuthRunner,
-                                )
-                            ) {
-                                com.kapp.tenon.agent.drivers.CliAuthProbes.Verdict.LOGGED_IN ->
-                                    com.kapp.tenon.agent.drivers.DriverAuthProbes.State.AUTHENTICATED
-                                com.kapp.tenon.agent.drivers.CliAuthProbes.Verdict.LOGGED_OUT ->
-                                    com.kapp.tenon.agent.drivers.DriverAuthProbes.State.NOT_AUTHENTICATED
-                                com.kapp.tenon.agent.drivers.CliAuthProbes.Verdict.UNKNOWN -> null
-                            }
+                            DriverAuthJudgement.cliAuthStateOf(
+                                key,
+                                com.kapp.tenon.agent.drivers.CliDiscovery.resolveFor(key),
+                                cliAuthRunner,
+                            )
                         },
                     )
                 },

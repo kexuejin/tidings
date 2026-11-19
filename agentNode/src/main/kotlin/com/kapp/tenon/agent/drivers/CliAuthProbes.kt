@@ -2,11 +2,7 @@
 
 package com.kapp.tenon.agent.drivers
 
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeout
 import java.io.File
-import java.util.concurrent.TimeUnit
 
 /**
  * 交互式 CLI 的**只读登录态探针**（跑一次厂家自己的 status 子命令）。
@@ -25,9 +21,11 @@ import java.util.concurrent.TimeUnit
  *
  * ## 注入与证据强度
  *
- * [probe] 的 runner 可注入 ⇒ 测试给合成输出，不依赖本机装没装 CLI。解析 [classify]
- * 是纯函数，输出串的判据只有一处。STRONG 只给命令真跑成功的 codex / claude；
- * opencode 的 `stored` 只证明「存过凭证」，不证明还有效 ⇒ 由映射层降级为 HINT。
+ * [probe] 的 runner 可注入 ⇒ 测试给合成输出，不依赖本机装没装 CLI。判定**声明**
+ * （argv + 有序正则信号 + golden 夹具）住在 `driver-specs.json` 的 `authProbe`，经
+ * [CliDriverSpecs.authProbeOf] 投影读取；这里只执行判定（信号顺序、退出码纪律是机制）。
+ * STRONG 只给命令真跑成功的 codex / claude；opencode 的 `stored` 只证明「存过凭证」，
+ * 由映射层降级为 HINT。
  */
 object CliAuthProbes {
 
@@ -35,49 +33,52 @@ object CliAuthProbes {
 
     data class Output(val exitCode: Int, val text: String)
 
-    /** 这三家才有只读查询子命令；其余驱动走各自的凭证文件/env 探针。 */
-    private val QUERYABLE = setOf("codex", "claude", "opencode")
-
-    fun supports(key: String): Boolean = key in QUERYABLE
+    /**
+     * 是否接了厂家只读 status 查询：声明为 CLI_CMD 的驱动才算（codex/claude/opencode）。
+     * agy 走 CLI_MARKER（`agy models` + marker），由 `AgyAuthProbe` 单独判，不进这里。
+     */
+    fun supports(key: String): Boolean =
+        CliDriverSpecs.authProbeOf(key)?.kind == CliDriverSpecs.AuthProbeKind.CLI_CMD
 
     /**
-     * 只读查询的 argv（首项是 CLI 可执行文件路径）。命令来自各家 `--help` 与本机实测，
-     * 不凭印象编：codex 有 `login` 子命令且 `status` 是其只读分支，claude 有 `auth status`
-     * 输出 JSON，opencode 有 `auth list` 列出已存凭证。
+     * 只读查询的 argv（首项是 CLI 可执行文件路径）。子命令骨架来自 JSON 投影的
+     * `authProbe.argv`，`${cliPath}` 由发现器给的绝对路径替换——命令出处可在真源核对，
+     * 不在代码里另写一份。
      */
-    fun queryOf(key: String, cliPath: String): List<String>? = when (key) {
-        "codex" -> listOf(cliPath, "login", "status")
-        "claude" -> listOf(cliPath, "auth", "status")
-        "opencode" -> listOf(cliPath, "auth", "list")
-        else -> null
+    fun queryOf(key: String, cliPath: String): List<String>? {
+        val argv = CliDriverSpecs.authProbeOf(key)?.argv?.takeIf { it.isNotEmpty() } ?: return null
+        return argv.map { if (it == AUTH_CLI_TOKEN) cliPath else it }
     }
 
     /**
-     * 纯解析：输出串 → 三态。合成输入可测，不读本机。
+     * 纯解析：输出串 → 三态。声明（有序信号）从 JSON 投影读，合成输入可测，不读本机。
      *
      * **退出码不是判据**：codex / claude 在「未登录」时故意返回非 0（本机实测 exit=1），
      * 若按 `exitCode != 0 ⇒ UNKNOWN` 过滤，正好把唯一确定的状态全丢掉 —— 界面又变回
-     * 「全未判定」。只有输出串对不上任何已知口径时才 UNKNOWN（含命令缺失 / 参数错）。
+     * 「全未判定」。只有输出串对不上任何已知信号时才 UNKNOWN（含命令缺失 / 参数错）。
+     * 信号**顺序**是声明的一部分（codex 的 `not logged in` 必须先于 `logged in`，否则
+     * 后者永远命中）——投影按 JSON 数组顺序给出，这里不重排。
      */
     fun classify(key: String, out: Output): Verdict {
-        return when (key) {
-            "codex" -> when {
-                CODE_LOGGED_OUT.containsMatchIn(out.text) -> Verdict.LOGGED_OUT
-                CODE_LOGGED_IN.containsMatchIn(out.text) -> Verdict.LOGGED_IN
-                else -> Verdict.UNKNOWN
+        val spec = CliDriverSpecs.authProbeOf(key) ?: return Verdict.UNKNOWN
+        if (spec.kind != CliDriverSpecs.AuthProbeKind.CLI_CMD) return Verdict.UNKNOWN
+        for (signal in spec.signals) {
+            val hit = if (signal.blank) {
+                out.text.isBlank()
+            } else {
+                val regex = signal.regex ?: continue
+                val opts = if (signal.ignoreCase) setOf(RegexOption.IGNORE_CASE) else emptySet()
+                Regex(regex, opts).containsMatchIn(out.text)
             }
-            "claude" -> when {
-                CLAUDE_FALSE.containsMatchIn(out.text) -> Verdict.LOGGED_OUT
-                CLAUDE_TRUE.containsMatchIn(out.text) -> Verdict.LOGGED_IN
-                else -> Verdict.UNKNOWN
+            if (hit) {
+                return when (signal.verdict) {
+                    CliDriverSpecs.AuthVerdict.AUTHENTICATED -> Verdict.LOGGED_IN
+                    CliDriverSpecs.AuthVerdict.NOT_AUTHENTICATED -> Verdict.LOGGED_OUT
+                    CliDriverSpecs.AuthVerdict.UNKNOWN -> Verdict.UNKNOWN
+                }
             }
-            "opencode" -> when {
-                OPENCODE_STORED.containsMatchIn(out.text) -> Verdict.LOGGED_IN
-                out.text.isBlank() -> Verdict.LOGGED_OUT
-                else -> Verdict.UNKNOWN
-            }
-            else -> Verdict.UNKNOWN
         }
+        return Verdict.UNKNOWN
     }
 
     /**
@@ -98,28 +99,19 @@ object CliAuthProbes {
     /**
      * JVM 子进程执行器：合并 stderr、限定超时、读完后回收进程。
      * cwd 设为 home —— 各家的凭证配置都在用户目录，别让调用方的临时 cwd 影响判定。
+     *
+     * 超时由 [ProbeProcess] 的看门狗杀进程实现（阻塞读上 `waitFor(timeout)` 是假超时）。
+     * 被杀时**抛**而不是把残片当输出：`opencode auth list` 的「空输出」语义是「没存凭证」，
+     * 若把超时混成空串，界面会显示一个确切但错误的结论 —— 这里宁可降级 UNKNOWN。
      */
     fun jvmRunner(timeoutMs: Long = 5_000L): suspend (List<String>) -> Output = { argv ->
-        withTimeout(timeoutMs) {
-            withContext(Dispatchers.IO) {
-                val proc = ProcessBuilder(argv)
-                    .redirectErrorStream(true)
-                    .directory(File(System.getProperty("user.home")))
-                    .start()
-                try {
-                    val text = proc.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
-                    val code = if (proc.waitFor(timeoutMs, TimeUnit.MILLISECONDS)) proc.exitValue() else -1
-                    Output(code, text)
-                } finally {
-                    if (proc.isAlive) proc.destroyForcibly()
-                }
-            }
+        val result = ProbeProcess.run(argv, timeoutMs, File(System.getProperty("user.home")))
+        if (result.timedOut) {
+            throw IllegalStateException("probe timed out after " + timeoutMs + "ms: " + argv.firstOrNull())
         }
+        Output(result.exitCode, result.text)
     }
 
-    private val CODE_LOGGED_OUT = Regex("not\\s+logged\\s+in", RegexOption.IGNORE_CASE)
-    private val CODE_LOGGED_IN = Regex("logged\\s+in", RegexOption.IGNORE_CASE)
-    private val CLAUDE_FALSE = Regex("\"loggedIn\"\\s*:\\s*false")
-    private val CLAUDE_TRUE = Regex("\"loggedIn\"\\s*:\\s*true")
-    private val OPENCODE_STORED = Regex("stored", RegexOption.IGNORE_CASE)
+    /** argv 模板里的 CLI 路径占位符；真值由发现器给的绝对路径替换。 */
+    private const val AUTH_CLI_TOKEN = "\${cliPath}"
 }

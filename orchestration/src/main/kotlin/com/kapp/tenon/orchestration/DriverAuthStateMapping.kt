@@ -2,6 +2,7 @@
 
 package com.kapp.tenon.orchestration
 
+import com.kapp.tenon.agent.drivers.DriverAuthJudgement
 import com.kapp.tenon.agent.drivers.DshCredentials
 import com.kapp.tenon.agent.drivers.DriverAuthProbes
 import com.kapp.tenon.agent.drivers.DriverKeys
@@ -19,7 +20,8 @@ import com.kapp.tenon.domain.DriverAuthStateUi
  * 证明未登录。所以：
  *
  * - 只有 [DriverKeys.AGY] 真跑 `agy models`，拿得到 STRONG 的三态；
- * - dsh 的凭证位置是完整已知的（凭证文件 + env key），两处都没有才判 NOT_AUTHENTICATED；
+ * - dsh 的凭证位置是完整已知的（凭证文件 + env key），**且 HOME 已知**时两处都没有才判
+ *   NOT_AUTHENTICATED；HOME 读不到 = 不知道该查哪个目录 ⇒ UNKNOWN，不冒充「确定没有」；
  * - zcode 的核心前置「应用里选了哪个模型」持久化在 `setting.json`，位置固定 ⇒ 选不出模型
  *   （对象为空/缺键/文件不在）可判 NOT_AUTHENTICATED；选过仍是 HINT/UNKNOWN，不画绿灯；
  * - codebuddy 的 auth session 文件名经过哈希、路径不可靠 ⇒ env/文件缺失时**一律 UNKNOWN**，
@@ -60,7 +62,7 @@ internal object DriverAuthStateMapping {
         // 固定顺序：inService 是 Set，遍历顺序不稳会让界面行序每次重组都跳。
         for (key in REPORTABLE) {
             if (key !in keys) continue
-            val probe = probeFor(key, env, agyState, zcodeSettingPath, cliAuthState)
+            val probe = snapshotOf(key, env, agyState, zcodeSettingPath, cliAuthState)
             out[key] = DriverAuthStateEntryUi(
                 driverKey = key,
                 state = toUi(probe.state),
@@ -75,47 +77,26 @@ internal object DriverAuthStateMapping {
         return out
     }
 
-    private suspend fun probeFor(
+    /**
+     * 一家驱动的**原始两维**快照（三态 + 证据强度）。
+     *
+     * 判定本身住在 `:agentNode` 的 `DriverAuthJudgement`（那是驱动知识）；这里只做转发，
+     * 好让「界面」与「诊断面」共用同一条路径 —— 两处各写一份判据，症状是
+     * 「界面说已登录、doctor 说未判定」，而两边都能编译。
+     */
+    internal suspend fun snapshotOf(
         key: String,
         env: Map<String, String>,
         agyState: suspend () -> DriverAuthProbes.State?,
         zcodeSettingPath: String,
         cliAuthState: suspend (String) -> DriverAuthProbes.State?,
-    ): DriverAuthProbes.Snapshot = when (key) {
-        DriverKeys.AGY ->
-            DriverAuthProbes.agySnapshot(agyState())
-                ?: DriverAuthProbes.Snapshot(key, DriverAuthProbes.State.UNKNOWN, DriverAuthProbes.Evidence.STRONG)
-        "dsh" -> DriverAuthProbes.hintSnapshot(
-            key,
-            DriverAuthProbes.hasCredential(env, DshCredentials.ENV_KEY) ||
-                DshCredentials.hasCredentialFile(env),
-        )
-        "zcode" -> DriverAuthProbes.hintSnapshot(
-            key,
-            DriverAuthProbes.zcodeHasModelSelected(zcodeSettingPath),
-        )
-        // 三家有厂家自己的只读 status 子命令（实测可用）⇒ 真跑，给确定的三态。
-        // 探针没跑成（null）仍降级 UNKNOWN，不把「读不到」说成「没有」。
-        "claude", "codex", "opencode" -> {
-            val state = cliAuthState(key)
-            when {
-                state == null -> DriverAuthProbes.Snapshot(
-                    key, DriverAuthProbes.State.UNKNOWN, DriverAuthProbes.Evidence.HINT,
-                )
-                // opencode 的 `stored` 只证明存过凭证，不保证还有效 ⇒ 不许画绿灯。
-                key == "opencode" && state == DriverAuthProbes.State.AUTHENTICATED ->
-                    DriverAuthProbes.Snapshot(
-                        key, DriverAuthProbes.State.UNKNOWN, DriverAuthProbes.Evidence.HINT,
-                    )
-                else -> DriverAuthProbes.Snapshot(key, state, DriverAuthProbes.Evidence.STRONG)
-            }
-        }
-        // codebuddy 的 auth session 路径哈希不可靠，且 `-p` 探测会触发真实派单
-        // （本机实测报 Authentication required，不能当只读探针用）⇒ 只报 UNKNOWN。
-        "codebuddy" ->
-            DriverAuthProbes.Snapshot(key, DriverAuthProbes.State.UNKNOWN, DriverAuthProbes.Evidence.HINT)
-        else -> DriverAuthProbes.Snapshot(key, DriverAuthProbes.State.UNKNOWN, DriverAuthProbes.Evidence.HINT)
-    }
+    ): DriverAuthProbes.Snapshot = DriverAuthJudgement.snapshotOf(
+        key = key,
+        env = env,
+        agyState = agyState,
+        zcodeSettingPath = zcodeSettingPath,
+        cliAuthState = cliAuthState,
+    )
 
     /** 引导类别的唯一词表（UI 侧只按枚举选本地化文案）。 */
     fun remediationOf(key: String): DriverAuthRemediationUi = when (key) {

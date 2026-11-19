@@ -63,6 +63,24 @@ object OsSandboxGuard {
     enum class NetworkPolicy { AIR_GAPPED, LOOPBACK, OPEN }
 
     /**
+     * 声明面（`driver-specs.json` 的 `networkPolicy`）→ 执行面枚举。
+     *
+     * 两个枚举**刻意独立**：[CliDriverSpecs] 住在 `:agent-contract`，不许依赖 OS 沙箱的实现
+     * 细节，所以转换只在这里发生一次。`when` 不写 `else`：新增档位时编译期就红，不会静默
+     * 落进某个已有档——那会把「断网」悄悄变成「全网」，或反过来。
+     *
+     * 查不到该驱动 = 投影漏了/传了野键，[CliDriverSpecs.networkPolicyOf] 直接抛（不兜底）。
+     */
+    fun declaredPolicyOf(driverId: String): NetworkPolicy = of(CliDriverSpecs.networkPolicyOf(driverId))
+
+    /** 三档直译。单独成函数是为了能对**每一档**做断言（经驱动查表只能验到在册的那一档）。 */
+    fun of(declared: CliDriverSpecs.NetworkPolicy): NetworkPolicy = when (declared) {
+        CliDriverSpecs.NetworkPolicy.OPEN -> NetworkPolicy.OPEN
+        CliDriverSpecs.NetworkPolicy.LOOPBACK -> NetworkPolicy.LOOPBACK
+        CliDriverSpecs.NetworkPolicy.AIR_GAPPED -> NetworkPolicy.AIR_GAPPED
+    }
+
+    /**
      * 探活当前环境能否拉起 OS 沙箱。探测本身跑一条真实命令（毫秒级）：
      * macOS 用 `sandbox-exec` 跑一条最小 profile；Linux 用 `unshare -n true`。
      */

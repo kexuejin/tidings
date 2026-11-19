@@ -153,12 +153,19 @@ class CodebuddyAndZcodeCliWiringTest {
             "无 type 的单次信封也要出正文——zcode 机读输出的键名未逐字核实，不能只认 text",
         )
         assertNotNull(
-            CliSubprocessDriver.CODEBUDDY_RESUME.sessionIdFromLine("""{"type":"system","session_id":"01a1-e1fe"}"""),
+            CliSubprocessDriver.codebuddyResume(autoApprove = false)
+                .sessionIdFromLine("""{"type":"system","session_id":"01a1-e1fe"}"""),
             "重试跳必须能从首行拿到会话 id",
         )
         assertEquals(
-            listOf("--resume", "01a1-e1fe", "-p", "again", "--output-format", "stream-json", "--verbose", "-y"),
-            CliSubprocessDriver.CODEBUDDY_RESUME.args("01a1-e1fe", "again"),
+            listOf("--resume", "01a1-e1fe", "-p", "again", "--output-format", "stream-json", "--verbose"),
+            CliSubprocessDriver.codebuddyResume(autoApprove = false).args("01a1-e1fe", "again", null),
+            "裸路径的续跑跳不许带 -y：首跳没放开权限，重试跳放开等于一次失败就把权限面放宽",
+        )
+        assertEquals(
+            listOf("--resume", "01a1-e1fe", "-p", "again", "--output-format", "stream-json", "--verbose", "-y", "--model", "m-1"),
+            CliSubprocessDriver.codebuddyResume(autoApprove = true).args("01a1-e1fe", "again", "m-1"),
+            "沙箱分支的续跑跳必须同时保住 -y 与本次任务的模型（重试跳不许丢模型）",
         )
     }
 

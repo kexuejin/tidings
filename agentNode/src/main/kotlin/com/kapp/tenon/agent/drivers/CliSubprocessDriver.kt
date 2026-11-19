@@ -12,12 +12,19 @@ import kotlinx.coroutines.withContext
 /**
  * 断点续跑形态：从 CLI 自己的输出里捕获它这次的会话 id，重试时以**续跑参数**重放，
  * 让重试从上一跳的断点继续而不是从零再读一遍上下文。null = 该 CLI 无此能力（重试从头跑）。
+ *
+ * ## 为什么 [args] 必须收 `model`
+ *
+ * 它曾经只收 `(sessionId, prompt)`，于是**重试跳静默丢掉本次任务的模型**：首跳失败、
+ * 次跳成功，用户只看到「重试成功」，模型其实已经回到默认。模型是本次任务的属性，
+ * 不随「第几次尝试」改变 —— 所以由 [CliSubprocessDriver.attemptArgv] 统一注入，
+ * 而不是让每个 spec 自己捕获构造时的那个值。
  */
 data class CliResumeSpec(
     /** 从一行原始输出里解析 CLI 侧会话 id；解析不出返回 null（继续等后面的行）。 */
     val sessionIdFromLine: (line: String) -> String?,
-    /** 重试跳的完整启动参数（含续跑标记与 prompt）。 */
-    val args: (cliSessionId: String, prompt: String) -> List<String>,
+    /** 重试跳的完整启动参数（含续跑标记、模型与 prompt）。 */
+    val args: (cliSessionId: String, prompt: String, model: String?) -> List<String>,
 )
 
 /**
@@ -85,6 +92,14 @@ class CliSubprocessDriver(
      * 「不支持」并响亮失败。假阴性比静默忽略更好查，但同样不是我们要的。
      */
     private val modelKey: String = driverId,
+    /**
+     * 墙钟止损（毫秒）。null = 读 `TENON_SANDBOX_TIMEOUT_MS`，与沙箱分支同一口径。
+     *
+     * 这个参数的存在本身就是一条判据：**裸路径也必须会超时**。裸路径跑的是「本机自己的仓」
+     * 与触发式只读通道，CLI 一旦挂住（等 stdin、等网络、等审批），工单就永远 busy，
+     * 而沙箱那条路 30 分钟就自动收场 —— 两条路不一样，用户只会以为「都没问题」。
+     */
+    private val timeoutMs: Long? = null,
 ) : AgentDriver {
 
     /**
@@ -166,6 +181,23 @@ class CliSubprocessDriver(
         modelKey = modelKey,
     )
 
+    /**
+     * 本次尝试的完整 argv —— 生产与守卫的**同一个出口**。
+     *
+     * 提出来不是为了复用，而是为了让「装配出来的 argv 到底长什么样」有一个可断言的入口。
+     * `CliModelSelectionTest` 那种只测助手函数、不测装配的写法，正是模型被吞却长期全绿的成因：
+     * 助手函数 `codexArgs(prompt, model = x)` 一直是对的，错的是装配没把模型传给它。
+     *
+     * [resumedCliSessionId] 非空且该驱动有续跑能力 ⇒ 走续跑参数分支；两条分支的模型都来自
+     * 当前实例的 [model]，所以「重试跳丢模型」在结构上不可能再发生。
+     */
+    internal fun attemptArgv(prompt: String, resumedCliSessionId: String?): List<String> =
+        if (resumedCliSessionId != null && resumeSpec != null) {
+            resumeSpec.args(resumedCliSessionId, prompt, model)
+        } else {
+            argSpec(prompt, model)
+        }
+
     override suspend fun executeTask(
         sessionId: String,
         prompt: String,
@@ -184,50 +216,43 @@ class CliSubprocessDriver(
         var resumedCliSessionId: String? = null
         val totalAttempts = 1 + maxExtraAttempts.coerceAtLeast(0)
         var lastFailure: String? = null
+        // 止损口径与沙箱分支同源：同一个 env、同一个默认值，免得「两条路不一样」。
+        val limitMs = timeoutMs ?: WorktreeSandboxExecutor.timeoutMsOf()
         // 终局错误必须带上 CLI 自己的 stderr 尾巴（`dsh: <code>: <message>` 这类
         // 故障诊断行）—— 行映射器认不出的行会被如实跳过，但「exit 1」 alone 让
         // 根因不可见（AGENTS §2.5：诊断要么如实、要么不存在）。只取最后 3 行防刷屏。
-        fun failureWithStderrTail(failure: String, tail: StringBuilder): String =
-            failure + stderrTailOf(tail)
+        fun failureWithStderrTail(failure: String, tail: BoundedOutputTail): String =
+            failure + stderrTailOf(tail.toString())
         for (attempt in 1..totalAttempts) {
-            // 近邻判别的输出累积：瞬时判别与续跑 id 都从这里取（CLI 输出量有限，全量可承受）。
-            val outputTail = StringBuilder()
-            val attemptArgs = if (attempt > 1 && resumeSpec != null && resumedCliSessionId != null) {
-                resumeSpec.args(resumedCliSessionId!!, prompt)
-            } else {
-                argSpec(prompt, model)
-            }
+            // 近邻判别的输出累积：瞬时判别与续跑 id 都从这里取。总量有上限
+            // （BoundedOutputTail），长任务不会把宿主堆吃光——单行有界挡不住几百万行短输出。
+            val outputTail = BoundedOutputTail()
+            val attemptArgs = attemptArgv(prompt, if (attempt > 1) resumedCliSessionId else null)
             var exitCode = SPAWN_FAILED_EXIT
             var lineLimitBroken = false
+            val timedOut = java.util.concurrent.atomic.AtomicBoolean(false)
             try {
                 exitCode = withContext(Dispatchers.IO) {
                     val pb = ProcessBuilder(listOf(cliPath) + attemptArgs)
-                    File(wsPath).takeIf { it.isDirectory }?.let {
-                        pb.directory(it)
-                        // 同 WorktreeSandbox：`directory()` 不改继承来的 PWD，而 opencode
-                        // 是按 `$PWD` 解析工作区的（否则产物写到宿主目录去）。
-                        pb.environment()["PWD"] = it.absolutePath
-                    }
-                    // T-3a：模型凭证注入（节点本地 → 子进程环境）。值绝不进日志/台账/报文。
-                    // PATH 必须先补齐：GUI 启动的宿主只有最小 PATH，脚本型 CLI 会因为找不到
-                    // 解释器直接 127（见 CliDiscovery.childPath）。envOverrides 在其后覆盖，
-                    // 显式注入仍然赢。
-                    pb.environment()["PATH"] = CliDiscovery.childPath(pb.environment())
-                    envOverrides.forEach { (key, value) -> pb.environment()[key] = value }
-                    // 会话对齐键（提案 §9 阶段三）：hook 脚本读到它才把 sessionId 透传给
-                    // 审批路由，审批卡与只读策略因此挂在派单会话上。
+                    val workDir = File(wsPath).takeIf { it.isDirectory }
+                    workDir?.let { pb.directory(it) }
+                    // 环境装配只有一处（顺序与每条顺序的代价见 [CliChildEnv]）：这里只给输入。
                     //
-                    // **所有**子进程都要注入，不能只在 SandboxedCliDriver 的沙箱分支给：
-                    // 触发式只读通道走 wsPath=null，SandboxedCliDriver.executeTask 把它
-                    // 委托给本裸驱动，那里漏这一只变量 ⇒ hook 不带 sessionId ⇒
+                    // 派单 sessionId 走 [CliChildEnv.Spec.hookSessionId] 而不是塞进
+                    // envOverrides —— **所有**子进程都要带它，不能只在 SandboxedCliDriver 的
+                    // 沙箱分支给：触发式只读通道走 wsPath=null，SandboxedCliDriver.executeTask
+                    // 把它委托给本裸驱动，那里漏这一只变量 ⇒ hook 不带 sessionId ⇒
                     // hookSessionTrusted 为假 ⇒ 执行前的只读否决整条被跳过。症状是
-                    // 「看起来两层拦截，其实只剩事后判负」。
-                    //
-                    // 放在 envOverrides 之后：宿主派单的 sessionId 是安全判据，不许被配置
-                    // 层的同名变量盖掉（盖掉就等于拿一个对不上 readOnlyToolPolicies 的键
-                    // 去问审批，只读约束静默失效）。与 SandboxedCliDriver、
-                    // ProcessAgentDriver 的「后写者胜」口径一致。
-                    pb.environment()[DriverKeys.ENV_HOOK_SESSION_ID] = sessionId
+                    // 「看起来两层拦截，其实只剩事后判负」。位置（最后写）见 CliChildEnv。
+                    CliChildEnv.applyTo(
+                        pb,
+                        CliChildEnv.Spec(
+                            inherited = pb.environment(),
+                            overrides = envOverrides,
+                            pwd = workDir?.absolutePath,
+                            hookSessionId = sessionId,
+                        ),
+                    )
                     // stderr 合并进 stdout：认不出的行会被 mapLine 如实跳过，同时避免双流对拷的死锁。
                     pb.redirectErrorStream(true)
                     // 子进程的 stdin **在内核层**接 /dev/null：会读 stdin 的 CLI 会一直等 EOF，
@@ -243,30 +268,63 @@ class CliSubprocessDriver(
                     // 单测复现不出这个挂起。
                     pb.redirectInput(ProcessBuilder.Redirect.from(java.io.File("/dev/null")))
                     val proc = pb.start()
-                    // 有界读取（§8.2）：这个驱动此前**完全没有**行上限，`useLines` 会把
-                    // 一行任意长度的输出整段读进堆。超限行在这里等于「CLI 输出的东西宿主
-                    // 理解不了」，按响亮失败收场，不重试（重试只会再喂一次同样的 prompt）。
-                    val reader = BoundedLineReader(proc.inputStream.bufferedReader())
-                    while (true) {
-                        when (val read = reader.readLine()) {
-                            BoundedLine.Eof -> break
-                            BoundedLine.TooLong -> {
-                                lineLimitBroken = true
-                                runCatching { proc.destroyForcibly() }
-                                break
-                            }
-                            is BoundedLine.Text -> {
-                                val line = read.value
-                                outputTail.append(line).append('\n')
-                                if (resumedCliSessionId == null) {
-                                    resumeSpec?.sessionIdFromLine?.invoke(line)?.let { resumedCliSessionId = it }
-                                }
-                                mapLine(line)?.let { onEvent(it) }
+                    // 墙钟止损：**读行是阻塞的**，`proc.waitFor(limitMs)` 排在读之后根本轮不到
+                    // —— 挂住的 CLI 不关 stdout，读永远不返回，超时判断等于没写。所以超时交给
+                    // 看门狗线程执行：根一死 stdout 就关，阻塞读拿到 EOF 自然醒。
+                    // 先收后代再收根：只杀根会把整层留给 init，它们仍然占着工作目录。
+                    val watchdog = Thread {
+                        runCatching {
+                            if (!proc.waitFor(limitMs, java.util.concurrent.TimeUnit.MILLISECONDS)) {
+                                timedOut.set(true)
+                                runCatching { proc.descendants().forEach { it.destroyForcibly() } }
+                                proc.destroyForcibly()
                             }
                         }
                     }
-                    if (lineLimitBroken) return@withContext SPAWN_FAILED_EXIT
-                    proc.waitFor()
+                    watchdog.isDaemon = true
+                    watchdog.start()
+                    try {
+                        // 有界读取（§8.2）：这个驱动此前**完全没有**行上限，`useLines` 会把
+                        // 一行任意长度的输出整段读进堆。超限行在这里等于「CLI 输出的东西宿主
+                        // 理解不了」，按响亮失败收场，不重试（重试只会再喂一次同样的 prompt）。
+                        val reader = BoundedLineReader(proc.inputStream.bufferedReader())
+                        while (true) {
+                            when (val read = reader.readLine()) {
+                                BoundedLine.Eof -> break
+                                BoundedLine.TooLong -> {
+                                    lineLimitBroken = true
+                                    runCatching { proc.destroyForcibly() }
+                                    break
+                                }
+                                is BoundedLine.Text -> {
+                                    val line = read.value
+                                    outputTail.appendLine(line)
+                                    if (resumedCliSessionId == null) {
+                                        resumeSpec?.sessionIdFromLine?.invoke(line)?.let { resumedCliSessionId = it }
+                                    }
+                                    mapLine(line)?.let { onEvent(it) }
+                                }
+                            }
+                        }
+                        if (lineLimitBroken) return@withContext SPAWN_FAILED_EXIT
+                        proc.waitFor()
+                    } finally {
+                        // 正常路径到这里进程已退出；异常路径（读中断、协程取消）必须收尾，
+                        // 否则看门狗要陪它耗满整个止损窗口。
+                        if (proc.isAlive) proc.destroyForcibly()
+                        watchdog.interrupt()
+                    }
+                }
+                // 超时**不重试**：再喂一次同样的 prompt 只会再挂满一个窗口，把「半小时后
+                // 收场」变成「一小时后收场」。与单行熔断同一处置：一次终局、如实报因。
+                if (timedOut.get()) {
+                    onEvent(
+                        DriverEvent.Error(
+                            "cli \"" + cliPath + "\" still running after " + limitMs +
+                                "ms — process tree killed, not retrying",
+                        ),
+                    )
+                    return
                 }
                 // 只在这里报一次错并收场：若交给下面的 `transientOf` 分支，同一个缺陷
                 // 会被判成「可重试」再喂一次 prompt，并多报一条 Error。
@@ -338,11 +396,23 @@ class CliSubprocessDriver(
             "rate limit",
         )
 
-        /** 终局错误统一携带的 CLI stderr 尾巴（最后 3 行，行内 200 字上限）——根因可见性。 */
-        internal fun stderrTailOf(tail: StringBuilder): String {
-            val lines = tail.lines().filter { it.isNotBlank() }.takeLast(3)
-                .map { it.trim().take(200) }
-            return if (lines.isEmpty()) "" else " ⏎ " + lines.joinToString(" ⏎ ")
+        /**
+         * 终局错误统一携带的 CLI stderr 尾巴（最后 3 行，行内 200 字上限）——根因可见性。
+         *
+         * 从尾部反向逐行取，**不**用 `tail.lines()`：后者会把整串复制成一个 List，
+         * 400 万字符就是 400 万字符的临时对象峰值——判「只取 3 行」的时候内存已经付过了。
+         * [tail] 来自 [BoundedOutputTail]，本身已限总量，这里再避免一次全量复制。
+         */
+        internal fun stderrTailOf(tail: String): String {
+            val kept = ArrayDeque<String>()
+            var end = tail.length
+            while (end > 0 && kept.size < 3) {
+                val nl = tail.lastIndexOf('\n', end - 1)
+                val line = tail.substring(maxOf(0, nl + 1), end).trim()
+                if (line.isNotEmpty()) kept.addFirst(line.take(200))
+                end = if (nl < 0) 0 else nl
+            }
+            return if (kept.isEmpty()) "" else " ⏎ " + kept.joinToString(" ⏎ ")
         }
 
         internal const val DEFAULT_MAX_EXTRA_ATTEMPTS = 2
@@ -366,26 +436,35 @@ class CliSubprocessDriver(
          */
         val DSH_RESUME = CliResumeSpec(
             sessionIdFromLine = { line -> RESUME_SESSION_LINE.find(line)?.groupValues?.getOrNull(1) },
-            args = { cliSessionId, prompt -> dshResumeArgs(cliSessionId, prompt) },
+            args = { cliSessionId, prompt, model -> dshResumeArgsWithModel(cliSessionId, prompt, model) },
         )
 
-        /** dsh 的续跑规格（带模型）：patch 路径由调用方按次给出。 */
-        fun dshResume(model: String?, patchPath: () -> String?): CliResumeSpec = CliResumeSpec(
-            sessionIdFromLine = { line -> RESUME_SESSION_LINE.find(line)?.groupValues?.getOrNull(1) },
-            args = { cliSessionId, prompt ->
-                dshResumeArgs(cliSessionId, prompt, model, patchPath())
-            },
-        )
+        /**
+         * [dshResumeArgs] 的按模型版本：写一份 patch 再追加 `--patch`。
+         *
+         * 与 [dshArgsWithModel] 同一条纪律：写盘失败就**不带 patch**、让 dsh 自己报错，
+         * 不做「悄悄跑默认模型还报成功」。
+         */
+        fun dshResumeArgsWithModel(
+            cliSessionId: String,
+            prompt: String,
+            model: String?,
+        ): List<String> {
+            if (model.isNullOrBlank()) return dshResumeArgs(cliSessionId, prompt)
+            val patchPath = runCatching { dshPatchFileFor(model) }.getOrNull()
+                ?: return dshResumeArgs(cliSessionId, prompt)
+            return dshResumeArgs(cliSessionId, prompt, model, patchPath)
+        }
 
         fun dshResumeArgs(
             cliSessionId: String,
             prompt: String,
             model: String? = null,
             patchPath: String? = null,
-        ): List<String> =
-            // 同样：`--patch` 在前（启动器选项）。
-            (if (model != null && patchPath != null) listOf("--patch", patchPath) else emptyList()) +
-                listOf("--profile", "headless", "--json", "--session-id", cliSessionId, prompt)
+        ): List<String> = renderArgv(
+            "dsh", sandboxed = false, prompt, model,
+            patchPath = patchPath, session = cliSessionId, resume = true,
+        )
 
         private val RESUME_SESSION_LINE =
             Regex("\"type\"\\s*:\\s*\"session\".*?\"sessionId\"\\s*:\\s*\"([^\"]+)\"")
@@ -397,9 +476,46 @@ class CliSubprocessDriver(
             driverId = DriverKeys.cliDriverId("claude"),
             displayName = "Claude Code (CLI)",
             cliPath = cliPath,
-            argSpec = { prompt -> listOf("-p", prompt, "--output-format", "stream-json", "--verbose") },
+            // argv token 骨架来自 JSON 真源（plain 模板），这里只注入 prompt 与模型旗标两个动态 token。
+            // `${model}` 在模板末尾 = `-p` 已把 prompt 收作选项值，旗标追加其后不会被当 prompt。
+            argSpec = { prompt, m -> renderArgv("claude", sandboxed = false, prompt, m) },
             envOverrides = envOverrides,
         )
+
+        /**
+         * 从 [CliDriverSpecs.argvOf] 取模板、注入动态 token、渲染成 argv。
+         * 生产装配与守卫的**唯一渲染出口**：模板骨架（含 `${model}` 位置）只有 JSON 一份。
+         * [patchPath] 仅 dsh 传（patch 写盘是机制，路径在调用前算好）；[session] 仅续跳传。
+         */
+        internal fun renderArgv(
+            key: String,
+            sandboxed: Boolean,
+            prompt: String,
+            model: String?,
+            patchPath: String? = null,
+            session: String? = null,
+            sandboxMode: String? = null,
+            resume: Boolean = false,
+        ): List<String> {
+            val spec = CliDriverSpecs.argvOf(DriverKeys.cliDriverId(key))
+                ?: error("driver-specs.json 缺 $key 的 argv 声明")
+            val template = when {
+                resume && sandboxed -> spec.resumeSandbox ?: spec.resumePlain
+                    ?: error("driver-specs.json 缺 $key 的续跑沙箱 argv 模板")
+                resume -> spec.resumePlain
+                    ?: error("driver-specs.json 缺 $key 的续跑 argv 模板")
+                sandboxed -> spec.sandbox ?: spec.plain
+                else -> spec.plain
+            }
+            val tokens = linkedMapOf<String, List<String>>(
+                "prompt" to listOf(prompt),
+                "model" to DriverModelFlags.flagsFor(key, model),
+                "sandbox" to (sandboxMode?.let { listOf(it) } ?: emptyList()),
+                "patch" to (if (patchPath != null) listOf("--patch", patchPath) else emptyList()),
+                "session" to (session?.let { listOf(it) } ?: emptyList()),
+            )
+            return CliArgv.render(template, tokens)
+        }
 
         /**
          * codex 的命令行参数（两处装配共用，防漂）。
@@ -414,10 +530,12 @@ class CliSubprocessDriver(
             prompt: String,
             env: Map<String, String> = System.getenv(),
             model: String? = null,
-        ): List<String> = listOf("exec", "--json", "--sandbox", codexSandboxMode(env)) +
-            // 位置不能挪：prompt 是末尾位置参数（clap 的 trailing var-arg），
-            // `--model x` 追加到它后面会被当成 prompt 的一部分。
-            DriverModelFlags.flagsFor("codex", model) + prompt
+        ): List<String> = renderArgv(
+            key = "codex", sandboxed = false, prompt = prompt, model = model,
+            // `${sandbox}` 的动态值仍由机制算（TENON_CODEX_SANDBOX 白名单校验），
+            // 但它的**位置**（model 之前、prompt 之前）由 JSON 模板决定，不再靠代码顺序记忆。
+            sandboxMode = codexSandboxMode(env),
+        )
 
         /**
          * opencode 的 headless 参数（实测 v2.2.5）。
@@ -430,9 +548,8 @@ class CliSubprocessDriver(
          * - `--format json`：行协议，交给 [CliLineEventMapper] 的 opencode 分支。
          */
         fun opencodeArgs(prompt: String, model: String? = null): List<String> =
-            listOf("run", "--standalone", "--auto", "--format", "json") +
-                // 同上：prompt 必须在最后，模型旗标插在它前面。
-                DriverModelFlags.flagsFor("opencode", model) + prompt
+            // prompt 末尾、模型在前的顺序由 JSON 模板固定，不靠这里的代码顺序记忆。
+            renderArgv("opencode", sandboxed = false, prompt, model)
 
         /**
          * dsh 的 headless 参数（实测 v0.2.1-rc.2，`dsh --help`）。
@@ -454,11 +571,9 @@ class CliSubprocessDriver(
          * [model] 非空时写一份临时 patch（三字段写全）并追加 `--patch`；调用方负责删文件。
          */
         fun dshArgs(prompt: String, model: String? = null, patchPath: String? = null): List<String> =
-            // `--patch` 是 dsh **启动器**的选项，不是 headless 应用的选项 —— 必须排在
-            // `--profile` 之前。放错位置时 dsh 报 `unknown option '--patch'` 并退出 1
-            // （本机实测），而那个报错看着像「参数拼错了」，实际是位置错了。
-            (if (model != null && patchPath != null) listOf("--patch", patchPath) else emptyList()) +
-                listOf("--profile", "headless", "--json", prompt)
+            // `${patch}` 在 JSON 模板里位列 `--profile` 之前 —— `--patch` 是启动器选项，
+            // 放错位置 dsh 报 `unknown option '--patch'`（本机实测）。位置由模板固定。
+            renderArgv("dsh", sandboxed = false, prompt, model, patchPath = patchPath)
 
         /**
          * dsh 的 patch 文件内容：**三个字段必须写全**（整块替换语义，见 [dshArgs]）。
@@ -520,17 +635,37 @@ class CliSubprocessDriver(
          * 宿主可用 CODEBUDDY_IS_SANDBOX=1 显式整档放开（只在自己的隔离面内才该这么做）。
          */
         fun codebuddyArgs(prompt: String, model: String? = null, autoApprove: Boolean = true): List<String> =
-            listOf("-p", prompt, "--output-format", "stream-json", "--verbose") +
-                (if (autoApprove) listOf("-y") else emptyList()) +
-                DriverModelFlags.flagsFor("codebuddy", model)
+            // autoApprove 与「沙箱模板带 -y / 裸路径不带」一一对应：沙箱分支 true、裸路径 false。
+            // `-y` 的有无由 JSON 的 sandbox/plain 模板决定，不再靠这里的 if。
+            renderArgv("codebuddy", sandboxed = autoApprove, prompt, model)
 
-        /** CodeBuddy 的重试跳：从首行 `session_id` 续跑，不把上一跳的 stdout 塞进 prompt。 */
-        fun codebuddyResumeArgs(cliSessionId: String, prompt: String): List<String> =
-            listOf("--resume", cliSessionId) + codebuddyArgs(prompt)
+        /**
+         * CodeBuddy 的重试跳：从首行 `session_id` 续跑，不把上一跳的 stdout 塞进 prompt。
+         *
+         * [autoApprove] 必须与**首跳一致**：它曾经固定按默认值 `true` 拼，于是裸路径
+         * （机主自己的仓）首跳不带 `-y`、重试跳却带上了 —— 一次失败就把权限面悄悄放宽。
+         */
+        fun codebuddyResumeArgs(
+            cliSessionId: String,
+            prompt: String,
+            model: String? = null,
+            autoApprove: Boolean = false,
+        ): List<String> = renderArgv(
+            "codebuddy", sandboxed = autoApprove, prompt, model,
+            session = cliSessionId, resume = true,
+        )
 
-        val CODEBUDDY_RESUME = CliResumeSpec(
+        /**
+         * 续跑规格按「首跳的权限姿态」参数化：两个装配分支各取一份，不共用常量。
+         *
+         * 共用常量的后果不是「少写一行」，而是**沙箱的放开漏到裸路径**（或反过来）——
+         * 这类跨分支的静默差异没有任何调用点会报错。
+         */
+        fun codebuddyResume(autoApprove: Boolean): CliResumeSpec = CliResumeSpec(
             sessionIdFromLine = { line -> CODEBUDDY_SESSION_LINE.find(line)?.groupValues?.getOrNull(1) },
-            args = { cliSessionId, prompt -> codebuddyResumeArgs(cliSessionId, prompt) },
+            args = { cliSessionId, prompt, model ->
+                codebuddyResumeArgs(cliSessionId, prompt, model, autoApprove)
+            },
         )
 
         private val CODEBUDDY_SESSION_LINE =
@@ -543,8 +678,8 @@ class CliSubprocessDriver(
          * 执行档里配了模型会在保存期与驱动执行期两处响亮拒绝，不会静默跑默认模型。
          */
         fun zcodeArgs(prompt: String, model: String? = null): List<String> =
-            listOf("-p", prompt, "--mode", "yolo", "--json", "--no-color") +
-                DriverModelFlags.flagsFor("zcode", model)
+            // zcode 模板里没有 ${model}（它不支持按次选模型），render 只展开 prompt。
+            renderArgv("zcode", sandboxed = false, prompt, model)
 
         /**
          * codex 自己的沙箱模式，默认 `workspace-write`。
@@ -558,11 +693,12 @@ class CliSubprocessDriver(
          * 认不出的值一律回落默认，不猜、不静默放开。
          */
         fun codexSandboxMode(env: Map<String, String> = System.getenv()): String {
-            val raw = env["TENON_CODEX_SANDBOX"]?.trim()
-            return when (raw) {
-                "read-only", "workspace-write", "danger-full-access" -> raw
-                else -> "workspace-write"
-            }
+            // 合法值、默认值与 env 键都来自 JSON 真源的投影（agent-contract），
+            // 这里只剩「trim + 白名单成员判定 + 回落默认」这段机制。
+            val spec = CliDriverSpecs.sandboxModeOf(DriverKeys.cliDriverId("codex"))
+                ?: error("driver-specs.json 缺 codex 的 sandboxMode 声明")
+            val raw = env[spec.envVar]?.trim()
+            return if (raw != null && raw in spec.allowed) raw else spec.default
         }
 
         fun codex(
@@ -572,7 +708,7 @@ class CliSubprocessDriver(
             driverId = DriverKeys.cliDriverId("codex"),
             displayName = "Codex (CLI)",
             cliPath = cliPath,
-            argSpec = { prompt -> codexArgs(prompt) },
+            argSpec = { prompt, m -> codexArgs(prompt, model = m) },
             envOverrides = envOverrides,
         )
     }
@@ -623,18 +759,11 @@ fun cliDriverRegistrations(
                     driverId = DriverKeys.cliDriverId("claude"),
                     displayName = "Claude Code (CLI)",
                     cliPath = claude,
-                    // `--permission-mode bypassPermissions`：headless（`-p`）下没有人能点
-                    // 「允许」，默认权限模式会把每一次写文件都拒掉 —— 派单永远「跑完了但
-                    // 没有交付物」。与 agy 的 `--dangerously-skip-permissions` 同一条理由：
-                    // 写操作只落在**一次性 worktree**（宿主仓零接触，收割后无痕清理），
-                    // 人的守门点是合流审查（merge-patch）。**裸路径不加** —— 那里的工作区
-                    // 是机主自己的仓，不该被静默放开。
-                    argSpec = { prompt ->
-                        listOf(
-                            "-p", prompt, "--output-format", "stream-json", "--verbose",
-                            "--permission-mode", "bypassPermissions",
-                        )
-                    },
+                    // `--permission-mode bypassPermissions` 只在沙箱模板里：headless（`-p`）下
+                    // 没人能点「允许」，默认权限模式会把每次写文件都拒掉。写操作只落在一次性
+                    // worktree（宿主仓零接触），人的守门点是合流审查。**裸路径模板不含此旗标**
+                    // —— 那里是机主自己的仓，不该被静默放开。两者都由 JSON 的 sandbox/plain 模板固定。
+                    argSpec = { prompt, m -> CliSubprocessDriver.renderArgv("claude", sandboxed = true, prompt, m) },
                     sandbox = sandbox,
                     envOverrides = providerEnv,
                 )
@@ -658,7 +787,7 @@ fun cliDriverRegistrations(
                     driverId = DriverKeys.cliDriverId("codex"),
                     displayName = "Codex (CLI)",
                     cliPath = codex,
-                    argSpec = { prompt -> CliSubprocessDriver.codexArgs(prompt) },
+                    argSpec = { prompt, m -> CliSubprocessDriver.codexArgs(prompt, model = m) },
                     sandbox = sandbox,
                     envOverrides = providerEnv,
                 )
@@ -692,26 +821,19 @@ fun cliDriverRegistrations(
                     // 旗标**只在此处安全**：所有写操作落在一次性 worktree（宿主仓
                     // 零接触），人的守门点 = 合并审查（merge-patch）。隔离边界是我们的
                     // worktree + 合流审批，不是 agy 的交互提示层。
-                    argSpec = { prompt, _ ->
-                        listOf(
-                            "-p", prompt, "--output-format", "stream-json",
-                            "--mode", "auto", "--dangerously-skip-permissions",
-                        )
-                    },
+                    argSpec = { prompt, m -> CliSubprocessDriver.renderArgv("agy", sandboxed = true, prompt, m) },
                     sandbox = sandbox,
                     envOverrides = providerEnv,
                     useRealHome = true,
-                    // agy 必须连自家后端（CodeAssist API + 授权端点）。本机 seatbelt
-                    // 无法按 IP/端口过滤出网（实测裁决）——要么全开要么断网，
-                    // 开放网是它能在沙箱里跑的唯一形态。
-                    networkPolicy = OsSandboxGuard.NetworkPolicy.OPEN,
+                    // 网络策略不在这里写：沙箱驱动默认读 driver-specs.json 的 networkPolicy
+                    //（agy 实测必须连自家后端，声明为 OPEN；见 JSON）。
                 )
             } else {
                 CliSubprocessDriver(
                     driverId = DriverKeys.cliDriverId("agy"),
                     displayName = "Antigravity (agy CLI)",
                     cliPath = agy,
-                    argSpec = { prompt -> listOf("-p", prompt, "--output-format", "stream-json") },
+                    argSpec = { prompt, m -> CliSubprocessDriver.renderArgv("agy", sandboxed = false, prompt, m) },
                     envOverrides = providerEnv,
                 )
             },
@@ -750,7 +872,7 @@ fun cliDriverRegistrations(
                     // —— 与 claude 的 `--permission-mode bypassPermissions` 同一条理由：
                     // 写操作只落在一次性 worktree。`--format json` 是行协议，喂给
                     // [CliLineEventMapper]。
-                    argSpec = { prompt -> CliSubprocessDriver.opencodeArgs(prompt) },
+                    argSpec = { prompt, m -> CliSubprocessDriver.opencodeArgs(prompt, m) },
                     sandbox = sandbox,
                     envOverrides = providerEnv,
                 )
@@ -759,7 +881,7 @@ fun cliDriverRegistrations(
                     driverId = DriverKeys.cliDriverId("opencode"),
                     displayName = "OpenCode (CLI)",
                     cliPath = opencode,
-                    argSpec = { prompt -> CliSubprocessDriver.opencodeArgs(prompt) },
+                    argSpec = { prompt, m -> CliSubprocessDriver.opencodeArgs(prompt, m) },
                     envOverrides = providerEnv,
                 )
             },
@@ -848,8 +970,7 @@ fun cliDriverRegistrations(
                     argSpec = { prompt, model -> cbPrefix + CliSubprocessDriver.codebuddyArgs(prompt, model, true) },
                     sandbox = sandbox,
                     envOverrides = providerEnv,
-                    networkPolicy = OsSandboxGuard.NetworkPolicy.OPEN,
-                    resumeSpec = CliSubprocessDriver.CODEBUDDY_RESUME,
+                    resumeSpec = CliSubprocessDriver.codebuddyResume(autoApprove = true),
                 )
             } else {
                 CliSubprocessDriver(
@@ -858,7 +979,7 @@ fun cliDriverRegistrations(
                     cliPath = cbBin,
                     argSpec = { prompt, model -> cbPrefix + CliSubprocessDriver.codebuddyArgs(prompt, model, false) },
                     envOverrides = providerEnv,
-                    resumeSpec = CliSubprocessDriver.CODEBUDDY_RESUME,
+                    resumeSpec = CliSubprocessDriver.codebuddyResume(autoApprove = false),
                 )
             },
         )
@@ -904,7 +1025,6 @@ fun cliDriverRegistrations(
                     argSpec = { prompt, _ -> zcPrefix + CliSubprocessDriver.zcodeArgs(prompt) },
                     sandbox = sandbox,
                     envOverrides = providerEnv,
-                    networkPolicy = OsSandboxGuard.NetworkPolicy.OPEN,
                 )
             } else {
                 CliSubprocessDriver(

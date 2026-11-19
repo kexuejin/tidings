@@ -179,22 +179,23 @@ class DriverModelCatalog(
     }
 
     companion object {
-        /** 目录变化很慢（账号/套餐级），10 分钟足够；换账号/换网重开编制即可重探。 */
-        const val DEFAULT_TTL_MS: Long = 10L * 60L * 1000L
+        /**
+         * 目录变化很慢（账号/套餐级），TTL 由 `driver-specs.json` 的 `probeLimits` 声明。
+         * 改 TTL 只改真源 + `:driverSpecProject` 重投影，不在代码里另写一份。
+         */
+        val DEFAULT_TTL_MS: Long get() = CliDriverSpecs.probeLimits.modelCatalogTtlMs
 
-        /** 单次探测上限：列表命令是最轻的只读子命令，20s 足够慢机器冷启动。 */
-        const val PROBE_TIMEOUT_MS: Long = 20_000L
+        /** 单次探测上限：列表命令是最轻的只读子命令，20s 足够慢机器冷启动。同样来自真源。 */
+        val PROBE_TIMEOUT_MS: Long get() = CliDriverSpecs.probeLimits.modelProbeTimeoutMs
 
         /**
          * dsh 的 provider → 哪家 CLI 的模型目录能列出它的候选。
          *
          * 实测：`provider: dsh-opencode-go` 的全部候选就在 `opencode models` 的
          * `opencode-go/` 前缀下。这条映射是**实测事实**，不是命名巧合的推测 ——
-         * 换 provider 时必须重新实测，别按名字猜。
+         * 换 provider 时必须重新实测并改 JSON 的 `modelProbe.catalogSource`。
          */
-        val PROVIDER_CATALOG_SOURCE: Map<String, String> = mapOf(
-            "dsh-opencode-go" to "opencode",
-        )
+        val PROVIDER_CATALOG_SOURCE: Map<String, String> get() = configCatalogSources
 
         const val NO_SPEC_NOTE: String = "no verified model-list probe"
         const val NO_CLI_NOTE: String = "cli not found"
@@ -361,49 +362,68 @@ data class ModelCatalogEntry(
 )
 
 /**
- * 已实测过的探测规格（每一条都在本机跑过真实输出、按真实形态写解析）。
+ * parser 是**机制 id**：表里只放 id，函数实现注册在这里。
  *
+ * 两张注册表的键集必须与 `driver-specs.json` 中实际引用的 parser 严格相等（见
+ * `CliDriverCoverageGuardTest.modelParsersAreRegisteredInCode`）：JSON 引用了但这里没注册
+ * ⇒ 投影构造时 `error` 当场炸；这里注册了但 JSON 不用 ⇒ 死机制，守卫红。新增一家解析形态
+ * 必须两头同步，杜绝「表里写了 parser，代码忘了实现」的静默失效。
+ */
+internal val MODEL_PARSERS: Map<String, (String) -> List<ModelCatalogModel>> = mapOf(
+    "two-column" to DriverModelCatalog::parseTwoColumnList,
+    "codex-json" to DriverModelCatalog::parseCodexModelsJson,
+)
+
+internal val CONFIG_PARSERS: Map<String, (String) -> DshDefaultModel?> = mapOf(
+    "dsh-default" to DriverModelCatalog::parseDshDefaultModel,
+)
+
+/** provider → 源驱动：从 JSON 的 CONFIG catalogSource 派生，不在此手写第二份映射。 */
+private val configCatalogSources: Map<String, String> =
+    CliDriverSpecs.builtins.mapNotNull { spec ->
+        CliDriverSpecs.modelProbeOf(spec.key)?.catalogSource?.let { it.provider to it.driver }
+    }.toMap()
+
+/**
+ * 已实测过的探测规格——**从 JSON 真源投影构造**，不再手写表。
+ *
+ * 实测形态的理由记在 `driver-specs.json` 每家的 `modelProbe.note` 与「§2.4 机制表」里：
  * - `agy models` → TAB 分隔两列（id + 可读名）；
  * - `opencode models` → 单列 `provider/model`，本机实测一次返回百余行；
  * - `codex debug models` → 结构化 JSON，`models[].slug` / `display_name`（本机实测有值）。
  *
- * 其余三家不在此表，理由各自不同、都**不是「猜它没有」**：
- * - `claude`：`--help` 里没有任何列模型的子命令（只有 `auth`），模型名只出现在
- *   `--model` 的说明文案里（`fable` / `opus` / `sonnet` 这类别名），属于**别名不是目录**；
- * - `dsh`：模型写在 profile 的插件配置里，没有列表子命令 —— 但**有** [VERIFIED_CONFIG_SPECS]
- *   这条配置型探测（读 dump-config 拿当前值）；
- * - `codebuddy` / `zcode`：本机未安装，无法取得可信输出。
- *
- * 要加一家：先真机跑一次、按真实输出写解析、补进表与测试 —— 不要按「应该有」写。
+ * 没有列表子命令的三家（claude/codebuddy/zcode）在 JSON 里声明为 `kind=NONE`，这里
+ * 不会为它们构造 spec ⇒ [ModelCatalogState.UNKNOWN]，不去猜。要加一家：先真机跑一次、
+ * 按真实输出写解析函数并注册 parser、在 JSON 里补声明 —— 不要按「应该有」写。
  */
+internal val VERIFIED_SPECS: Map<String, ModelProbeSpec> =
+    CliDriverSpecs.builtins.mapNotNull { spec ->
+        val mp = CliDriverSpecs.modelProbeOf(spec.key) ?: return@mapNotNull null
+        if (mp.kind != CliDriverSpecs.ModelProbeKind.LIST) return@mapNotNull null
+        val parser = MODEL_PARSERS[mp.parser]
+            ?: error("driver-specs.json 引用了未注册的 model parser: ${mp.parser} (${spec.key})")
+        spec.key to ModelProbeSpec(args = mp.argv, parse = parser)
+    }.toMap()
+
 /**
- * 配置型探测规格（当前只有 dsh）。
+ * 配置型探测规格——同样从 JSON 的 `kind=CONFIG` 声明投影构造。
  *
  * dsh 的模型写在 profile 的 `agent-default-model` 插件配置里，**没有 `--model` 旗标**；
  * `--dump-config` 是唯一能读到当前值的通道，`--patch` 是唯一能改的通道（官方覆盖机制）。
- *
- * 候选来自 opencode 的目录：dsh 的 provider `dsh-opencode-go` 对应 `opencode-go/` 前缀
- * （本机实测该前缀下 34 个模型，去掉前缀即为 dsh 认的裸 id）。
+ * 候选来源（provider → 源驱动 + id 前缀）来自 JSON 的 `catalogSource`，本机实测：
+ * dsh 的 `dsh-opencode-go` 对应 `opencode-go/` 前缀下 34 个模型，去前缀即裸 id。
  */
-internal val VERIFIED_CONFIG_SPECS: Map<String, ConfigProbeSpec> = mapOf(
-    "dsh" to ConfigProbeSpec(
-        args = listOf("--profile", "headless", "--dump-config"),
-        parse = DriverModelCatalog::parseDshDefaultModel,
-        providerToCatalogPrefix = mapOf("dsh-opencode-go" to "opencode-go/"),
-    ),
-)
-
-internal val VERIFIED_SPECS: Map<String, ModelProbeSpec> = mapOf(
-    DriverKeys.AGY to ModelProbeSpec(
-        args = listOf("models"),
-        parse = DriverModelCatalog::parseTwoColumnList,
-    ),
-    "opencode" to ModelProbeSpec(
-        args = listOf("models"),
-        parse = DriverModelCatalog::parseTwoColumnList,
-    ),
-    "codex" to ModelProbeSpec(
-        args = listOf("debug", "models"),
-        parse = DriverModelCatalog::parseCodexModelsJson,
-    ),
-)
+internal val VERIFIED_CONFIG_SPECS: Map<String, ConfigProbeSpec> =
+    CliDriverSpecs.builtins.mapNotNull { spec ->
+        val mp = CliDriverSpecs.modelProbeOf(spec.key) ?: return@mapNotNull null
+        if (mp.kind != CliDriverSpecs.ModelProbeKind.CONFIG) return@mapNotNull null
+        val parser = CONFIG_PARSERS[mp.parser]
+            ?: error("driver-specs.json 引用了未注册的 config parser: ${mp.parser} (${spec.key})")
+        val src = mp.catalogSource
+            ?: error("driver-specs.json 的 CONFIG modelProbe 缺 catalogSource: ${spec.key}")
+        spec.key to ConfigProbeSpec(
+            args = mp.argv,
+            parse = parser,
+            providerToCatalogPrefix = mapOf(src.provider to src.prefix),
+        )
+    }.toMap()

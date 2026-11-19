@@ -224,18 +224,19 @@ class WorktreeSandboxExecutor(
                 // PWD 必须跟着改：`directory()` 只改真实 cwd，继承来的 PWD 仍指向宿主目录。
                 // opencode 解析工作区读的是 `$PWD` 而不是 getcwd —— 不补这一行，它会
                 // 把产物写进宿主仓库根（实测：proof.txt 落在 repo 根，worktree 里空）。
-                // 先设、后 env.forEach，显式注入的 PWD 仍然赢。
-                pb.environment()["PWD"] = worktree.absolutePath
-                // 宿主中介 MCP 工具的工作区边界：显式传沙箱 worktree，绝不靠进程 cwd 猜。
-                pb.environment()["TENON_MCP_WORKSPACE"] = worktree.absolutePath
-                env.forEach { (k, v) -> pb.environment()[k] = v }
-                // 同 CliSubprocessDriver：GUI 启动的宿主只有最小 PATH，脚本型 CLI
-                // （`#!/usr/bin/env node`）会找不到解释器 → 127。env 显式给了 PATH 就不动它。
-                if (env["PATH"] == null) pb.environment()["PATH"] = CliDiscovery.childPath(pb.environment())
-                if (env["HOME"] == null) {
-                    val sandboxHome = prepareSandboxHome(artifactsDir)
-                    pb.environment()["HOME"] = sandboxHome.absolutePath
-                }
+                // 环境装配只有一处（顺序与每条顺序的代价见 [CliChildEnv]）：这里只给输入。
+                // - `TENON_MCP_WORKSPACE` 只在沙箱分支给：中介工具的工作区边界靠它，不靠 cwd 猜；
+                // - `HOME` 只在调用方没显式给时换成沙箱目录（agy 走 useRealHome，自己给了真 HOME）。
+                CliChildEnv.applyTo(
+                    pb,
+                    CliChildEnv.Spec(
+                        inherited = pb.environment(),
+                        overrides = env,
+                        pwd = worktree.absolutePath,
+                        mcpWorkspace = worktree.absolutePath,
+                        home = if (env["HOME"] == null) prepareSandboxHome(artifactsDir).absolutePath else null,
+                    ),
+                )
                 pb.redirectErrorStream(true)
                 // stdin **在内核层**接 /dev/null，而不是"启动后关流"。
                 //
@@ -1049,19 +1050,7 @@ class WorktreeSandboxExecutor(
          * 反向纪律：这张清单**不许**扩进敏感目录（.ssh / .gnupg / .aws 一类）——
          * 「能跑通」不能靠把宿主私有凭据整个挂进去来换。
          */
-        internal val SANDBOX_CREDENTIAL_ENTRIES = listOf(
-            ".codex",
-            ".claude",
-            ".claude.json",
-            ".gemini",
-            ".agy",
-            ".dsh",
-            ".codebuddy",
-            ".zcode",
-            ".npm",
-            ".nvm",
-            ".gitconfig",
-        )
+        internal val SANDBOX_CREDENTIAL_ENTRIES: List<String> get() = CliDriverSpecs.sandboxHomeLinks
 
         fun sha256Hex(file: File): String {
             val digest = java.security.MessageDigest.getInstance("SHA-256")
